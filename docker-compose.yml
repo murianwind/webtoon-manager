@@ -1,9 +1,18 @@
+# GitHub Actions가 push할 때마다 미리 빌드해서 GHCR에 올려주는 이미지를 pull해서 씁니다.
+# 로컬 빌드가 필요 없어서, CLI에서 `docker compose up -d`로 바로 실행하거나
+# Portainer의 "Web editor"에 이 내용을 그대로 붙여넣어도 됩니다 (repository 연결/clone/fork 필요 없음).
+#
+# 자동 업데이트: 아래 labels에 있는 com.centurylinklabs.watchtower.enable=true 는
+# Watchtower용 표시입니다. 이미 Watchtower를 쓰고 계시면(--label-enable 옵션이 켜져
+# 있는 경우) 새 이미지가 올라올 때마다 자동으로 갱신됩니다.
+
 services:
   naver-webtoon-manager:
-    build: .
-    # 또는 GHCR 이미지를 쓸 경우: image: ghcr.io/murianwind/naver-webtoon-manager:latest
+    image: ghcr.io/murianwind/naver-webtoon-manager:latest
     container_name: naver-webtoon-manager
     restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
     ports:
       - "${WEB_PORT:-8000}:8000"
     environment:

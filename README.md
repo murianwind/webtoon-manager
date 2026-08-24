@@ -37,6 +37,26 @@ Playwright `storage_state()` 형식(JSON)으로 export한 브라우저 쿠키 �
 `NID_AUT`/`NID_SES`만 자동으로 추출해서 쓴다. 파일 경로는 `.env`의
 `COOKIE_FILE_PATH`로 지정하며 코드에는 하드코딩되어 있지 않다.
 
+## Portainer 배포 (Web editor)
+
+로컬 빌드나 저장소 clone이 필요 없습니다 — GitHub Actions가 push할 때마다 이미지를
+미리 빌드해서 GHCR에 올려두고, Portainer는 그 이미지를 pull만 합니다.
+
+1. Portainer → Stacks → Add stack → **Web editor** 선택
+2. `docker-compose.yml` 내용을 그대로 붙여넣기 (다른 텍스트 섞이지 않게 주의)
+3. 아래로 스크롤해서 **Environment variables** 섹션에 다음을 하나씩 추가
+   - `WEBTOON_DOWNLOAD_HOST_PATH` — 예: `D:\Downloads\Webtoon\Webtoon_Download`
+   - `APP_DATA_HOST_PATH` — DB 등을 저장할 빈 폴더
+   - `COOKIE_DIR_HOST_PATH` — 쿠키 export 파일이 있는 폴더
+   - `COOKIE_FILE_NAME` — 쿠키 파일명 (기본 `cookies.json`)
+   - `WEBTOON_WEBHOOK_URL`, `WEBTOON_BOT_TOKEN`, `WEBTOON_NOTIFY_CHANNEL_ID` (선택)
+4. Deploy the stack
+5. `http://<호스트>:8000` 접속 → "기존 ID_list.txt 붙여넣기로 한 번에 가져오기"로 기존
+   구독 목록을 옮긴다.
+
+자동 업데이트가 필요 없으면 `docker-compose.yml`의 `labels` 블록은 지워도 됩니다
+(이미 Watchtower를 쓰고 있지 않다면 있으나 없으나 동작에 차이 없음).
+
 ## 로컬 실행 (개발용)
 
 ```bash
@@ -44,19 +64,6 @@ cp .env.example .env
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
-
-## Portainer 배포
-
-1. Portainer에서 이 저장소를 가리키는 Stack을 하나 만든다 (`docker-compose.yml` 사용).
-2. Stack 환경변수에 다음을 채운다.
-   - `WEBTOON_DOWNLOAD_HOST_PATH` — 예: `D:\Downloads\Webtoon\Webtoon_Download`
-   - `APP_DATA_HOST_PATH` — DB 등을 저장할 빈 폴더
-   - `COOKIE_DIR_HOST_PATH` — 쿠키 export 파일이 있는 폴더
-   - `COOKIE_FILE_NAME` — 쿠키 파일명 (기본 `cookies.json`)
-   - `WEBTOON_WEBHOOK_URL`, `WEBTOON_BOT_TOKEN`, `WEBTOON_NOTIFY_CHANNEL_ID` (선택)
-3. Deploy the stack.
-4. `http://<호스트>:8000` 접속 → 우측 상단 접기 메뉴에서 "기존 ID_list.txt 붙여넣기로 한 번에
-   가져오기"로 기존 구독 목록을 옮긴다.
 
 ## 기존 hermes 크론과의 관계
 
