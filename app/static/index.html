@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>네이버 웹툰 구독 관리</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1>네이버 웹툰 구독 관리</h1>
+    <div class="actions">
+      <button id="btn-scan-discovery" title="완결 감지 + 작가/태그 신작 자동추가를 지금 바로 실행">신작 스캔 실행</button>
+      <button id="btn-scan-download" title="구독 중인 웹툰의 새 회차를 지금 바로 다운로드">다운로드 실행</button>
+    </div>
+  </header>
+
+  <section class="add-form">
+    <input id="input-title-id" type="text" inputmode="numeric" placeholder="titleId (숫자)" />
+    <input id="input-title" type="text" placeholder="제목 (비워두면 자동 조회)" />
+    <button id="btn-add">목록추가</button>
+    <span id="add-error" class="error"></span>
+  </section>
+
+  <details class="import-box">
+    <summary>기존 ID_list.txt 붙여넣기로 한 번에 가져오기</summary>
+    <textarea id="import-textarea" rows="6" placeholder="신의 탑 183559&#10;전지적 독자 시점 747269&#10;..."></textarea>
+    <button id="btn-import">가져오기</button>
+    <span id="import-result" class="error"></span>
+  </details>
+
+  <section class="filter-tabs">
+    <button class="tab active" data-status="all">전체</button>
+    <button class="tab" data-status="active">구독중</button>
+    <button class="tab" data-status="unsubscribed">구독해제</button>
+    <button class="tab" data-status="excluded">목록제외</button>
+  </section>
+
+  <table id="webtoon-table">
+    <thead>
+      <tr>
+        <th>제목</th>
+        <th>titleId</th>
+        <th>상태</th>
+        <th>마지막 다운로드</th>
+        <th>추가경로</th>
+        <th>완결</th>
+        <th>동작</th>
+      </tr>
+    </thead>
+    <tbody id="webtoon-tbody"></tbody>
+  </table>
+
+  <p id="empty-message" class="hidden">표시할 웹툰이 없습니다.</p>
+
+  <script src="/app.js"></script>
+</body>
+</html>

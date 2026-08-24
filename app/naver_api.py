@@ -1,0 +1,241 @@
+"""
+comic.naver.com 내부 API 호출 전담 모듈.
+
+원칙: raw dict 파싱은 이 파일에서만 한다. 다른 모듈(downloader/tracker/comicinfo)은
+여기서 반환하는 TitleInfo/EpisodeInfo 같은 정리된 객체만 사용한다 (SRP).
+"""
+
+import asyncio
+import logging
+from typing import Optional
+
+import aiohttp
+
+from app.constants import (
+    DEFAULT_HEADERS,
+    EPISODE_LIST_MAX_RETRIES,
+    NAVER_ARTIST_OTHER_TITLES_URL,
+    NAVER_CURATION_LIST_URL,
+    NAVER_CURATION_META_URL,
+    NAVER_INFO_URL,
+    NAVER_LIST_URL,
+    RETRY_BACKOFF_BASE_SECONDS,
+)
+from app.models import EpisodeInfo, TitleInfo
+
+log = logging.getLogger(__name__)
+
+_WEBTOON_CODE_TO_TYPE = {
+    "WEBTOON": "webtoon",
+    "CHALLENGE": "challenge",
+    "BEST_CHALLENGE": "bestChallenge",
+}
+
+
+class NaverApiError(Exception):
+    """네이버 API 요청이 최종적으로 실패했을 때."""
+
+
+def _parse_title_info(raw: dict, title_id: str) -> TitleInfo:
+    age = raw.get("age") or {}
+    author = raw.get("author") or {}
+    gfp = raw.get("gfpAdCustomParam") or {}
+
+    writer_entries = author.get("writers") or []
+    painter_entries = author.get("painters") or []
+
+    # communityArtists는 없을 수도 있는 확장 필드라 안전하게 조회
+    writer_ids: set[str] = set()
+    for artist in raw.get("communityArtists") or []:
+        artist_types = artist.get("artistTypeList") or []
+        if "ARTIST_WRITER" in artist_types and artist.get("artistId") is not None:
+            writer_ids.add(str(artist["artistId"]))
+    # communityArtists가 없는 응답 대비: author.writers의 id도 보조로 채운다
+    if not writer_ids:
+        writer_ids = {str(w["id"]) for w in writer_entries if w.get("id")}
+
+    return TitleInfo(
+        title_id=title_id,
+        title_name=raw.get("titleName", ""),
+        synopsis=raw.get("synopsis", ""),
+        is_adult=(age.get("type") == "RATE_18"),
+        webtoon_type=_WEBTOON_CODE_TO_TYPE.get(raw.get("webtoonLevelCode", ""), "webtoon"),
+        is_finished=bool(raw.get("finished")),
+        thumbnail_url=raw.get("thumbnailUrl", ""),
+        writer_names=[w.get("name", "") for w in writer_entries if w.get("name")],
+        painter_names=[p.get("name", "") for p in painter_entries if p.get("name")],
+        writer_ids=writer_ids,
+        genres=list(gfp.get("genreTypes") or []),
+        tags=list(gfp.get("tags") or []),
+        age_description=age.get("description", ""),
+    )
+
+
+async def fetch_title_info(
+    session: aiohttp.ClientSession, title_id: str, timeout_seconds: int
+) -> Optional[TitleInfo]:
+    try:
+        async with session.get(
+            NAVER_INFO_URL,
+            params={"titleId": title_id},
+            headers=DEFAULT_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+        ) as response:
+            if response.status != 200:
+                log.error("title info 요청 실패 (titleId=%s): HTTP %s", title_id, response.status)
+                return None
+            raw = await response.json()
+            return _parse_title_info(raw, title_id)
+    except Exception as e:
+        log.error("title info 요청 중 예외 (titleId=%s): %s", title_id, e)
+        return None
+
+
+async def _fetch_episode_list_page(
+    session: aiohttp.ClientSession,
+    title_id: str,
+    page: int,
+    cookies: dict[str, str],
+    timeout_seconds: int,
+) -> Optional[dict]:
+    last_error: Optional[Exception] = None
+    for attempt in range(EPISODE_LIST_MAX_RETRIES + 1):
+        try:
+            async with session.get(
+                NAVER_LIST_URL,
+                params={"titleId": title_id, "page": page},
+                headers=DEFAULT_HEADERS,
+                cookies=cookies,
+                timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+            ) as response:
+                if response.status == 200:
+                    return await response.json()
+                last_error = NaverApiError(f"HTTP {response.status}")
+        except Exception as e:
+            last_error = e
+
+        if attempt < EPISODE_LIST_MAX_RETRIES:
+            await asyncio.sleep(RETRY_BACKOFF_BASE_SECONDS * (2**attempt))
+
+    log.error(
+        "episode list 페이지 요청 최종 실패 (titleId=%s, page=%s): %s", title_id, page, last_error
+    )
+    return None
+
+
+async def fetch_all_episodes(
+    session: aiohttp.ClientSession,
+    title_id: str,
+    cookies: dict[str, str],
+    timeout_seconds: int,
+) -> list[EpisodeInfo]:
+    """
+    전체 회차를 no 오름차순으로 반환한다. list API 자체에 접근 불가(성인+미인증 등)면
+    빈 리스트를 반환하며, 이 경우 상위 로직에서 "다운로드 가능한 회차 없음"으로 처리된다.
+    """
+    first_page = await _fetch_episode_list_page(session, title_id, 1, cookies, timeout_seconds)
+    if not first_page:
+        return []
+
+    total_pages = (first_page.get("pageInfo") or {}).get("totalPages", 1) or 1
+
+    pages_raw = [first_page]
+    if total_pages > 1:
+        tasks = [
+            _fetch_episode_list_page(session, title_id, page, cookies, timeout_seconds)
+            for page in range(2, total_pages + 1)
+        ]
+        pages_raw.extend(await asyncio.gather(*tasks))
+
+    episodes: list[EpisodeInfo] = []
+    for page_data in pages_raw:
+        if not page_data:
+            continue
+        for article in page_data.get("articleList") or []:
+            episodes.append(
+                EpisodeInfo(
+                    episode_no=article.get("no", 0),
+                    subtitle=article.get("subtitle", ""),
+                    is_locked=bool(article.get("thumbnailLock")),
+                )
+            )
+
+    episodes.sort(key=lambda ep: ep.episode_no)
+    return episodes
+
+
+def free_episodes_only(episodes: list[EpisodeInfo]) -> list[EpisodeInfo]:
+    """썸네일 잠금(유료/미공개)이 걸린 첫 회차를 만나면 그 이후는 제외한다."""
+    free: list[EpisodeInfo] = []
+    for episode in episodes:
+        if episode.is_locked:
+            break
+        free.append(episode)
+    return free
+
+
+async def fetch_other_titles_by_artist(
+    session: aiohttp.ClientSession, title_id: str, timeout_seconds: int
+) -> list[dict]:
+    try:
+        async with session.get(
+            NAVER_ARTIST_OTHER_TITLES_URL,
+            params={"titleId": title_id},
+            headers=DEFAULT_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+        ) as response:
+            if response.status != 200:
+                return []
+            return await response.json()
+    except Exception as e:
+        log.error("작가의 다른 작품 조회 실패 (titleId=%s): %s", title_id, e)
+        return []
+
+
+async def fetch_curation_title_name(
+    session: aiohttp.ClientSession, tag_id: int, timeout_seconds: int
+) -> str:
+    try:
+        async with session.get(
+            NAVER_CURATION_META_URL,
+            params={"type": "CUSTOM_TAG", "id": tag_id},
+            headers=DEFAULT_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+        ) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data.get("curationTitle", str(tag_id))
+    except Exception as e:
+        log.error("curation/meta 조회 실패 (tag_id=%s): %s", tag_id, e)
+    return str(tag_id)
+
+
+async def fetch_curation_titles(
+    session: aiohttp.ClientSession, tag_id: int, timeout_seconds: int, delay_seconds: float
+) -> list[dict]:
+    all_items: list[dict] = []
+    page = 1
+    while True:
+        try:
+            async with session.get(
+                NAVER_CURATION_LIST_URL,
+                params={"type": "CUSTOM_TAG", "id": tag_id, "page": page, "pageSize": 100, "order": "USER"},
+                headers=DEFAULT_HEADERS,
+                timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+            ) as response:
+                if response.status != 200:
+                    log.error("curation/list 조회 실패 (tag_id=%s, page=%s): HTTP %s", tag_id, page, response.status)
+                    break
+                data = await response.json()
+        except Exception as e:
+            log.error("curation/list 예외 (tag_id=%s, page=%s): %s", tag_id, page, e)
+            break
+
+        all_items.extend(data.get("curationViewList") or [])
+        page_info = data.get("pageInfo") or {}
+        if page >= page_info.get("totalPages", page):
+            break
+        page += 1
+        await asyncio.sleep(delay_seconds)
+
+    return all_items

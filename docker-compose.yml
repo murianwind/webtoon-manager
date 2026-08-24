@@ -1,0 +1,26 @@
+services:
+  naver-webtoon-manager:
+    build: .
+    # 또는 GHCR 이미지를 쓸 경우: image: ghcr.io/murianwind/naver-webtoon-manager:latest
+    container_name: naver-webtoon-manager
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8000}:8000"
+    environment:
+      DOWNLOAD_ROOT: /data/Webtoon_Download
+      DATABASE_PATH: /data/webtoons.db
+      COOKIE_FILE_PATH: /data/cookies/${COOKIE_FILE_NAME:-cookies.json}
+      WEBTOON_WEBHOOK_URL: ${WEBTOON_WEBHOOK_URL:-}
+      WEBTOON_BOT_TOKEN: ${WEBTOON_BOT_TOKEN:-}
+      WEBTOON_NOTIFY_CHANNEL_ID: ${WEBTOON_NOTIFY_CHANNEL_ID:-}
+      WEBTOON_TAG_IDS: ${WEBTOON_TAG_IDS:-134,133}
+      SCAN_INTERVAL_MINUTES: ${SCAN_INTERVAL_MINUTES:-360}
+      DOWNLOAD_INTERVAL_MINUTES: ${DOWNLOAD_INTERVAL_MINUTES:-60}
+      COMMANDS_ONLY_INTERVAL_MINUTES: ${COMMANDS_ONLY_INTERVAL_MINUTES:-5}
+    volumes:
+      # 실제 다운로드 폴더 (기존 D:\Downloads\Webtoon\Webtoon_Download 그대로 사용)
+      - ${WEBTOON_DOWNLOAD_HOST_PATH}:/data/Webtoon_Download
+      # DB/설정 영속 볼륨
+      - ${APP_DATA_HOST_PATH}:/data
+      # 브라우저 쿠키 export 파일이 들어있는 폴더 (파일명은 COOKIE_FILE_NAME으로 지정)
+      - ${COOKIE_DIR_HOST_PATH}:/data/cookies:ro
