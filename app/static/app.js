@@ -78,9 +78,9 @@ function renderNaverList() {
   const emptyMsg = document.getElementById("naver-list-empty");
   const query = document.getElementById("naver-list-search").value.trim().toLowerCase();
 
-  const filtered = query
-    ? naverListCache.filter((w) => w.title.toLowerCase().includes(query))
-    : naverListCache;
+  // 목록제외한 웹툰은 전체목록에서 아예 보이지 않고 "제외됨" 탭에서만 보인다.
+  const visible = naverListCache.filter((w) => w.status !== "excluded");
+  const filtered = query ? visible.filter((w) => w.title.toLowerCase().includes(query)) : visible;
 
   grid.innerHTML = "";
   emptyMsg.classList.toggle("hidden", filtered.length > 0);
@@ -105,21 +105,19 @@ function renderNaverList() {
 
     const actions = card.querySelector(".webtoon-card-actions");
     if (w.status !== "active") {
-      actions.appendChild(makeButton("구독", () => naverListAction(w.title_id, w.title, "subscribe")));
+      actions.appendChild(makeButton("구독", () => naverListAction(w.title_id, w.title, w.thumbnail_url, "subscribe")));
     }
-    if (w.status !== "excluded") {
-      actions.appendChild(makeButton("목록제외", () => naverListAction(w.title_id, w.title, "exclude")));
-    }
+    actions.appendChild(makeButton("목록제외", () => naverListAction(w.title_id, w.title, w.thumbnail_url, "exclude")));
 
     grid.appendChild(card);
   }
 }
 
-async function naverListAction(titleId, title, action) {
+async function naverListAction(titleId, title, thumbnailUrl, action) {
   try {
     await apiCall(`/api/naver-list/${titleId}/${action}`, {
       method: "POST",
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title, thumbnail_url: thumbnailUrl || "" }),
     });
     await loadNaverList();
   } catch (e) {
@@ -153,15 +151,23 @@ function renderSubscriptionTab(status, rows) {
   emptyEl.classList.toggle("hidden", rows.length > 0);
 
   for (const w of rows) {
-    const row = document.createElement("div");
-    row.className = "webtoon-row";
-    row.innerHTML = `
-      <div class="webtoon-row-title">${escapeHtml(w.title)}${w.is_adult ? " 🔞" : ""}</div>
-      <div class="webtoon-row-meta">${w.last_downloaded_no}화까지 · titleId ${w.title_id}${w.is_finished ? " · <span class=\"badge finished\">완결</span>" : ""}</div>
-      <div class="webtoon-row-actions"></div>
+    const card = document.createElement("div");
+    card.className = "webtoon-card";
+
+    const metaParts = [`${w.last_downloaded_no}화까지`];
+    if (w.is_finished) metaParts.push("완결");
+    if (w.is_adult) metaParts.push("🔞");
+
+    card.innerHTML = `
+      ${w.thumbnail_url ? `<img src="${escapeHtml(w.thumbnail_url)}" alt="" loading="lazy" />` : '<div class="thumb-placeholder"></div>'}
+      <div class="webtoon-card-body">
+        <div class="webtoon-card-title">${escapeHtml(w.title)}</div>
+        <div class="webtoon-card-meta">${escapeHtml(metaParts.join(" · "))}</div>
+      </div>
+      <div class="webtoon-card-actions"></div>
     `;
 
-    const actions = row.querySelector(".webtoon-row-actions");
+    const actions = card.querySelector(".webtoon-card-actions");
     if (status !== "active") {
       actions.appendChild(makeButton("구독", () => subscriptionAction(w.title_id, "subscribe", status)));
     }
@@ -169,7 +175,7 @@ function renderSubscriptionTab(status, rows) {
       actions.appendChild(makeButton("구독해제", () => subscriptionAction(w.title_id, "unsubscribe", status)));
     }
 
-    listEl.appendChild(row);
+    listEl.appendChild(card);
   }
 }
 

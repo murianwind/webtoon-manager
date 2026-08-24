@@ -81,6 +81,7 @@ async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, setting
             repository.mark_finished(title_id)
 
         repository.update_is_adult(title_id, info.is_adult)
+        repository.update_thumbnail_url(title_id, info.thumbnail_url)
 
         if info.writer_ids:
             repository.update_writer_ids(title_id, sorted(info.writer_ids))

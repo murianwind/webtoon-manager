@@ -33,6 +33,7 @@ class WebtoonOut(BaseModel):
     last_downloaded_no: int
     is_finished: bool
     finish_ack: bool
+    thumbnail_url: str
 
 
 def _to_out(wt) -> WebtoonOut:
@@ -45,6 +46,7 @@ def _to_out(wt) -> WebtoonOut:
         last_downloaded_no=wt.last_downloaded_no,
         is_finished=wt.is_finished,
         finish_ack=wt.finish_ack,
+        thumbnail_url=wt.thumbnail_url,
     )
 
 
@@ -91,6 +93,7 @@ async def unsubscribe(title_id: str):
 
 class NaverListEntryIn(BaseModel):
     title: str
+    thumbnail_url: str = ""
 
     @field_validator("title")
     @classmethod
@@ -127,7 +130,13 @@ async def browse_naver_list():
 async def naver_list_subscribe(title_id: str, payload: NaverListEntryIn):
     if not await asyncio.to_thread(repository.exists, title_id):
         await asyncio.to_thread(
-            repository.upsert_new, title_id, payload.title, False, None, repository.SOURCE_MANUAL
+            repository.upsert_new,
+            title_id,
+            payload.title,
+            False,
+            None,
+            repository.SOURCE_MANUAL,
+            payload.thumbnail_url,
         )
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_ACTIVE)
     return _to_out(await asyncio.to_thread(repository.get, title_id))
@@ -137,7 +146,13 @@ async def naver_list_subscribe(title_id: str, payload: NaverListEntryIn):
 async def naver_list_exclude(title_id: str, payload: NaverListEntryIn):
     if not await asyncio.to_thread(repository.exists, title_id):
         await asyncio.to_thread(
-            repository.upsert_new, title_id, payload.title, False, None, repository.SOURCE_MANUAL
+            repository.upsert_new,
+            title_id,
+            payload.title,
+            False,
+            None,
+            repository.SOURCE_MANUAL,
+            payload.thumbnail_url,
         )
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_EXCLUDED)
     return _to_out(await asyncio.to_thread(repository.get, title_id))

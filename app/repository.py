@@ -36,6 +36,7 @@ def _row_to_record(row) -> WebtoonRecord:
         last_downloaded_no=row["last_downloaded_no"],
         is_finished=bool(row["is_finished"]),
         finish_ack=bool(row["finish_ack"]),
+        thumbnail_url=row["thumbnail_url"] or "",
     )
 
 
@@ -71,6 +72,7 @@ def upsert_new(
     is_adult: bool = False,
     writer_ids: list[str] | None = None,
     added_source: str = SOURCE_MANUAL,
+    thumbnail_url: str = "",
 ) -> None:
     """이미 존재하면 아무 것도 하지 않는다 (구독 취소/제외 상태를 덮어쓰지 않기 위해)."""
     if exists(title_id):
@@ -81,8 +83,8 @@ def upsert_new(
             """
             INSERT INTO webtoons
                 (title_id, title, status, is_adult, writer_ids, added_source,
-                 last_downloaded_no, is_finished, finish_ack, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?)
+                 last_downloaded_no, is_finished, finish_ack, thumbnail_url, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?)
             """,
             (
                 title_id,
@@ -91,9 +93,20 @@ def upsert_new(
                 int(is_adult),
                 json.dumps(writer_ids or []),
                 added_source,
+                thumbnail_url,
                 now,
                 now,
             ),
+        )
+
+
+def update_thumbnail_url(title_id: str, thumbnail_url: str) -> None:
+    if not thumbnail_url:
+        return
+    with write_transaction() as conn:
+        conn.execute(
+            "UPDATE webtoons SET thumbnail_url = ?, updated_at = ? WHERE title_id = ?",
+            (thumbnail_url, _now(), title_id),
         )
 
 

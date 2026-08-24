@@ -55,3 +55,4 @@ class WebtoonRecord:
     last_downloaded_no: int
     is_finished: bool
     finish_ack: bool
+    thumbnail_url: str = ""

@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS webtoons (
     last_downloaded_no INTEGER NOT NULL DEFAULT 0,
     is_finished INTEGER NOT NULL DEFAULT 0,
     finish_ack INTEGER NOT NULL DEFAULT 0,
+    thumbnail_url TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -34,6 +35,20 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT
 );
 """
+
+# 기존에 이미 만들어진 DB(위 스키마에 thumbnail_url 컬럼이 없던 버전)를 위한 마이그레이션.
+# CREATE TABLE IF NOT EXISTS는 이미 있는 테이블의 컬럼을 추가해주지 않기 때문에 별도로 처리한다.
+_MIGRATIONS = [
+    ("webtoons", "thumbnail_url", "ALTER TABLE webtoons ADD COLUMN thumbnail_url TEXT NOT NULL DEFAULT ''"),
+]
+
+
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    for table, column, alter_sql in _MIGRATIONS:
+        existing_columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in existing_columns:
+            conn.execute(alter_sql)
+    conn.commit()
 
 
 def _connect() -> sqlite3.Connection:
@@ -54,6 +69,7 @@ def get_connection() -> sqlite3.Connection:
         _connection = _connect()
         _connection.executescript(_SCHEMA)
         _connection.commit()
+        _apply_migrations(_connection)
     return _connection
 
 
