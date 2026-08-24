@@ -19,9 +19,11 @@ from app.constants import (
     NAVER_CURATION_META_URL,
     NAVER_INFO_URL,
     NAVER_LIST_URL,
+    NAVER_WEEKDAY_LIST_URL,
+    NAVER_WEEKDAYS,
     RETRY_BACKOFF_BASE_SECONDS,
 )
-from app.models import EpisodeInfo, TitleInfo
+from app.models import EpisodeInfo, NaverListItem, TitleInfo
 
 log = logging.getLogger(__name__)
 
@@ -172,6 +174,72 @@ def free_episodes_only(episodes: list[EpisodeInfo]) -> list[EpisodeInfo]:
             break
         free.append(episode)
     return free
+
+
+async def _fetch_weekday_titles(
+    session: aiohttp.ClientSession, week: str, timeout_seconds: int
+) -> list[dict]:
+    try:
+        async with session.get(
+            NAVER_WEEKDAY_LIST_URL,
+            params={"week": week},
+            headers=DEFAULT_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+        ) as response:
+            if response.status != 200:
+                log.error("요일별 목록 조회 실패 (week=%s): HTTP %s", week, response.status)
+                return []
+            data = await response.json()
+    except Exception as e:
+        log.error("요일별 목록 조회 예외 (week=%s): %s", week, e)
+        return []
+
+    # 응답 키가 버전에 따라 다를 수 있어 몇 가지 후보를 순서대로 시도한다.
+    items = data.get("titleList")
+    if items is None:
+        items = (data.get("titleListMap") or {}).get(week)
+    return items or []
+
+
+async def fetch_full_webtoon_list(
+    session: aiohttp.ClientSession, timeout_seconds: int
+) -> list[NaverListItem]:
+    """요일(월~일) 전체를 조회해서 titleId 기준으로 합친 네이버 웹툰 전체 목록을 반환한다.
+
+    사이트의 '요일전체' 탭도 같은 방식(요일별 데이터를 클라이언트에서 합침)으로 동작한다.
+    """
+    merged: dict[str, NaverListItem] = {}
+
+    tasks = [_fetch_weekday_titles(session, week, timeout_seconds) for week in NAVER_WEEKDAYS]
+    results = await asyncio.gather(*tasks)
+
+    for week, items in zip(NAVER_WEEKDAYS, results):
+        for item in items:
+            title_id = str(item.get("titleId", ""))
+            if not title_id:
+                continue
+
+            existing = merged.get(title_id)
+            if existing:
+                if week not in existing.weekdays:
+                    existing.weekdays.append(week)
+                continue
+
+            author_summary = item.get("author", "")
+            if not author_summary:
+                writer_names = [w.get("name", "") for w in (item.get("writers") or [])]
+                author_summary = ", ".join(n for n in writer_names if n)
+
+            merged[title_id] = NaverListItem(
+                title_id=title_id,
+                title_name=item.get("titleName", item.get("title", "")),
+                thumbnail_url=item.get("thumbnailUrl", item.get("thumbnail", "")),
+                weekdays=[week],
+                is_finished=bool(item.get("finish") or item.get("finished")),
+                author_summary=author_summary,
+            )
+
+    return sorted(merged.values(), key=lambda x: x.title_name)
 
 
 async def fetch_other_titles_by_artist(

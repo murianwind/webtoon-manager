@@ -7,9 +7,9 @@
 # 있는 경우) 새 이미지가 올라올 때마다 자동으로 갱신됩니다.
 
 services:
-  naver-webtoon-manager:
-    image: ghcr.io/murianwind/naver-webtoon-manager:latest
-    container_name: naver-webtoon-manager
+  webtoon-manager:
+    image: ghcr.io/murianwind/webtoon-manager:latest
+    container_name: webtoon-manager
     restart: unless-stopped
     labels:
       - "com.centurylinklabs.watchtower.enable=true"

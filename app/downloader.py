@@ -1,9 +1,11 @@
 """
 회차 이미지 다운로드 엔진.
 
-기존 NWebtoon_Downloader의 module/webtoon/downloader.py를 그대로 이식하되,
-콘솔 GUI를 pywinauto로 조작하던 download.py의 자동화 계층은 제거했다.
-이 모듈은 함수 호출만으로 다운로드가 끝나므로 스케줄러가 직접 부를 수 있다.
+기존 NWebtoon_Downloader의 module/webtoon/downloader.py를 이식하되, pywinauto
+GUI 자동화 계층은 제거했다. 회차는 한 번에 하나씩만 처리한다(download_single_episode) —
+호출자(scheduler.py)가 "다운로드 → 압축 → 폴더 삭제 → 다음 화"를 회차마다 반복하기
+때문에, 이 파일은 회차 하나를 완전히 받는 책임만 진다 (여러 회차를 동시에 받지 않음).
+회차 내부의 이미지 여러 장은 max_concurrent_downloads로 동시에 받는다.
 
 폴더/파일 네이밍은 기존 규칙과 동일하게 유지한다:
   {download_root}/{title}/[{episode_no:04d}] {subtitle}/{image_no:04d}{ext}
@@ -12,8 +14,8 @@
 import asyncio
 import logging
 import random
-from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 import aiofiles
 import aiohttp
@@ -36,19 +38,12 @@ from app.models import EpisodeInfo
 log = logging.getLogger(__name__)
 
 
-@dataclass
-class EpisodeDownloadResult:
-    episode_no: int
-    subtitle: str
-    success: bool
-    image_count: int
-
-
 async def _fetch_episode_image_urls(
     session: aiohttp.ClientSession,
     detail_url: str,
     title_id: str,
     episode: EpisodeInfo,
+    cookies: dict[str, str],
     timeout_seconds: int,
 ) -> list[str]:
     """회차 상세 페이지 HTML을 받아 div.wt_viewer 안의 이미지 URL들을 추출한다."""
@@ -61,6 +56,7 @@ async def _fetch_episode_image_urls(
                 detail_url,
                 params=params,
                 headers=DEFAULT_HEADERS,
+                cookies=cookies,
                 timeout=aiohttp.ClientTimeout(total=timeout_seconds),
             ) as response:
                 if response.status == 200:
@@ -93,12 +89,19 @@ async def _fetch_episode_image_urls(
 
 
 async def _download_single_image(
-    session: aiohttp.ClientSession, img_url: str, file_path: Path, timeout_seconds: int
+    session: aiohttp.ClientSession,
+    img_url: str,
+    file_path: Path,
+    cookies: dict[str, str],
+    timeout_seconds: int,
 ) -> bool:
     for attempt in range(IMAGE_DOWNLOAD_MAX_RETRIES + 1):
         try:
             async with session.get(
-                img_url, headers=DEFAULT_HEADERS, timeout=aiohttp.ClientTimeout(total=timeout_seconds)
+                img_url,
+                headers=DEFAULT_HEADERS,
+                cookies=cookies,
+                timeout=aiohttp.ClientTimeout(total=timeout_seconds),
             ) as response:
                 if response.status == 200:
                     file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -118,93 +121,52 @@ async def _download_single_image(
     return False
 
 
-async def download_webtoon_episodes(
+async def download_single_episode(
+    session: aiohttp.ClientSession,
     title_id: str,
     title_name: str,
     webtoon_type: str,
-    episodes: list[EpisodeInfo],
+    episode: EpisodeInfo,
     cookies: dict[str, str],
     download_root: str,
     folder_zero_fill: int,
     image_zero_fill: int,
-    batch_size: int,
     max_concurrent_downloads: int,
-    delay_seconds: float,
     timeout_seconds: int,
-) -> list[EpisodeDownloadResult]:
+) -> tuple[bool, Optional[Path]]:
     """
-    주어진 회차 목록을 배치 단위로 이미지 URL을 수집한 뒤, 세마포어로 동시성을
-    제한하며 전부 다운로드한다. 한 회차가 실패해도 나머지 회차 처리는 계속된다.
+    회차 하나를 완전히 받는다. 이미지 목록을 못 가져오거나 일부라도 다운로드에
+    실패하면 (False, episode_dir)를 반환한다 — 호출자가 이 경우 다음 회차로
+    넘어가지 않고 멈춰야, "다음 실행 때 이 화부터 재시도"가 성립한다.
     """
-    if not episodes:
-        return []
-
     detail_url = NAVER_DETAIL_URL_TEMPLATES.get(webtoon_type, NAVER_DETAIL_URL_TEMPLATES["webtoon"])
     safe_title = remove_forbidden_str(title_name)
+
+    img_urls = await _fetch_episode_image_urls(
+        session, detail_url, title_id, episode, cookies, timeout_seconds
+    )
+    if not img_urls:
+        return False, None
+
+    episode_dir = (
+        Path(download_root)
+        / safe_title
+        / episode_folder_name(episode.episode_no, episode.subtitle, folder_zero_fill)
+    )
+    episode_dir.mkdir(parents=True, exist_ok=True)
+
     semaphore = asyncio.Semaphore(max_concurrent_downloads)
 
-    async with aiohttp.ClientSession(cookies=cookies) as session:
-        results: list[EpisodeDownloadResult] = []
+    async def _bounded(img_url: str, file_path: Path) -> bool:
+        async with semaphore:
+            return await _download_single_image(session, img_url, file_path, cookies, timeout_seconds)
 
-        for batch_start in range(0, len(episodes), batch_size):
-            batch = episodes[batch_start : batch_start + batch_size]
+    tasks = []
+    for image_index, img_url in enumerate(img_urls):
+        ext = guess_image_extension(img_url)
+        file_name = image_file_name(image_index + 1, image_zero_fill, ext)
+        tasks.append(_bounded(img_url, episode_dir / file_name))
 
-            url_tasks = [
-                _fetch_episode_image_urls(session, detail_url, title_id, ep, timeout_seconds)
-                for ep in batch
-            ]
-            batch_img_urls = await asyncio.gather(*url_tasks)
-
-            download_tasks = []
-            task_episode_map: list[tuple[EpisodeInfo, int]] = []  # (episode, image_count)
-
-            # 폴더는 회차 순서대로 먼저 만들어둔다 (동시 다운로드 중 생성 순서가 뒤섞이지
-            # 않도록). change.py 쪽에서 폴더 생성 순서를 회차 순서로 신뢰하기 때문에 중요하다.
-            episode_dirs_in_order: dict[int, Path] = {}
-            for episode, img_urls in zip(batch, batch_img_urls):
-                if not img_urls:
-                    continue
-                episode_dir = (
-                    Path(download_root)
-                    / safe_title
-                    / episode_folder_name(episode.episode_no, episode.subtitle, folder_zero_fill)
-                )
-                episode_dir.mkdir(parents=True, exist_ok=True)
-                episode_dirs_in_order[episode.episode_no] = episode_dir
-
-            for episode, img_urls in zip(batch, batch_img_urls):
-                if not img_urls:
-                    results.append(
-                        EpisodeDownloadResult(episode.episode_no, episode.subtitle, False, 0)
-                    )
-                    continue
-
-                episode_dir = episode_dirs_in_order[episode.episode_no]
-                task_episode_map.append((episode, len(img_urls)))
-
-                async def _download_one_episode(session, episode_dir, img_urls, episode):
-                    async def _bounded(img_url, file_path):
-                        async with semaphore:
-                            return await _download_single_image(session, img_url, file_path, timeout_seconds)
-
-                    tasks = []
-                    for image_index, img_url in enumerate(img_urls):
-                        ext = guess_image_extension(img_url)
-                        file_name = image_file_name(image_index + 1, image_zero_fill, ext)
-                        tasks.append(_bounded(img_url, episode_dir / file_name))
-                    outcomes = await asyncio.gather(*tasks, return_exceptions=True)
-                    success_count = sum(1 for o in outcomes if o is True)
-                    return success_count == len(img_urls)
-
-                download_tasks.append(_download_one_episode(session, episode_dir, img_urls, episode))
-
-            episode_success_flags = await asyncio.gather(*download_tasks) if download_tasks else []
-            for (episode, image_count), success in zip(task_episode_map, episode_success_flags):
-                results.append(
-                    EpisodeDownloadResult(episode.episode_no, episode.subtitle, success, image_count)
-                )
-
-            if batch_start + batch_size < len(episodes):
-                await asyncio.sleep(delay_seconds)
-
-        return results
+    outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+    success = sum(1 for o in outcomes if o is True) == len(img_urls)
+    return success, episode_dir

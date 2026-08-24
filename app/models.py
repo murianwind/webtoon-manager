@@ -31,6 +31,18 @@ class TitleInfo:
 
 
 @dataclass
+class NaverListItem:
+    """네이버 '요일별 전체 웹툰' 목록의 한 항목 (구독 여부와 무관하게 존재하는 원본 목록)."""
+
+    title_id: str
+    title_name: str
+    thumbnail_url: str
+    weekdays: list[str] = field(default_factory=list)
+    is_finished: bool = False
+    author_summary: str = ""
+
+
+@dataclass
 class WebtoonRecord:
     """SQLite webtoons 테이블 한 행에 대응."""
 

@@ -10,6 +10,8 @@ NAVER_LIST_URL = f"{NAVER_API_BASE}/article/list"
 NAVER_ARTIST_OTHER_TITLES_URL = f"{NAVER_API_BASE}/artist/otherTitle/list"
 NAVER_CURATION_LIST_URL = f"{NAVER_API_BASE}/curation/list"
 NAVER_CURATION_META_URL = f"{NAVER_API_BASE}/curation/meta"
+NAVER_WEEKDAY_LIST_URL = f"{NAVER_API_BASE}/webtoon/titlelist/weekday"
+NAVER_WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 NAVER_DETAIL_URL_TEMPLATES = {
     "webtoon": "https://comic.naver.com/webtoon/detail",

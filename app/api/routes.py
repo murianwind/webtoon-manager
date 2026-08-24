@@ -1,20 +1,24 @@
 """
-구독관리 웹페이지가 사용하는 REST API.
+웹 페이지가 사용하는 REST API.
 
-LAN 전용, 인증 없음 (사용자 결정사항). 입력값 검증 실패 시 크래시 대신
-명확한 4xx 응답을 준다 (요구사항: 잘못된 입력에 대한 에러 전달).
+LAN 전용, 인증 없음. 입력값 검증 실패 시 크래시 대신 명확한 4xx 응답을 준다.
+
+- 구독중/구독해제/제외됨 조회 및 상태 전환 : /webtoons/*
+- 네이버 전체 웹툰 목록 조회 + 거기서 바로 구독/제외 : /naver-list/*
+- 다운로드/스캔 주기 설정 : /settings
+- 수동 실행 + 진행상황 조회 : /jobs/*
 """
 
 import asyncio
 import logging
 
 import aiohttp
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
-from app import naver_api, repository
+from app import job_status, naver_api, repository
+from app import scheduler as scheduler_mod
 from app.config import get_settings
-from app.scheduler import run_discovery_job, run_download_job
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
@@ -31,18 +35,6 @@ class WebtoonOut(BaseModel):
     finish_ack: bool
 
 
-class AddWebtoonIn(BaseModel):
-    title_id: str
-    title: str | None = None  # 비워두면 네이버 API에서 자동 조회
-
-    @field_validator("title_id")
-    @classmethod
-    def title_id_must_be_numeric(cls, v: str) -> str:
-        if not v.strip().isdigit():
-            raise ValueError("titleId는 숫자만 입력할 수 있습니다.")
-        return v.strip()
-
-
 def _to_out(wt) -> WebtoonOut:
     return WebtoonOut(
         title_id=wt.title_id,
@@ -56,48 +48,29 @@ def _to_out(wt) -> WebtoonOut:
     )
 
 
-@router.get("/webtoons", response_model=list[WebtoonOut])
-async def list_webtoons():
-    rows = await asyncio.to_thread(repository.list_all)
-    return [_to_out(r) for r in rows]
-
-
-@router.post("/webtoons", response_model=WebtoonOut)
-async def add_webtoon(payload: AddWebtoonIn):
-    if await asyncio.to_thread(repository.exists, payload.title_id):
-        raise HTTPException(status_code=409, detail="이미 목록에 있는 titleId입니다.")
-
-    title = payload.title
-    is_adult = False
-    if not title:
-        settings = get_settings()
-        async with aiohttp.ClientSession() as session:
-            info = await naver_api.fetch_title_info(session, payload.title_id, settings.request_timeout_seconds)
-        if info is None:
-            raise HTTPException(
-                status_code=400,
-                detail="네이버 API에서 해당 titleId 정보를 찾지 못했습니다. title을 직접 입력해주세요.",
-            )
-        title = info.title_name
-        is_adult = info.is_adult
-
-    await asyncio.to_thread(
-        repository.upsert_new,
-        payload.title_id,
-        title,
-        is_adult,
-        None,
-        repository.SOURCE_MANUAL,
-    )
-    wt = await asyncio.to_thread(repository.get, payload.title_id)
-    return _to_out(wt)
-
-
 def _get_or_404(title_id: str):
     wt = repository.get(title_id)
     if wt is None:
         raise HTTPException(status_code=404, detail="해당 titleId를 목록에서 찾을 수 없습니다.")
     return wt
+
+
+# ── 구독중 / 구독해제 / 제외됨 조회·전환 ──────────────────────────────
+
+@router.get("/webtoons", response_model=list[WebtoonOut])
+async def list_webtoons(status: str | None = None):
+    if status and status not in (
+        repository.STATUS_ACTIVE,
+        repository.STATUS_UNSUBSCRIBED,
+        repository.STATUS_EXCLUDED,
+    ):
+        raise HTTPException(status_code=400, detail="status는 active/unsubscribed/excluded 중 하나여야 합니다.")
+    rows = (
+        await asyncio.to_thread(repository.list_by_status, status)
+        if status
+        else await asyncio.to_thread(repository.list_all)
+    )
+    return [_to_out(r) for r in rows]
 
 
 @router.post("/webtoons/{title_id}/subscribe", response_model=WebtoonOut)
@@ -114,49 +87,123 @@ async def unsubscribe(title_id: str):
     return _to_out(await asyncio.to_thread(repository.get, title_id))
 
 
-@router.post("/webtoons/{title_id}/exclude", response_model=WebtoonOut)
-async def exclude(title_id: str):
-    """목록제외: 완전히 추적 대상에서 빼고, 이후 작가/태그 자동추가 대상에서도 영구 제외."""
-    await asyncio.to_thread(_get_or_404, title_id)
+# ── 네이버 전체 웹툰 목록 (여기서 바로 구독/목록제외) ──────────────────
+
+class NaverListEntryIn(BaseModel):
+    title: str
+
+    @field_validator("title")
+    @classmethod
+    def title_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("title이 비어있습니다.")
+        return v
+
+
+@router.get("/naver-list")
+async def browse_naver_list():
+    settings = get_settings()
+    async with aiohttp.ClientSession() as session:
+        items = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
+
+    existing = await asyncio.to_thread(repository.list_all)
+    existing_status = {w.title_id: w.status for w in existing}
+
+    return [
+        {
+            "title_id": item.title_id,
+            "title": item.title_name,
+            "thumbnail_url": item.thumbnail_url,
+            "weekdays": item.weekdays,
+            "is_finished": item.is_finished,
+            "author_summary": item.author_summary,
+            "status": existing_status.get(item.title_id),
+        }
+        for item in items
+    ]
+
+
+@router.post("/naver-list/{title_id}/subscribe")
+async def naver_list_subscribe(title_id: str, payload: NaverListEntryIn):
+    if not await asyncio.to_thread(repository.exists, title_id):
+        await asyncio.to_thread(
+            repository.upsert_new, title_id, payload.title, False, None, repository.SOURCE_MANUAL
+        )
+    await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_ACTIVE)
+    return _to_out(await asyncio.to_thread(repository.get, title_id))
+
+
+@router.post("/naver-list/{title_id}/exclude")
+async def naver_list_exclude(title_id: str, payload: NaverListEntryIn):
+    if not await asyncio.to_thread(repository.exists, title_id):
+        await asyncio.to_thread(
+            repository.upsert_new, title_id, payload.title, False, None, repository.SOURCE_MANUAL
+        )
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_EXCLUDED)
     return _to_out(await asyncio.to_thread(repository.get, title_id))
 
 
-class ImportIdListIn(BaseModel):
-    text: str  # 기존 ID_list.txt 내용 그대로 (한 줄당 "제목 titleId")
+# ── 설정 (다운로드/스캔 주기) ──────────────────────────────────────
+
+class IntervalSettingsOut(BaseModel):
+    scan_interval_minutes: int
+    download_interval_minutes: int
+    commands_only_interval_minutes: int
 
 
-@router.post("/import/id-list")
-async def import_id_list(payload: ImportIdListIn):
-    """기존 ID_list.txt 내용을 붙여넣어 한 번에 가져온다. 로컬 스크립트 실행이 필요 없다."""
-    imported, skipped = [], []
-    for line in payload.text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        parts = line.rsplit(None, 1)
-        if len(parts) != 2 or not parts[1].isdigit():
-            skipped.append(line)
-            continue
-        title, title_id = parts[0], parts[1]
-        if await asyncio.to_thread(repository.exists, title_id):
-            skipped.append(line)
-            continue
-        await asyncio.to_thread(
-            repository.upsert_new, title_id, title, False, None, repository.SOURCE_MANUAL
-        )
-        imported.append({"title_id": title_id, "title": title})
+class IntervalSettingsIn(BaseModel):
+    scan_interval_minutes: int
+    download_interval_minutes: int
+    commands_only_interval_minutes: int
 
-    return {"imported": imported, "skipped": skipped}
+    @field_validator("scan_interval_minutes", "download_interval_minutes", "commands_only_interval_minutes")
+    @classmethod
+    def must_be_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("주기는 1분 이상이어야 합니다.")
+        return v
 
 
-@router.post("/scan/discovery")
-async def trigger_discovery_scan():
-    asyncio.create_task(run_discovery_job())
+@router.get("/settings", response_model=IntervalSettingsOut)
+async def get_interval_settings():
+    return IntervalSettingsOut(
+        scan_interval_minutes=await asyncio.to_thread(scheduler_mod.get_effective_interval, "scan_interval_minutes"),
+        download_interval_minutes=await asyncio.to_thread(
+            scheduler_mod.get_effective_interval, "download_interval_minutes"
+        ),
+        commands_only_interval_minutes=await asyncio.to_thread(
+            scheduler_mod.get_effective_interval, "commands_only_interval_minutes"
+        ),
+    )
+
+
+@router.post("/settings", response_model=IntervalSettingsOut)
+async def update_interval_settings(payload: IntervalSettingsIn, request: Request):
+    for field_name, key in scheduler_mod.INTERVAL_SETTING_KEYS.items():
+        value = getattr(payload, field_name)
+        await asyncio.to_thread(repository.set_setting, key, str(value))
+
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler is not None:
+        await asyncio.to_thread(scheduler_mod.reschedule_all, scheduler)
+
+    return await get_interval_settings()
+
+
+# ── 수동 실행 + 진행상황 ──────────────────────────────────────────
+
+@router.get("/jobs/status")
+async def jobs_status():
+    return await asyncio.to_thread(job_status.snapshot)
+
+
+@router.post("/jobs/discovery/run")
+async def trigger_discovery_job():
+    asyncio.create_task(scheduler_mod.run_discovery_job())
     return {"status": "started"}
 
 
-@router.post("/scan/download")
-async def trigger_download_scan():
-    asyncio.create_task(run_download_job())
+@router.post("/jobs/download/run")
+async def trigger_download_job():
+    asyncio.create_task(scheduler_mod.run_download_job())
     return {"status": "started"}

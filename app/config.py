@@ -28,7 +28,6 @@ class Settings(BaseSettings):
     # 다운로드 동작
     folder_zero_fill: int = 4
     image_zero_fill: int = 4
-    batch_size: int = 5
     max_concurrent_downloads: int = 10
     delay_seconds: float = 1.0
     request_timeout_seconds: int = 10

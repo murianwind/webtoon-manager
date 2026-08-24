@@ -55,6 +55,6 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="naver-webtoon-manager", lifespan=lifespan)
+app = FastAPI(title="웹툰 구독 관리", lifespan=lifespan)
 app.include_router(api_router)
 app.mount("/", StaticFiles(directory="app/static", html=True), name="static")

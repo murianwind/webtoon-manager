@@ -1,20 +1,7 @@
-const tbody = document.getElementById("webtoon-tbody");
-const emptyMessage = document.getElementById("empty-message");
-const addError = document.getElementById("add-error");
-
-let currentFilter = "all";
-let allWebtoons = [];
-
 const STATUS_LABEL = {
   active: "구독중",
   unsubscribed: "구독해제",
   excluded: "목록제외",
-};
-
-const SOURCE_LABEL = {
-  manual: "수동",
-  artist: "작가",
-  tag: "태그",
 };
 
 async function apiCall(path, options = {}) {
@@ -24,46 +11,19 @@ async function apiCall(path, options = {}) {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `요청 실패 (${res.status})`);
+    const detail = body.detail;
+    const message = Array.isArray(detail)
+      ? detail.map((d) => d.msg).join(", ")
+      : detail || `요청 실패 (${res.status})`;
+    throw new Error(message);
   }
   return res.json();
 }
 
-function render() {
-  const filtered =
-    currentFilter === "all"
-      ? allWebtoons
-      : allWebtoons.filter((w) => w.status === currentFilter);
-
-  tbody.innerHTML = "";
-  emptyMessage.classList.toggle("hidden", filtered.length > 0);
-
-  for (const w of filtered) {
-    const tr = document.createElement("tr");
-
-    tr.innerHTML = `
-      <td>${escapeHtml(w.title)}${w.is_adult ? " 🔞" : ""}</td>
-      <td>${w.title_id}</td>
-      <td><span class="badge ${w.status}">${STATUS_LABEL[w.status] || w.status}</span></td>
-      <td>${w.last_downloaded_no}화</td>
-      <td>${SOURCE_LABEL[w.added_source] || w.added_source}</td>
-      <td>${w.is_finished ? '<span class="badge finished">완결</span>' : "-"}</td>
-      <td class="row-actions"></td>
-    `;
-
-    const actionsCell = tr.querySelector(".row-actions");
-    if (w.status !== "active") {
-      actionsCell.appendChild(makeButton("구독", () => act(w.title_id, "subscribe")));
-    }
-    if (w.status !== "unsubscribed") {
-      actionsCell.appendChild(makeButton("구독해제", () => act(w.title_id, "unsubscribe")));
-    }
-    if (w.status !== "excluded") {
-      actionsCell.appendChild(makeButton("목록제외", () => act(w.title_id, "exclude")));
-    }
-
-    tbody.appendChild(tr);
-  }
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str ?? "";
+  return div.innerHTML;
 }
 
 function makeButton(label, onClick) {
@@ -73,84 +33,231 @@ function makeButton(label, onClick) {
   return btn;
 }
 
-function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
+// ── 탭 전환 ─────────────────────────────────────────────
+
+const pageLoaders = {
+  "naver-list": loadNaverList,
+  active: () => loadSubscriptionTab("active"),
+  unsubscribed: () => loadSubscriptionTab("unsubscribed"),
+  excluded: () => loadSubscriptionTab("excluded"),
+  settings: loadSettingsPage,
+};
+
+document.querySelectorAll(".main-tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".main-tab").forEach((t) => t.classList.remove("active"));
+    document.querySelectorAll(".page").forEach((p) => p.classList.add("hidden"));
+    tab.classList.add("active");
+    const page = tab.dataset.page;
+    document.getElementById(`page-${page}`).classList.remove("hidden");
+    stopJobPolling();
+    pageLoaders[page]?.();
+  });
+});
+
+// ── 네이버 웹툰 전체목록 ─────────────────────────────────
+
+let naverListCache = [];
+
+async function loadNaverList() {
+  const grid = document.getElementById("naver-list-grid");
+  const emptyMsg = document.getElementById("naver-list-empty");
+  grid.innerHTML = "<p>불러오는 중...</p>";
+  try {
+    naverListCache = await apiCall("/api/naver-list");
+    renderNaverList();
+  } catch (e) {
+    grid.innerHTML = "";
+    emptyMsg.textContent = `목록을 불러오지 못했습니다: ${e.message}`;
+    emptyMsg.classList.remove("hidden");
+  }
 }
 
-async function act(titleId, action) {
+function renderNaverList() {
+  const grid = document.getElementById("naver-list-grid");
+  const emptyMsg = document.getElementById("naver-list-empty");
+  const query = document.getElementById("naver-list-search").value.trim().toLowerCase();
+
+  const filtered = query
+    ? naverListCache.filter((w) => w.title.toLowerCase().includes(query))
+    : naverListCache;
+
+  grid.innerHTML = "";
+  emptyMsg.classList.toggle("hidden", filtered.length > 0);
+
+  for (const w of filtered) {
+    const card = document.createElement("div");
+    card.className = "webtoon-card";
+
+    const statusBadge = w.status
+      ? `<span class="badge ${w.status}">${STATUS_LABEL[w.status] || w.status}</span>`
+      : "";
+
+    card.innerHTML = `
+      ${w.thumbnail_url ? `<img src="${escapeHtml(w.thumbnail_url)}" alt="" loading="lazy" />` : '<div class="thumb-placeholder"></div>'}
+      <div class="webtoon-card-body">
+        <div class="webtoon-card-title">${escapeHtml(w.title)}</div>
+        <div class="webtoon-card-meta">${escapeHtml(w.author_summary || "")}</div>
+        ${statusBadge}
+      </div>
+      <div class="webtoon-card-actions"></div>
+    `;
+
+    const actions = card.querySelector(".webtoon-card-actions");
+    if (w.status !== "active") {
+      actions.appendChild(makeButton("구독", () => naverListAction(w.title_id, w.title, "subscribe")));
+    }
+    if (w.status !== "excluded") {
+      actions.appendChild(makeButton("목록제외", () => naverListAction(w.title_id, w.title, "exclude")));
+    }
+
+    grid.appendChild(card);
+  }
+}
+
+async function naverListAction(titleId, title, action) {
   try {
-    await apiCall(`/api/webtoons/${titleId}/${action}`, { method: "POST" });
-    await loadWebtoons();
+    await apiCall(`/api/naver-list/${titleId}/${action}`, {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    });
+    await loadNaverList();
   } catch (e) {
     alert(e.message);
   }
 }
 
-async function loadWebtoons() {
-  allWebtoons = await apiCall("/api/webtoons");
-  render();
+document.getElementById("btn-refresh-naver-list").addEventListener("click", loadNaverList);
+document.getElementById("naver-list-search").addEventListener("input", renderNaverList);
+
+// ── 구독중 / 구독해제 / 제외됨 ─────────────────────────────
+
+async function loadSubscriptionTab(status) {
+  const listEl = document.getElementById(`${status}-list`);
+  const emptyEl = document.getElementById(`${status}-empty`);
+  listEl.innerHTML = "<p>불러오는 중...</p>";
+  try {
+    const rows = await apiCall(`/api/webtoons?status=${status}`);
+    renderSubscriptionTab(status, rows);
+  } catch (e) {
+    listEl.innerHTML = "";
+    emptyEl.textContent = `불러오지 못했습니다: ${e.message}`;
+    emptyEl.classList.remove("hidden");
+  }
 }
 
-document.querySelectorAll(".filter-tabs .tab").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    document.querySelectorAll(".filter-tabs .tab").forEach((t) => t.classList.remove("active"));
-    tab.classList.add("active");
-    currentFilter = tab.dataset.status;
-    render();
-  });
-});
+function renderSubscriptionTab(status, rows) {
+  const listEl = document.getElementById(`${status}-list`);
+  const emptyEl = document.getElementById(`${status}-empty`);
+  listEl.innerHTML = "";
+  emptyEl.classList.toggle("hidden", rows.length > 0);
 
-document.getElementById("btn-add").addEventListener("click", async () => {
-  addError.textContent = "";
-  const titleId = document.getElementById("input-title-id").value.trim();
-  const title = document.getElementById("input-title").value.trim();
+  for (const w of rows) {
+    const row = document.createElement("div");
+    row.className = "webtoon-row";
+    row.innerHTML = `
+      <div class="webtoon-row-title">${escapeHtml(w.title)}${w.is_adult ? " 🔞" : ""}</div>
+      <div class="webtoon-row-meta">${w.last_downloaded_no}화까지 · titleId ${w.title_id}${w.is_finished ? " · <span class=\"badge finished\">완결</span>" : ""}</div>
+      <div class="webtoon-row-actions"></div>
+    `;
 
-  if (!titleId) {
-    addError.textContent = "titleId를 입력해주세요.";
-    return;
+    const actions = row.querySelector(".webtoon-row-actions");
+    if (status !== "active") {
+      actions.appendChild(makeButton("구독", () => subscriptionAction(w.title_id, "subscribe", status)));
+    }
+    if (status === "active") {
+      actions.appendChild(makeButton("구독해제", () => subscriptionAction(w.title_id, "unsubscribe", status)));
+    }
+
+    listEl.appendChild(row);
   }
+}
 
+async function subscriptionAction(titleId, action, currentTab) {
   try {
-    await apiCall("/api/webtoons", {
-      method: "POST",
-      body: JSON.stringify({ title_id: titleId, title: title || null }),
-    });
-    document.getElementById("input-title-id").value = "";
-    document.getElementById("input-title").value = "";
-    await loadWebtoons();
+    await apiCall(`/api/webtoons/${titleId}/${action}`, { method: "POST" });
+    await loadSubscriptionTab(currentTab);
   } catch (e) {
-    addError.textContent = e.message;
+    alert(e.message);
   }
-});
+}
 
-document.getElementById("btn-import").addEventListener("click", async () => {
-  const resultEl = document.getElementById("import-result");
-  const text = document.getElementById("import-textarea").value;
-  if (!text.trim()) return;
+// ── 설정 ────────────────────────────────────────────────
+
+let jobPollTimer = null;
+
+async function loadSettingsPage() {
   try {
-    const result = await apiCall("/api/import/id-list", {
+    const settings = await apiCall("/api/settings");
+    document.getElementById("setting-scan").value = settings.scan_interval_minutes;
+    document.getElementById("setting-download").value = settings.download_interval_minutes;
+    document.getElementById("setting-commands").value = settings.commands_only_interval_minutes;
+  } catch (e) {
+    document.getElementById("settings-save-result").textContent = e.message;
+  }
+  await refreshJobStatus();
+  startJobPolling();
+}
+
+document.getElementById("btn-save-settings").addEventListener("click", async () => {
+  const resultEl = document.getElementById("settings-save-result");
+  resultEl.textContent = "";
+  try {
+    await apiCall("/api/settings", {
       method: "POST",
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({
+        scan_interval_minutes: Number(document.getElementById("setting-scan").value),
+        download_interval_minutes: Number(document.getElementById("setting-download").value),
+        commands_only_interval_minutes: Number(document.getElementById("setting-commands").value),
+      }),
     });
     resultEl.style.color = "";
-    resultEl.textContent = `가져옴 ${result.imported.length}개, 건너뜀 ${result.skipped.length}개`;
-    document.getElementById("import-textarea").value = "";
-    await loadWebtoons();
+    resultEl.textContent = "저장했습니다.";
   } catch (e) {
     resultEl.textContent = e.message;
   }
 });
 
-document.getElementById("btn-scan-discovery").addEventListener("click", async () => {
-  await apiCall("/api/scan/discovery", { method: "POST" });
-  alert("신작 스캔을 백그라운드에서 시작했습니다. 잠시 후 새로고침해주세요.");
+document.getElementById("btn-run-discovery").addEventListener("click", async () => {
+  await apiCall("/api/jobs/discovery/run", { method: "POST" });
+  await refreshJobStatus();
 });
 
-document.getElementById("btn-scan-download").addEventListener("click", async () => {
-  await apiCall("/api/scan/download", { method: "POST" });
-  alert("다운로드를 백그라운드에서 시작했습니다. 잠시 후 새로고침해주세요.");
+document.getElementById("btn-run-download").addEventListener("click", async () => {
+  await apiCall("/api/jobs/download/run", { method: "POST" });
+  await refreshJobStatus();
 });
 
-loadWebtoons().catch((e) => alert(e.message));
+async function refreshJobStatus() {
+  let statuses;
+  try {
+    statuses = await apiCall("/api/jobs/status");
+  } catch (e) {
+    return;
+  }
+
+  for (const jobName of ["discovery", "download"]) {
+    const st = statuses[jobName];
+    if (!st) continue;
+    const badge = document.getElementById(`${jobName}-status-badge`);
+    badge.textContent = st.status;
+    badge.className = `badge job-${st.status}`;
+    document.getElementById(`${jobName}-log`).textContent = st.log.join("\n");
+  }
+}
+
+function startJobPolling() {
+  stopJobPolling();
+  jobPollTimer = setInterval(refreshJobStatus, 2000);
+}
+
+function stopJobPolling() {
+  if (jobPollTimer) {
+    clearInterval(jobPollTimer);
+    jobPollTimer = null;
+  }
+}
+
+// ── 초기 로드 ────────────────────────────────────────────
+
+loadNaverList();
