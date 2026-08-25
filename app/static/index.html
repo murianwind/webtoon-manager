@@ -16,6 +16,7 @@
     <button class="main-tab" data-page="unsubscribed">구독해제</button>
     <button class="main-tab" data-page="excluded">제외됨</button>
     <button class="main-tab" data-page="manual-download">수동 다운로드</button>
+    <button class="main-tab" data-page="registry">작가/태그 관리</button>
     <button class="main-tab" data-page="settings">설정</button>
   </nav>
 
@@ -33,9 +34,8 @@
         <option value="author">저자순</option>
         <option value="new-episode">새 에피소드 먼저</option>
       </select>
-      <button id="btn-refresh-naver-list">새로고침</button>
+      <button id="btn-refresh-naver-list">불러오기</button>
     </div>
-    <p class="hint">새로고침 버튼: 네이버 웹툰 사이트에서 요일별 목록을 다시 받아옵니다 (신작이 새로 올라왔는지 등을 바로 확인할 때 사용).</p>
     <div id="naver-list-grid" class="webtoon-grid"></div>
     <p id="naver-list-empty" class="hidden empty-message">불러온 목록이 없습니다.</p>
   </section>
@@ -43,11 +43,9 @@
   <!-- 구독해제 -->
   <section id="page-unsubscribed" class="page hidden">
     <div class="toolbar">
-      <input id="unsubscribed-search" type="text" placeholder="제목/저자로 검색" />
-      <select id="unsubscribed-sort">
-        <option value="title">제목순</option>
-        <option value="author">저자순</option>
-      </select>
+      <input id="unsubscribed-search" type="text" placeholder="제목으로 검색" />
+      <select id="unsubscribed-author-filter"><option value="">작가 전체</option></select>
+      <select id="unsubscribed-tag-filter"><option value="">태그 전체</option></select>
     </div>
     <div id="unsubscribed-list" class="webtoon-grid"></div>
     <p id="unsubscribed-empty" class="hidden empty-message">구독 해제한 웹툰이 없습니다.</p>
@@ -56,11 +54,9 @@
   <!-- 제외됨 -->
   <section id="page-excluded" class="page hidden">
     <div class="toolbar">
-      <input id="excluded-search" type="text" placeholder="제목/저자로 검색" />
-      <select id="excluded-sort">
-        <option value="title">제목순</option>
-        <option value="author">저자순</option>
-      </select>
+      <input id="excluded-search" type="text" placeholder="제목으로 검색" />
+      <select id="excluded-author-filter"><option value="">작가 전체</option></select>
+      <select id="excluded-tag-filter"><option value="">태그 전체</option></select>
     </div>
     <div id="excluded-list" class="webtoon-grid"></div>
     <p id="excluded-empty" class="hidden empty-message">목록에서 제외한 웹툰이 없습니다.</p>
@@ -69,9 +65,11 @@
   <!-- 수동 다운로드 -->
   <section id="page-manual-download" class="page hidden">
     <div class="toolbar">
-      <input id="manual-title-id" type="text" inputmode="numeric" placeholder="titleId (숫자)" />
+      <input id="manual-query" type="text" placeholder="titleId 또는 웹툰 제목" />
       <button id="btn-manual-analyze">분석</button>
     </div>
+    <div id="manual-search-results" class="hidden webtoon-grid small"></div>
+
     <div id="manual-result" class="hidden">
       <h3 id="manual-title-name"></h3>
       <div class="manual-actions">
@@ -94,6 +92,37 @@
     </div>
   </section>
 
+  <!-- 작가/태그 관리 -->
+  <section id="page-registry" class="page hidden">
+    <div class="settings-card">
+      <h2>작가</h2>
+      <div class="registry-add-row">
+        <input id="author-search-input" type="text" placeholder="작가 이름으로 검색" />
+        <button id="btn-search-author">검색</button>
+      </div>
+      <div id="author-search-results" class="registry-list"></div>
+
+      <h3 class="registry-subheading">등록된/발견된 작가 전체</h3>
+      <div class="registry-add-row">
+        <input id="add-author-id" type="text" placeholder="author_id (직접 등록)" />
+        <input id="add-author-name" type="text" placeholder="이름(선택)" />
+        <button id="btn-add-author">직접 추가</button>
+      </div>
+      <div id="author-list" class="registry-list"></div>
+    </div>
+
+    <div class="settings-card">
+      <h2>태그</h2>
+      <div class="registry-add-row">
+        <input id="tag-catalog-search" type="text" placeholder="태그 이름으로 찾기" />
+      </div>
+      <div id="tag-catalog-results" class="registry-list"></div>
+
+      <h3 class="registry-subheading">등록된 태그</h3>
+      <div id="tag-list" class="registry-list"></div>
+    </div>
+  </section>
+
   <!-- 설정 -->
   <section id="page-settings" class="page hidden">
     <div class="settings-card">
@@ -111,44 +140,23 @@
     </div>
 
     <div class="settings-card">
-      <h2>작가/태그 자동추가 관리</h2>
-      <div class="registry-columns">
-        <div class="registry-column">
-          <h3>작가</h3>
-          <div class="registry-add-row">
-            <input id="add-author-id" type="text" placeholder="author_id" />
-            <input id="add-author-name" type="text" placeholder="이름(선택)" />
-            <button id="btn-add-author">추가</button>
-          </div>
-          <div id="author-list" class="registry-list"></div>
-        </div>
-        <div class="registry-column">
-          <h3>태그</h3>
-          <div class="registry-add-row">
-            <input id="add-tag-id" type="text" inputmode="numeric" placeholder="tag_id (숫자)" />
-            <button id="btn-add-tag">추가</button>
-          </div>
-          <div id="tag-list" class="registry-list"></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="settings-card">
       <h2>디스코드 설정</h2>
-      <div class="settings-form">
-        <label>웹훅 URL (신작 알림)
+      <div class="discord-form-grid">
+        <label>웹훅 URL <span class="hint-inline">(신작 알림)</span>
           <input id="discord-webhook-url" type="text" placeholder="https://discord.com/api/webhooks/..." />
         </label>
-        <label>봇 토큰 (완결 확인) <span class="hint-inline">비워두면 기존 값 유지</span>
+        <label>봇 토큰 <span class="hint-inline">(완결 확인, 비워두면 기존 값 유지)</span>
           <input id="discord-bot-token" type="password" placeholder="설정됨 (변경하려면 입력)" />
         </label>
         <label>알림 채널 ID
           <input id="discord-channel-id" type="text" placeholder="123456789012345678" />
         </label>
       </div>
-      <button id="btn-save-discord">저장</button>
-      <button id="btn-test-webhook">웹훅 테스트</button>
-      <button id="btn-test-bot">봇 테스트</button>
+      <div class="discord-actions">
+        <button id="btn-save-discord">저장</button>
+        <button id="btn-test-webhook">웹훅 테스트</button>
+        <button id="btn-test-bot">봇 테스트</button>
+      </div>
       <span id="discord-save-result" class="error"></span>
       <p id="discord-bot-status" class="hint"></p>
     </div>

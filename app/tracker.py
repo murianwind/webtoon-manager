@@ -70,6 +70,42 @@ async def _is_other_finished(
     return bool(info and info.is_finished)
 
 
+async def search_authors_by_name(
+    session: aiohttp.ClientSession, name: str, settings: Settings
+) -> list[dict]:
+    """
+    네이버에는 작가 이름 검색 API가 없어서, 전체 웹툰 목록의 저자 텍스트에서
+    이름이 포함된 작품을 찾은 뒤 그 작품들의 상세정보로 실제 author_id를 알아낸다.
+    """
+    catalog = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
+    candidates = [item for item in catalog if name in item.author_summary][:8]
+    if not candidates:
+        return []
+
+    semaphore = asyncio.Semaphore(_ARTIST_SCAN_CONCURRENCY)
+
+    async def _fetch(item):
+        async with semaphore:
+            info = await naver_api.fetch_title_info(session, item.title_id, settings.request_timeout_seconds)
+            return item, info
+
+    results = await asyncio.gather(*(_fetch(c) for c in candidates))
+
+    found: dict[str, dict] = {}
+    for item, info in results:
+        if info is None:
+            continue
+        for writer_id, writer_name in info.writer_id_name_pairs:
+            if name in writer_name and writer_id not in found:
+                found[writer_id] = {
+                    "author_id": writer_id,
+                    "author_name": writer_name,
+                    "sample_title": item.title_name,
+                    "sample_title_id": item.title_id,
+                }
+    return list(found.values())
+
+
 async def backfill_missing_thumbnails(session: aiohttp.ClientSession, settings: Settings) -> int:
     """
     상태(구독중/구독해제/제외됨)와 무관하게, 썸네일 URL이 아직 없는 모든 웹툰의
@@ -105,6 +141,28 @@ async def backfill_missing_thumbnails(session: aiohttp.ClientSession, settings: 
         filled += 1
 
     return filled
+
+
+async def enrich_one(session: aiohttp.ClientSession, title_id: str, settings: Settings) -> None:
+    """
+    구독(또는 목록제외) 직후 백그라운드에서 즉시 실행 — 정기 스캔을 기다리지 않고
+    바로 정보(썸네일/장르/태그/휴재/작가)를 채우고 작가를 레지스트리에 등록한다.
+    등록된 작가 목록이 "다음 스캔까지" 비어있는 것처럼 보이는 문제를 없앤다.
+    """
+    try:
+        info = await naver_api.fetch_title_info(session, title_id, settings.request_timeout_seconds)
+        if info is None:
+            return
+        repository.update_is_adult(title_id, info.is_adult)
+        repository.update_thumbnail_url(title_id, info.thumbnail_url)
+        repository.update_genres_and_tags(title_id, info.genres, info.tags)
+        repository.update_is_paused(title_id, info.is_paused)
+        if info.writer_ids:
+            repository.update_writer_ids(title_id, sorted(info.writer_ids))
+        for writer_id, writer_name in info.writer_id_name_pairs:
+            repository.upsert_watched_author(writer_id, writer_name, enabled=True)
+    except Exception as e:
+        log.error("즉시 정보 보강 중 예외 (titleId=%s): %s", title_id, e)
 
 
 async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, settings: Settings) -> None:

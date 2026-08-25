@@ -55,6 +55,7 @@ const pageLoaders = {
   unsubscribed: () => loadSubscriptionTab("unsubscribed"),
   excluded: () => loadSubscriptionTab("excluded"),
   "manual-download": () => {},
+  registry: loadRegistryPage,
   settings: loadSettingsPage,
 };
 
@@ -78,7 +79,7 @@ function buildWebtoonCard(w, context) {
   card.dataset.titleId = w.title_id;
 
   const metaParts = [];
-  if (context !== "naver-list") metaParts.push(`${w.last_downloaded_no}화까지`);
+  if (context !== "naver-list" && w.last_downloaded_no > 0) metaParts.push(`${w.last_downloaded_no}화까지 다운로드`);
   if (w.author_summary) metaParts.push(w.author_summary);
   if (w.is_adult) metaParts.push("🔞");
   const statusBadge =
@@ -112,6 +113,25 @@ function buildWebtoonCard(w, context) {
 // ── 네이버 웹툰 전체목록 ─────────────────────────────────
 
 let naverListCache = [];
+const NAVER_LIST_PREFS_KEY = "naverListPrefs";
+
+function saveNaverListPrefs() {
+  const prefs = {
+    filterStatus: document.getElementById("naver-list-filter-status").value,
+    sort: document.getElementById("naver-list-sort").value,
+  };
+  localStorage.setItem(NAVER_LIST_PREFS_KEY, JSON.stringify(prefs));
+}
+
+function restoreNaverListPrefs() {
+  try {
+    const prefs = JSON.parse(localStorage.getItem(NAVER_LIST_PREFS_KEY) || "{}");
+    if (prefs.filterStatus) document.getElementById("naver-list-filter-status").value = prefs.filterStatus;
+    if (prefs.sort) document.getElementById("naver-list-sort").value = prefs.sort;
+  } catch (e) {
+    // 저장된 값이 이상하면 그냥 기본값 사용
+  }
+}
 
 async function loadNaverList() {
   const grid = document.getElementById("naver-list-grid");
@@ -202,12 +222,28 @@ function patchNaverListCard(titleId, webtoon, newStatus) {
 
 document.getElementById("btn-refresh-naver-list").addEventListener("click", loadNaverList);
 document.getElementById("naver-list-search").addEventListener("input", renderNaverList);
-document.getElementById("naver-list-filter-status").addEventListener("change", renderNaverList);
-document.getElementById("naver-list-sort").addEventListener("change", renderNaverList);
+document.getElementById("naver-list-filter-status").addEventListener("change", () => {
+  saveNaverListPrefs();
+  renderNaverList();
+});
+document.getElementById("naver-list-sort").addEventListener("change", () => {
+  saveNaverListPrefs();
+  renderNaverList();
+});
 
 // ── 구독해제 / 제외됨 ────────────────────────────────────
 
 let subscriptionCache = { unsubscribed: [], excluded: [] };
+let authorNameMap = {}; // author_id -> author_name (작가 필터 드롭다운용)
+
+async function loadAuthorNameMap() {
+  try {
+    const authors = await apiCall("/api/watched-authors");
+    authorNameMap = Object.fromEntries(authors.map((a) => [a.author_id, a.author_name || a.author_id]));
+  } catch (e) {
+    authorNameMap = {};
+  }
+}
 
 async function loadSubscriptionTab(status) {
   const listEl = document.getElementById(`${status}-list`);
@@ -216,7 +252,9 @@ async function loadSubscriptionTab(status) {
     listEl.innerHTML = "<p>불러오는 중...</p>";
   }
   try {
+    await loadAuthorNameMap();
     subscriptionCache[status] = await apiCall(`/api/webtoons?status=${status}`);
+    populateFilterOptions(status);
     renderSubscriptionTab(status);
   } catch (e) {
     if (listEl.children.length === 0) {
@@ -226,22 +264,52 @@ async function loadSubscriptionTab(status) {
   }
 }
 
+function populateFilterOptions(status) {
+  const rows = subscriptionCache[status] || [];
+
+  const authorIds = new Set();
+  const tagNames = new Set();
+  for (const w of rows) {
+    (w.writer_ids || []).forEach((id) => authorIds.add(id));
+    (w.tags || []).forEach((t) => tagNames.add(t));
+  }
+
+  const authorSelect = document.getElementById(`${status}-author-filter`);
+  const currentAuthor = authorSelect.value;
+  authorSelect.innerHTML = '<option value="">작가 전체</option>';
+  for (const id of authorIds) {
+    const opt = document.createElement("option");
+    opt.value = id;
+    opt.textContent = authorNameMap[id] || id;
+    authorSelect.appendChild(opt);
+  }
+  authorSelect.value = currentAuthor;
+
+  const tagSelect = document.getElementById(`${status}-tag-filter`);
+  const currentTag = tagSelect.value;
+  tagSelect.innerHTML = '<option value="">태그 전체</option>';
+  for (const tag of [...tagNames].sort()) {
+    const opt = document.createElement("option");
+    opt.value = tag;
+    opt.textContent = tag;
+    tagSelect.appendChild(opt);
+  }
+  tagSelect.value = currentTag;
+}
+
 function renderSubscriptionTab(status) {
   const listEl = document.getElementById(`${status}-list`);
   const emptyEl = document.getElementById(`${status}-empty`);
   const query = document.getElementById(`${status}-search`).value.trim().toLowerCase();
-  const sortBy = document.getElementById(`${status}-sort`).value;
+  const authorFilter = document.getElementById(`${status}-author-filter`).value;
+  const tagFilter = document.getElementById(`${status}-tag-filter`).value;
 
   let rows = subscriptionCache[status] || [];
-  if (query) {
-    rows = rows.filter((w) => w.title.toLowerCase().includes(query));
-  }
-  rows = [...rows];
-  if (sortBy === "author") {
-    rows.sort((a, b) => a.title.localeCompare(b.title)); // author_summary 없음(자체 DB), 제목순 폴백
-  } else {
-    rows.sort((a, b) => a.title.localeCompare(b.title));
-  }
+  if (query) rows = rows.filter((w) => w.title.toLowerCase().includes(query));
+  if (authorFilter) rows = rows.filter((w) => (w.writer_ids || []).includes(authorFilter));
+  if (tagFilter) rows = rows.filter((w) => (w.tags || []).includes(tagFilter));
+
+  rows = [...rows].sort((a, b) => a.title.localeCompare(b.title));
 
   listEl.innerHTML = "";
   emptyEl.classList.toggle("hidden", rows.length > 0);
@@ -250,10 +318,11 @@ function renderSubscriptionTab(status) {
   }
 }
 
-document.getElementById("unsubscribed-search").addEventListener("input", () => renderSubscriptionTab("unsubscribed"));
-document.getElementById("unsubscribed-sort").addEventListener("change", () => renderSubscriptionTab("unsubscribed"));
-document.getElementById("excluded-search").addEventListener("input", () => renderSubscriptionTab("excluded"));
-document.getElementById("excluded-sort").addEventListener("change", () => renderSubscriptionTab("excluded"));
+for (const status of ["unsubscribed", "excluded"]) {
+  document.getElementById(`${status}-search`).addEventListener("input", () => renderSubscriptionTab(status));
+  document.getElementById(`${status}-author-filter`).addEventListener("change", () => renderSubscriptionTab(status));
+  document.getElementById(`${status}-tag-filter`).addEventListener("change", () => renderSubscriptionTab(status));
+}
 
 async function subscriptionAction(titleId, action, currentTab) {
   try {
@@ -274,15 +343,55 @@ let manualAnalyzeResult = null;
 let manualPollTimer = null;
 
 document.getElementById("btn-manual-analyze").addEventListener("click", async () => {
-  const titleId = document.getElementById("manual-title-id").value.trim();
-  if (!titleId) return;
+  const query = document.getElementById("manual-query").value.trim();
+  if (!query) return;
+
+  const resultsEl = document.getElementById("manual-search-results");
+
+  if (/^\d+$/.test(query)) {
+    // 숫자만 입력 -> titleId로 바로 분석
+    resultsEl.classList.add("hidden");
+    await runManualAnalyze(query);
+    return;
+  }
+
+  // 텍스트 입력 -> 제목 검색 후보 표시
   try {
-    manualAnalyzeResult = await apiCall(`/api/manual-download/analyze?title_id=${encodeURIComponent(titleId)}`);
-    renderManualTable();
+    const matches = await apiCall(`/api/manual-download/search?query=${encodeURIComponent(query)}`);
+    resultsEl.innerHTML = "";
+    if (matches.length === 0) {
+      resultsEl.innerHTML = "<p>일치하는 웹툰이 없습니다.</p>";
+      resultsEl.classList.remove("hidden");
+      return;
+    }
+    for (const m of matches) {
+      const card = document.createElement("div");
+      card.className = "webtoon-card";
+      card.innerHTML = `
+        ${m.thumbnail_url ? `<img src="${escapeHtml(m.thumbnail_url)}" alt="" loading="lazy" />` : '<div class="thumb-placeholder"></div>'}
+        <div class="webtoon-card-body"><div class="webtoon-card-title">${escapeHtml(m.title)}</div></div>
+        <div class="webtoon-card-actions"></div>
+      `;
+      card.querySelector(".webtoon-card-actions").appendChild(
+        makeButton("이 작품 분석", () => runManualAnalyze(m.title_id))
+      );
+      resultsEl.appendChild(card);
+    }
+    resultsEl.classList.remove("hidden");
   } catch (e) {
     alert(e.message);
   }
 });
+
+async function runManualAnalyze(titleId) {
+  try {
+    manualAnalyzeResult = await apiCall(`/api/manual-download/analyze?title_id=${encodeURIComponent(titleId)}`);
+    document.getElementById("manual-search-results").classList.add("hidden");
+    renderManualTable();
+  } catch (e) {
+    alert(e.message);
+  }
+}
 
 function renderManualTable() {
   document.getElementById("manual-result").classList.remove("hidden");
@@ -366,6 +475,145 @@ async function refreshManualStatus() {
   if (st.status !== "running") stopManualPolling();
 }
 
+// ── 작가/태그 관리 (별도 페이지) ───────────────────────────
+
+async function loadRegistryPage() {
+  loadAuthorList();
+  loadTagList();
+  document.getElementById("author-search-results").innerHTML = "";
+  document.getElementById("tag-catalog-results").innerHTML = "";
+}
+
+document.getElementById("btn-search-author").addEventListener("click", async () => {
+  const name = document.getElementById("author-search-input").value.trim();
+  const resultsEl = document.getElementById("author-search-results");
+  if (!name) return;
+  resultsEl.innerHTML = "<p>검색 중...</p>";
+  try {
+    const results = await apiCall(`/api/authors/search?name=${encodeURIComponent(name)}`);
+    resultsEl.innerHTML = "";
+    if (results.length === 0) {
+      resultsEl.innerHTML = "<p>일치하는 작가를 찾지 못했습니다. 직접 추가를 이용해주세요.</p>";
+      return;
+    }
+    for (const r of results) {
+      const row = document.createElement("div");
+      row.className = "registry-row";
+      row.innerHTML = `<span>${escapeHtml(r.author_name)} <span class="registry-meta">(예: ${escapeHtml(r.sample_title)})</span></span>`;
+      row.appendChild(
+        makeButton("등록", async () => {
+          await apiCall("/api/watched-authors", {
+            method: "POST",
+            body: JSON.stringify({ author_id: r.author_id, author_name: r.author_name }),
+          });
+          loadAuthorList();
+        })
+      );
+      resultsEl.appendChild(row);
+    }
+  } catch (e) {
+    resultsEl.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+  }
+});
+
+async function loadAuthorList() {
+  const container = document.getElementById("author-list");
+  try {
+    const authors = await apiCall("/api/watched-authors");
+    container.innerHTML = "";
+    if (authors.length === 0) {
+      container.innerHTML = "<p>아직 발견된 작가가 없습니다. 웹툰을 구독하면 자동으로 채워집니다.</p>";
+      return;
+    }
+    for (const a of authors) {
+      const row = document.createElement("div");
+      row.className = `registry-row${a.enabled ? "" : " disabled"}`;
+      row.innerHTML = `<span>${escapeHtml(a.author_name || a.author_id)} <span class="registry-meta">(${escapeHtml(a.author_id)})</span></span>`;
+      row.appendChild(
+        makeButton(a.enabled ? "해제" : "등록", async () => {
+          await apiCall(`/api/watched-authors/${a.author_id}/${a.enabled ? "disable" : "enable"}`, { method: "POST" });
+          loadAuthorList();
+        })
+      );
+      container.appendChild(row);
+    }
+  } catch (e) {
+    container.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+  }
+}
+
+document.getElementById("btn-add-author").addEventListener("click", async () => {
+  const authorId = document.getElementById("add-author-id").value.trim();
+  const authorName = document.getElementById("add-author-name").value.trim();
+  if (!authorId) return;
+  try {
+    await apiCall("/api/watched-authors", { method: "POST", body: JSON.stringify({ author_id: authorId, author_name: authorName }) });
+    document.getElementById("add-author-id").value = "";
+    document.getElementById("add-author-name").value = "";
+    loadAuthorList();
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
+let tagCatalogCache = [];
+
+async function ensureTagCatalog() {
+  if (tagCatalogCache.length > 0) return tagCatalogCache;
+  tagCatalogCache = await apiCall("/api/tags/catalog");
+  return tagCatalogCache;
+}
+
+document.getElementById("tag-catalog-search").addEventListener("input", async (e) => {
+  const query = e.target.value.trim().toLowerCase();
+  const resultsEl = document.getElementById("tag-catalog-results");
+  if (!query) {
+    resultsEl.innerHTML = "";
+    return;
+  }
+  try {
+    const catalog = await ensureTagCatalog();
+    const matches = catalog.filter((t) => t.tag_name.toLowerCase().includes(query)).slice(0, 20);
+    resultsEl.innerHTML = "";
+    for (const t of matches) {
+      const row = document.createElement("div");
+      row.className = "registry-row";
+      row.innerHTML = `<span>${escapeHtml(t.tag_name)}</span>`;
+      row.appendChild(
+        makeButton("추가", async () => {
+          await apiCall("/api/watched-tags", { method: "POST", body: JSON.stringify({ tag_id: t.tag_id, tag_name: t.tag_name }) });
+          loadTagList();
+        })
+      );
+      resultsEl.appendChild(row);
+    }
+  } catch (e) {
+    resultsEl.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+  }
+});
+
+async function loadTagList() {
+  const container = document.getElementById("tag-list");
+  try {
+    const tags = await apiCall("/api/watched-tags");
+    container.innerHTML = "";
+    for (const t of tags) {
+      const row = document.createElement("div");
+      row.className = `registry-row${t.enabled ? "" : " disabled"}`;
+      row.innerHTML = `<span>${escapeHtml(t.tag_name || t.tag_id)}</span>`;
+      row.appendChild(
+        makeButton(t.enabled ? "해제" : "등록", async () => {
+          await apiCall(`/api/watched-tags/${t.tag_id}/${t.enabled ? "disable" : "enable"}`, { method: "POST" });
+          loadTagList();
+        })
+      );
+      container.appendChild(row);
+    }
+  } catch (e) {
+    container.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+  }
+}
+
 // ── 설정: 스케줄 ─────────────────────────────────────────
 
 function buildScheduleControls(jobId, schedule) {
@@ -442,76 +690,6 @@ document.getElementById("btn-save-settings").addEventListener("click", async () 
     resultEl.textContent = "저장했습니다.";
   } catch (e) {
     resultEl.textContent = e.message;
-  }
-});
-
-// ── 설정: 작가/태그 레지스트리 ────────────────────────────
-
-async function loadAuthorList() {
-  const container = document.getElementById("author-list");
-  try {
-    const authors = await apiCall("/api/watched-authors");
-    container.innerHTML = "";
-    for (const a of authors) {
-      const row = document.createElement("div");
-      row.className = `registry-row${a.enabled ? "" : " disabled"}`;
-      row.innerHTML = `<span>${escapeHtml(a.author_name || a.author_id)} <span class="hint-inline">(${escapeHtml(a.author_id)})</span></span>`;
-      const btn = makeButton(a.enabled ? "해제" : "등록", async () => {
-        await apiCall(`/api/watched-authors/${a.author_id}/${a.enabled ? "disable" : "enable"}`, { method: "POST" });
-        loadAuthorList();
-      });
-      row.appendChild(btn);
-      container.appendChild(row);
-    }
-  } catch (e) {
-    container.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
-  }
-}
-
-document.getElementById("btn-add-author").addEventListener("click", async () => {
-  const authorId = document.getElementById("add-author-id").value.trim();
-  const authorName = document.getElementById("add-author-name").value.trim();
-  if (!authorId) return;
-  try {
-    await apiCall("/api/watched-authors", { method: "POST", body: JSON.stringify({ author_id: authorId, author_name: authorName }) });
-    document.getElementById("add-author-id").value = "";
-    document.getElementById("add-author-name").value = "";
-    loadAuthorList();
-  } catch (e) {
-    alert(e.message);
-  }
-});
-
-async function loadTagList() {
-  const container = document.getElementById("tag-list");
-  try {
-    const tags = await apiCall("/api/watched-tags");
-    container.innerHTML = "";
-    for (const t of tags) {
-      const row = document.createElement("div");
-      row.className = `registry-row${t.enabled ? "" : " disabled"}`;
-      row.innerHTML = `<span>${escapeHtml(t.tag_name || t.tag_id)} <span class="hint-inline">(${escapeHtml(t.tag_id)})</span></span>`;
-      const btn = makeButton(t.enabled ? "해제" : "등록", async () => {
-        await apiCall(`/api/watched-tags/${t.tag_id}/${t.enabled ? "disable" : "enable"}`, { method: "POST" });
-        loadTagList();
-      });
-      row.appendChild(btn);
-      container.appendChild(row);
-    }
-  } catch (e) {
-    container.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
-  }
-}
-
-document.getElementById("btn-add-tag").addEventListener("click", async () => {
-  const tagId = document.getElementById("add-tag-id").value.trim();
-  if (!tagId) return;
-  try {
-    await apiCall("/api/watched-tags", { method: "POST", body: JSON.stringify({ tag_id: tagId }) });
-    document.getElementById("add-tag-id").value = "";
-    loadTagList();
-  } catch (e) {
-    alert(e.message);
   }
 });
 
@@ -613,8 +791,6 @@ async function loadSettingsPage() {
   } catch (e) {
     document.getElementById("settings-save-result").textContent = e.message;
   }
-  loadAuthorList();
-  loadTagList();
   loadDiscordSettings();
   await refreshJobStatus();
   startJobPolling();
@@ -677,4 +853,5 @@ function stopJobPolling() {
 
 // ── 초기 로드 ────────────────────────────────────────────
 
+restoreNaverListPrefs();
 loadNaverList();

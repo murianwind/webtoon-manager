@@ -10,6 +10,7 @@ NAVER_LIST_URL = f"{NAVER_API_BASE}/article/list"
 NAVER_ARTIST_OTHER_TITLES_URL = f"{NAVER_API_BASE}/artist/otherTitle/list"
 NAVER_CURATION_LIST_URL = f"{NAVER_API_BASE}/curation/list"
 NAVER_CURATION_META_URL = f"{NAVER_API_BASE}/curation/meta"
+NAVER_TAG_SHORTCUT_URL = f"{NAVER_API_BASE}/webtoon/tagList/shortcut"
 NAVER_WEEKDAY_LIST_URL = f"{NAVER_API_BASE}/webtoon/titlelist/weekday"
 
 NAVER_DETAIL_URL_TEMPLATES = {

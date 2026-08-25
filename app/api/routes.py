@@ -32,6 +32,7 @@ from app import (
     naver_api,
     repository,
     schedule_config,
+    tracker,
 )
 from app import scheduler as scheduler_mod
 from app.config import get_settings
@@ -55,6 +56,7 @@ class WebtoonOut(BaseModel):
     latest_episode_no: int
     is_paused: bool
     has_new_episode: bool
+    writer_ids: list[str]
 
 
 def _to_out(wt) -> WebtoonOut:
@@ -73,6 +75,7 @@ def _to_out(wt) -> WebtoonOut:
         latest_episode_no=wt.latest_episode_no,
         is_paused=wt.is_paused,
         has_new_episode=wt.latest_episode_no > wt.last_downloaded_no > 0,
+        writer_ids=wt.writer_ids,
     )
 
 
@@ -81,6 +84,15 @@ def _get_or_404(title_id: str):
     if wt is None:
         raise HTTPException(status_code=404, detail="해당 titleId를 목록에서 찾을 수 없습니다.")
     return wt
+
+
+def _trigger_enrich(title_id: str) -> None:
+    """구독 직후 백그라운드에서 정보/작가등록을 바로 채운다 (다음 정기 스캔까지 기다리지 않음)."""
+    async def _run():
+        async with aiohttp.ClientSession() as session:
+            await tracker.enrich_one(session, title_id, get_settings())
+
+    asyncio.create_task(_run())
 
 
 # ── 구독중 / 구독해제 / 제외됨 조회·전환 ──────────────────────────────
@@ -105,6 +117,7 @@ async def list_webtoons(status: str | None = None):
 async def subscribe(title_id: str):
     await asyncio.to_thread(_get_or_404, title_id)
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_ACTIVE)
+    _trigger_enrich(title_id)
     return _to_out(await asyncio.to_thread(repository.get, title_id))
 
 
@@ -189,6 +202,7 @@ async def naver_list_subscribe(title_id: str, payload: NaverListEntryIn):
             payload.thumbnail_url,
         )
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_ACTIVE)
+    _trigger_enrich(title_id)
     return _to_out(await asyncio.to_thread(repository.get, title_id))
 
 
@@ -327,6 +341,24 @@ async def remove_watched_tag(tag_id: str):
     return {"status": "deleted"}
 
 
+@router.get("/tags/catalog")
+async def get_tag_catalog():
+    """네이버가 제공하는 전체 태그 목록 (이름으로 골라서 등록할 때 사용)."""
+    settings = get_settings()
+    async with aiohttp.ClientSession() as session:
+        return await naver_api.fetch_tag_catalog(session, settings.request_timeout_seconds)
+
+
+@router.get("/authors/search")
+async def search_authors(name: str):
+    """작가 이름으로 검색 — 네이버 전체목록에서 이름이 포함된 작품을 찾아 실제 author_id를 알아낸다."""
+    if not name.strip():
+        raise HTTPException(status_code=400, detail="검색할 이름을 입력해주세요.")
+    settings = get_settings()
+    async with aiohttp.ClientSession() as session:
+        return await tracker.search_authors_by_name(session, name.strip(), settings)
+
+
 # ── 수동 다운로드 ──────────────────────────────────────────────────
 
 class ManualAnalyzeEpisodeOut(BaseModel):
@@ -352,6 +384,23 @@ class ManualDownloadIn(BaseModel):
         if not v:
             raise ValueError("다운로드할 회차를 하나 이상 선택해주세요.")
         return v
+
+
+@router.get("/manual-download/search")
+async def manual_download_search_title(query: str):
+    """titleId를 모를 때 제목으로 후보를 찾는다 (네이버 전체목록에서 검색)."""
+    if not query.strip():
+        raise HTTPException(status_code=400, detail="검색할 제목을 입력해주세요.")
+    settings = get_settings()
+    async with aiohttp.ClientSession() as session:
+        items = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
+    query_lower = query.strip().lower()
+    matches = [
+        {"title_id": item.title_id, "title": item.title_name, "thumbnail_url": item.thumbnail_url}
+        for item in items
+        if query_lower in item.title_name.lower()
+    ][:10]
+    return matches
 
 
 @router.get("/manual-download/analyze", response_model=ManualAnalyzeOut)

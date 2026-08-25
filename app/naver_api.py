@@ -237,6 +237,31 @@ async def fetch_full_webtoon_list(
     return sorted(merged.values(), key=lambda x: x.title_name)
 
 
+async def fetch_tag_catalog(
+    session: aiohttp.ClientSession, timeout_seconds: int
+) -> list[dict]:
+    """네이버가 제공하는 전체 태그(큐레이션) 카탈로그. [{"tag_id": "134", "tag_name": "먼치킨"}, ...]"""
+    try:
+        async with session.get(
+            NAVER_TAG_SHORTCUT_URL,
+            headers=DEFAULT_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+        ) as response:
+            if response.status != 200:
+                log.error("태그 카탈로그 조회 실패: HTTP %s", response.status)
+                return []
+            data = await response.json()
+    except Exception as e:
+        log.error("태그 카탈로그 조회 예외: %s", e)
+        return []
+
+    return [
+        {"tag_id": str(item["id"]), "tag_name": item.get("text", item.get("name", ""))}
+        for item in data.get("tagItemList") or []
+        if item.get("type") == "CUSTOM_TAG" and item.get("id") is not None
+    ]
+
+
 async def fetch_other_titles_by_artist(
     session: aiohttp.ClientSession, title_id: str, timeout_seconds: int
 ) -> list[dict]:

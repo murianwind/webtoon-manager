@@ -351,3 +351,46 @@ button:hover { border-color: var(--accent); }
 #manual-table th { background: #fafafa; color: var(--muted); font-weight: 600; }
 #manual-table tr:last-child td { border-bottom: none; }
 
+.webtoon-grid.small {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  margin-bottom: 16px;
+}
+
+.registry-subheading {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 16px 0 8px;
+}
+
+.registry-row .registry-meta {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* 디스코드 설정: 라벨 위 입력창 아래로 세로 정렬, 필드마다 줄바꿈 */
+.discord-form-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 480px;
+  margin-bottom: 14px;
+}
+.discord-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text);
+}
+.discord-form-grid input {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+}
+.discord-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
