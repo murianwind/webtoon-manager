@@ -161,8 +161,11 @@ class NaverListEntryIn(BaseModel):
 @router.get("/naver-list")
 async def browse_naver_list():
     settings = get_settings()
-    async with aiohttp.ClientSession() as session:
-        items = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
+    try:
+        async with aiohttp.ClientSession() as session:
+            items = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
+    except naver_api.NaverApiError as e:
+        raise HTTPException(status_code=502, detail=f"네이버 웹툰 목록을 불러오지 못했습니다: {e}")
 
     existing = await asyncio.to_thread(repository.list_all)
     existing_by_id = {w.title_id: w for w in existing}
@@ -371,8 +374,11 @@ async def remove_watched_tag(tag_id: str):
 async def get_tag_catalog():
     """네이버가 제공하는 전체 태그 목록 (이름으로 골라서 등록할 때 사용)."""
     settings = get_settings()
-    async with aiohttp.ClientSession() as session:
-        return await naver_api.fetch_tag_catalog(session, settings.request_timeout_seconds)
+    try:
+        async with aiohttp.ClientSession() as session:
+            return await naver_api.fetch_tag_catalog(session, settings.request_timeout_seconds)
+    except naver_api.NaverApiError as e:
+        raise HTTPException(status_code=502, detail=f"태그 카탈로그를 불러오지 못했습니다: {e}")
 
 
 @router.get("/authors/candidates")
@@ -380,8 +386,11 @@ async def list_author_candidates():
     """네이버엔 전체 작가 목록 API가 없어서, 요일별 전체목록의 저자 텍스트에서
     후보 이름들을 뽑아 보여준다 (둘러보기용 — 실제 등록은 이름 검색으로 id를 확정)."""
     settings = get_settings()
-    async with aiohttp.ClientSession() as session:
-        items = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
+    try:
+        async with aiohttp.ClientSession() as session:
+            items = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
+    except naver_api.NaverApiError as e:
+        raise HTTPException(status_code=502, detail=f"작가 후보 목록을 불러오지 못했습니다: {e}")
     return naver_api.extract_candidate_author_names(items)
 
 

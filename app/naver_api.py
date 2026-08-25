@@ -201,12 +201,12 @@ async def fetch_full_webtoon_list(
             timeout=aiohttp.ClientTimeout(total=timeout_seconds),
         ) as response:
             if response.status != 200:
-                log.error("요일별 전체 목록 조회 실패: HTTP %s", response.status)
-                return []
+                raise NaverApiError(f"요일별 전체 목록 조회 실패: HTTP {response.status}")
             data = await response.json()
+    except NaverApiError:
+        raise
     except Exception as e:
-        log.error("요일별 전체 목록 조회 예외: %s", e)
-        return []
+        raise NaverApiError(f"요일별 전체 목록 조회 예외: {e}") from e
 
     title_list_map = data.get("titleListMap") or {}
     merged: dict[str, NaverListItem] = {}
@@ -249,12 +249,12 @@ async def fetch_tag_catalog(
             timeout=aiohttp.ClientTimeout(total=timeout_seconds),
         ) as response:
             if response.status != 200:
-                log.error("태그 카탈로그 조회 실패: HTTP %s", response.status)
-                return []
+                raise NaverApiError(f"태그 카탈로그 조회 실패: HTTP {response.status}")
             data = await response.json()
+    except NaverApiError:
+        raise
     except Exception as e:
-        log.error("태그 카탈로그 조회 예외: %s", e)
-        return []
+        raise NaverApiError(f"태그 카탈로그 조회 예외: {e}") from e
 
     return [
         {"tag_id": str(item["id"]), "tag_name": item.get("text", item.get("name", ""))}

@@ -573,15 +573,16 @@ async function loadAuthorList() {
     document.getElementById("author-interested-list").innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
     return;
   }
+  let candidateError = "";
   if (authorCandidateNamesCache.length === 0) {
     try {
       authorCandidateNamesCache = await apiCall("/api/authors/candidates");
     } catch (e) {
-      // 후보 목록은 참고용이라 실패해도 나머지 기능엔 지장 없음
+      candidateError = e.message; // 조용히 삼키지 않고 전체 목록 영역에 실제 이유를 보여준다
     }
   }
   renderInterestedAuthors();
-  renderAllAuthors();
+  renderAllAuthors(candidateError);
 }
 
 function renderInterestedAuthors() {
@@ -606,10 +607,14 @@ function renderInterestedAuthors() {
   }
 }
 
-function renderAllAuthors() {
+function renderAllAuthors(candidateError) {
   const container = document.getElementById("author-all-list");
   const query = document.getElementById("author-candidate-filter").value.trim().toLowerCase();
   container.innerHTML = "";
+
+  if (candidateError) {
+    container.innerHTML = `<p class="error">작가 후보 목록을 못 가져왔습니다: ${escapeHtml(candidateError)}</p>`;
+  }
 
   // 1) 이미 등록됐지만 꺼둔 작가 (author_id 확정됨 — 바로 추가 가능)
   const disabled = watchedAuthorsCache.filter((a) => !a.enabled);
@@ -647,7 +652,7 @@ function renderAllAuthors() {
   }
 }
 
-document.getElementById("author-candidate-filter").addEventListener("input", renderAllAuthors);
+document.getElementById("author-candidate-filter").addEventListener("input", () => renderAllAuthors());
 
 document.getElementById("btn-add-author").addEventListener("click", async () => {
   const authorId = document.getElementById("add-author-id").value.trim();
