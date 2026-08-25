@@ -156,6 +156,15 @@ async def run_discovery_job() -> None:
 
     async with aiohttp.ClientSession() as session:
         try:
+            job_status.log_line("discovery", "썸네일 없는 웹툰 채우는 중")
+            filled = await tracker.backfill_missing_thumbnails(session, settings)
+            job_status.log_line("discovery", f"썸네일 {filled}개 채움")
+        except Exception as e:
+            had_error = True
+            log.error("썸네일 백필 중 예외: %s", e)
+            job_status.log_line("discovery", f"썸네일 백필 오류: {e}")
+
+        try:
             job_status.log_line("discovery", "작가 기반 신작 스캔 시작")
             await tracker.scan_subscriptions_for_updates(session, settings)
             job_status.log_line("discovery", "작가 기반 신작 스캔 완료")

@@ -59,6 +59,42 @@ async def _is_other_finished(
     return bool(info and info.is_finished)
 
 
+async def backfill_missing_thumbnails(session: aiohttp.ClientSession, settings: Settings) -> int:
+    """
+    상태(구독중/구독해제/제외됨)와 무관하게, 썸네일 URL이 아직 없는 모든 웹툰의
+    썸네일을 채운다. 신작 자동추가 같은 부수효과는 없이 정보 조회만 한다 —
+    그래서 목록제외된 웹툰도 여기서는 대상에 포함된다 (원래 신작 스캔은 구독중만
+    보기 때문에 제외된 웹툰은 이 백필이 없으면 썸네일을 영영 못 채운다).
+    """
+    targets = [wt for wt in repository.list_all() if not wt.thumbnail_url]
+    if not targets:
+        return 0
+
+    semaphore = asyncio.Semaphore(_ARTIST_SCAN_CONCURRENCY)
+
+    async def _fetch_one(title_id: str) -> tuple[str, TitleInfo | None]:
+        async with semaphore:
+            try:
+                info = await naver_api.fetch_title_info(session, title_id, settings.request_timeout_seconds)
+                await asyncio.sleep(settings.delay_seconds)
+                return title_id, info
+            except Exception as e:
+                log.error("썸네일 백필 중 예외 (titleId=%s): %s", title_id, e)
+                return title_id, None
+
+    results = await asyncio.gather(*(_fetch_one(wt.title_id) for wt in targets))
+
+    filled = 0
+    for title_id, info in results:
+        if info is None or not info.thumbnail_url:
+            continue
+        repository.update_thumbnail_url(title_id, info.thumbnail_url)
+        repository.update_is_adult(title_id, info.is_adult)
+        filled += 1
+
+    return filled
+
+
 async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, settings: Settings) -> None:
     """구독 중인(status=active) 모든 웹툰의 완결 여부 갱신 + 작가 신작 자동추가."""
     active_webtoons = repository.list_by_status(repository.STATUS_ACTIVE)
