@@ -17,7 +17,7 @@ import logging
 
 import aiohttp
 
-from app import naver_api, repository
+from app import job_status, naver_api, repository
 from app.config import Settings
 from app.discord_notify import send_webhook_notification
 from app.models import TitleInfo
@@ -126,26 +126,36 @@ async def backfill_missing_thumbnails(session: aiohttp.ClientSession, settings: 
     return filled
 
 
-async def enrich_one(session: aiohttp.ClientSession, title_id: str, settings: Settings) -> None:
+async def enrich_one(session: aiohttp.ClientSession, title_id: str, settings: Settings) -> tuple[bool, str]:
     """
-    구독(또는 목록제외) 직후 백그라운드에서 즉시 실행 — 정기 스캔을 기다리지 않고
-    바로 정보(썸네일/장르/태그/휴재/작가)를 채우고 작가를 레지스트리에 등록한다.
-    등록된 작가 목록이 "다음 스캔까지" 비어있는 것처럼 보이는 문제를 없앤다.
+    구독(또는 목록제외) 직후, 혹은 재동기화 때 실행 — 정보(썸네일/장르/태그/휴재/작가)를
+    채우고 작가를 레지스트리에 등록한다. (성공 여부, 사람이 읽을 결과 메시지)를 반환한다 —
+    예전엔 정보 조회 실패를 그냥 조용히 넘어가서 "재동기화는 성공했다는데 왜 목록이
+    비어있지?"를 진단할 방법이 없었다.
     """
     try:
         info = await naver_api.fetch_title_info(session, title_id, settings.request_timeout_seconds)
-        if info is None:
-            return
-        repository.update_is_adult(title_id, info.is_adult)
-        repository.update_thumbnail_url(title_id, info.thumbnail_url)
-        repository.update_genres_and_tags(title_id, info.genres, info.tags)
-        repository.update_is_paused(title_id, info.is_paused)
-        if info.writer_ids:
-            repository.update_writer_ids(title_id, sorted(info.writer_ids))
-        for writer_id, writer_name in info.writer_id_name_pairs:
-            repository.upsert_watched_author(writer_id, writer_name, enabled=True)
     except Exception as e:
-        log.error("즉시 정보 보강 중 예외 (titleId=%s): %s", title_id, e)
+        return False, f"정보 조회 예외: {e}"
+
+    if info is None:
+        return False, "정보 조회 실패 (네이버 API 응답 없음/오류)"
+
+    repository.update_is_adult(title_id, info.is_adult)
+    repository.update_thumbnail_url(title_id, info.thumbnail_url)
+    repository.update_genres_and_tags(title_id, info.genres, info.tags)
+    repository.update_is_paused(title_id, info.is_paused)
+    if info.writer_ids:
+        repository.update_writer_ids(title_id, sorted(info.writer_ids))
+
+    registered_names = []
+    for writer_id, writer_name in info.writer_id_name_pairs:
+        repository.upsert_watched_author(writer_id, writer_name, enabled=True)
+        registered_names.append(writer_name or writer_id)
+
+    if registered_names:
+        return True, f"작가 등록: {', '.join(registered_names)}"
+    return True, "작가 정보 없음 (API 응답에 작가 필드가 비어있음)"
 
 
 async def resync_registry(session: aiohttp.ClientSession, settings: Settings) -> int:
@@ -154,25 +164,29 @@ async def resync_registry(session: aiohttp.ClientSession, settings: Settings) ->
     채운다. enrich_one은 구독하는 "그 순간"에만 동작하는데, 그 기능이 생기기 전에
     이미 구독해뒀던 웹툰들은 정기 스캔이 돌기 전까지 계속 비어있는 문제가 있어서
     — 설정 페이지에서 사용자가 바로 눌러서 즉시 채울 수 있게 하는 수동 트리거다.
+
+    각 웹툰의 처리 결과(성공/실패 이유)를 job_status 로그에 남겨서, "재동기화는
+    끝났다는데 왜 목록이 비었지?"를 실행 이력에서 바로 진단할 수 있게 한다.
     """
     targets = [wt for wt in repository.list_all() if wt.status != repository.STATUS_EXCLUDED]
     if not targets:
+        job_status.log_line("registry", "재동기화 대상 웹툰이 없습니다 (구독중/구독해제된 것이 없음)")
         return 0
 
     semaphore = asyncio.Semaphore(_ARTIST_SCAN_CONCURRENCY)
+    registered_count = 0
 
-    async def _run_one(title_id: str) -> bool:
+    async def _run_one(wt) -> bool:
+        nonlocal registered_count
         async with semaphore:
-            try:
-                await enrich_one(session, title_id, settings)
-                await asyncio.sleep(settings.delay_seconds)
-                return True
-            except Exception as e:
-                log.error("레지스트리 재동기화 중 예외 (titleId=%s): %s", title_id, e)
-                return False
+            success, message = await enrich_one(session, wt.title_id, settings)
+            job_status.log_line("registry", f"[{wt.title}] {message}")
+            await asyncio.sleep(settings.delay_seconds)
+            return success and message.startswith("작가 등록")
 
-    results = await asyncio.gather(*(_run_one(wt.title_id) for wt in targets))
-    return sum(1 for r in results if r)
+    results = await asyncio.gather(*(_run_one(wt) for wt in targets))
+    registered_count = sum(1 for r in results if r)
+    return registered_count
 
 
 async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, settings: Settings) -> None:

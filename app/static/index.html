@@ -105,33 +105,43 @@
     <div class="settings-card">
       <h2>작가</h2>
       <div class="registry-add-row">
-        <input id="author-search-input" type="text" placeholder="작가 이름으로 정확히 검색" />
+        <input id="author-search-input" type="text" placeholder="작가 이름으로 정확히 검색해서 등록" />
         <button id="btn-search-author">검색</button>
       </div>
       <div id="author-search-results" class="registry-list"></div>
 
-      <h3 class="registry-subheading">네이버 연재중 작품에서 뽑은 작가 이름 후보 (클릭해서 검색·등록)</h3>
-      <input id="author-candidate-filter" type="text" placeholder="후보 목록 안에서 좁혀보기" />
-      <div id="author-candidates" class="registry-list registry-list-scroll"></div>
+      <div class="registry-columns">
+        <div class="registry-column">
+          <h3>관심있는 작가</h3>
+          <div id="author-interested-list" class="registry-list registry-list-scroll"></div>
+        </div>
+        <div class="registry-column">
+          <h3>전체 작가 목록</h3>
+          <input id="author-candidate-filter" type="text" placeholder="이름으로 좁혀보기" />
+          <div id="author-all-list" class="registry-list registry-list-scroll"></div>
+        </div>
+      </div>
 
-      <h3 class="registry-subheading">등록된/발견된 작가 전체</h3>
       <div class="registry-add-row">
         <input id="add-author-id" type="text" placeholder="author_id (직접 등록)" />
         <input id="add-author-name" type="text" placeholder="이름(선택)" />
         <button id="btn-add-author">직접 추가</button>
       </div>
-      <div id="author-list" class="registry-list"></div>
     </div>
 
     <div class="settings-card">
       <h2>태그</h2>
-      <div class="registry-add-row">
-        <input id="tag-catalog-search" type="text" placeholder="태그 이름으로 좁혀보기 (비우면 전체 표시)" />
+      <div class="registry-columns">
+        <div class="registry-column">
+          <h3>등록된 태그</h3>
+          <div id="tag-registered-list" class="registry-list registry-list-scroll"></div>
+        </div>
+        <div class="registry-column">
+          <h3>전체 태그 목록</h3>
+          <input id="tag-catalog-search" type="text" placeholder="이름으로 좁혀보기" />
+          <div id="tag-all-list" class="registry-list registry-list-scroll"></div>
+        </div>
       </div>
-      <div id="tag-catalog-results" class="registry-list registry-list-scroll"></div>
-
-      <h3 class="registry-subheading">등록된 태그</h3>
-      <div id="tag-list" class="registry-list"></div>
     </div>
   </section>
 
