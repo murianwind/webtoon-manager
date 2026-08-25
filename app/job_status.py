@@ -1,9 +1,10 @@
 """
-잡(discovery/download/commands) 진행 상황을 메모리에 잠깐 보관한다.
+잡(discovery/download/manual/registry) 진행 상황을 메모리에 잠깐 보관한다 — 실시간
+폴링(설정 페이지가 2초마다 조회)용이라 컨테이너 재시작하면 사라져도 무방하다.
 
-DB에 넣지 않는 이유: 이건 "지금 이 컨테이너가 뭘 하고 있는지"를 보여주는
-운영 상태일 뿐 영속시킬 필요가 없는 값이라, 컨테이너 재시작하면 사라져도
-무방하다 (오히려 재시작 후에도 지난 로그가 남아있는 게 더 헷갈린다).
+실행이 끝나면(finish) 그 실행의 결과(성공/실패 + 로그 전체)를 repository의
+job_history 테이블에도 남긴다 — 스케줄대로 자동 실행된 잡이 실제로 돌았는지,
+성공했는지를 나중에(설정 페이지를 안 보고 있었어도) 확인할 수 있어야 하기 때문이다.
 """
 
 import threading
@@ -56,6 +57,16 @@ def finish(job_name: str, success: bool) -> None:
         st = _statuses[job_name]
         st.status = "success" if success else "error"
         st.finished_at = _now()
+        started_at, finished_at, log_copy = st.started_at, st.finished_at, list(st.log)
+
+    # DB 쓰기는 락 밖에서 — repository의 write_transaction이 자체적으로 직렬화하므로
+    # job_status의 락을 오래 붙잡을 필요가 없다.
+    from app import repository  # 순환 import 방지용 지연 import
+
+    try:
+        repository.add_job_history(job_name, started_at or finished_at, finished_at, st.status, log_copy)
+    except Exception:
+        pass  # 이력 저장 실패가 잡 자체의 실행 결과에 영향을 주면 안 됨
 
 
 def snapshot() -> dict:

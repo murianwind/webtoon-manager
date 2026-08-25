@@ -324,6 +324,52 @@ def get_enabled_tag_ids() -> list[str]:
     return [r["tag_id"] for r in rows]
 
 
+# ── job_history (스케줄 실행 이력) ───────────────────────────────
+
+_JOB_HISTORY_KEEP_PER_JOB = 30
+
+
+def add_job_history(job_name: str, started_at: str, finished_at: str, status: str, log: list[str]) -> None:
+    with write_transaction() as conn:
+        conn.execute(
+            "INSERT INTO job_history (job_name, started_at, finished_at, status, log) VALUES (?, ?, ?, ?, ?)",
+            (job_name, started_at, finished_at, status, json.dumps(log)),
+        )
+        # 잡마다 최근 N개만 남기고 오래된 이력은 정리한다.
+        conn.execute(
+            """
+            DELETE FROM job_history
+            WHERE job_name = ? AND id NOT IN (
+                SELECT id FROM job_history WHERE job_name = ? ORDER BY started_at DESC LIMIT ?
+            )
+            """,
+            (job_name, job_name, _JOB_HISTORY_KEEP_PER_JOB),
+        )
+
+
+def list_job_history(limit_per_job: int = 10) -> list[dict]:
+    conn = get_connection()
+    job_names = [r["job_name"] for r in conn.execute("SELECT DISTINCT job_name FROM job_history").fetchall()]
+    results: list[dict] = []
+    for job_name in job_names:
+        rows = conn.execute(
+            "SELECT * FROM job_history WHERE job_name = ? ORDER BY started_at DESC LIMIT ?",
+            (job_name, limit_per_job),
+        ).fetchall()
+        for r in rows:
+            results.append(
+                {
+                    "job_name": r["job_name"],
+                    "started_at": r["started_at"],
+                    "finished_at": r["finished_at"],
+                    "status": r["status"],
+                    "log": json.loads(r["log"] or "[]"),
+                }
+            )
+    results.sort(key=lambda r: r["started_at"], reverse=True)
+    return results
+
+
 # ── 백업/복원 ───────────────────────────────────────────────────────
 
 _SECRET_SETTING_KEYS = {"discord_webhook_url", "discord_bot_token", "discord_notify_channel_id"}

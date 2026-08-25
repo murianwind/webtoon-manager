@@ -105,10 +105,14 @@
     <div class="settings-card">
       <h2>작가</h2>
       <div class="registry-add-row">
-        <input id="author-search-input" type="text" placeholder="작가 이름으로 검색" />
+        <input id="author-search-input" type="text" placeholder="작가 이름으로 정확히 검색" />
         <button id="btn-search-author">검색</button>
       </div>
       <div id="author-search-results" class="registry-list"></div>
+
+      <h3 class="registry-subheading">네이버 연재중 작품에서 뽑은 작가 이름 후보 (클릭해서 검색·등록)</h3>
+      <input id="author-candidate-filter" type="text" placeholder="후보 목록 안에서 좁혀보기" />
+      <div id="author-candidates" class="registry-list registry-list-scroll"></div>
 
       <h3 class="registry-subheading">등록된/발견된 작가 전체</h3>
       <div class="registry-add-row">
@@ -122,9 +126,9 @@
     <div class="settings-card">
       <h2>태그</h2>
       <div class="registry-add-row">
-        <input id="tag-catalog-search" type="text" placeholder="태그 이름으로 찾기" />
+        <input id="tag-catalog-search" type="text" placeholder="태그 이름으로 좁혀보기 (비우면 전체 표시)" />
       </div>
-      <div id="tag-catalog-results" class="registry-list"></div>
+      <div id="tag-catalog-results" class="registry-list registry-list-scroll"></div>
 
       <h3 class="registry-subheading">등록된 태그</h3>
       <div id="tag-list" class="registry-list"></div>
@@ -194,6 +198,13 @@
         <h3>다운로드 상태 <span id="download-status-badge" class="badge">idle</span></h3>
         <div id="download-log" class="job-log"></div>
       </div>
+    </div>
+
+    <div class="settings-card">
+      <h2>실행 이력</h2>
+      <p class="hint">스케줄에 따라 자동으로 실행된 작업이 실제로 돌았는지/성공했는지 확인할 수 있습니다.</p>
+      <button id="btn-refresh-history">새로고침</button>
+      <div id="job-history-list" class="job-history-list"></div>
     </div>
   </section>
 

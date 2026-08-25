@@ -55,6 +55,16 @@ CREATE TABLE IF NOT EXISTS watched_tags (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS job_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_name TEXT NOT NULL,       -- discovery | download | manual | registry
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL,
+    status TEXT NOT NULL,         -- success | error
+    log TEXT NOT NULL DEFAULT '[]'  -- JSON 배열 (그 실행의 로그 라인들)
+);
+CREATE INDEX IF NOT EXISTS idx_job_history_job_name ON job_history(job_name, started_at DESC);
 """
 
 # 기존에 이미 만들어진 DB(위 스키마에 없던 컬럼이 있던 버전)를 위한 마이그레이션.

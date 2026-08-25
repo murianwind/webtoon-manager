@@ -375,6 +375,16 @@ async def get_tag_catalog():
         return await naver_api.fetch_tag_catalog(session, settings.request_timeout_seconds)
 
 
+@router.get("/authors/candidates")
+async def list_author_candidates():
+    """네이버엔 전체 작가 목록 API가 없어서, 요일별 전체목록의 저자 텍스트에서
+    후보 이름들을 뽑아 보여준다 (둘러보기용 — 실제 등록은 이름 검색으로 id를 확정)."""
+    settings = get_settings()
+    async with aiohttp.ClientSession() as session:
+        items = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
+    return naver_api.extract_candidate_author_names(items)
+
+
 @router.get("/authors/search")
 async def search_authors(name: str):
     """작가 이름으로 검색 — 네이버 통합검색으로 실제 author_id를 알아낸다."""
@@ -619,6 +629,12 @@ async def restore_backup(data: dict):
 @router.get("/jobs/status")
 async def jobs_status():
     return await asyncio.to_thread(job_status.snapshot)
+
+
+@router.get("/jobs/history")
+async def jobs_history(limit_per_job: int = 10):
+    """스케줄대로 자동 실행된 잡이 실제로 돌았는지/성공했는지 나중에 확인할 수 있는 이력."""
+    return await asyncio.to_thread(repository.list_job_history, limit_per_job)
 
 
 @router.post("/jobs/discovery/run")

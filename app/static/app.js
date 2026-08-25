@@ -483,8 +483,9 @@ let registryPollTimer = null;
 async function loadRegistryPage() {
   loadAuthorList();
   loadTagList();
+  loadAuthorCandidates();
+  loadTagCatalogAll();
   document.getElementById("author-search-results").innerHTML = "";
-  document.getElementById("tag-catalog-results").innerHTML = "";
   await refreshRegistryResyncStatus();
 }
 
@@ -610,32 +611,79 @@ async function ensureTagCatalog() {
   return tagCatalogCache;
 }
 
-document.getElementById("tag-catalog-search").addEventListener("input", async (e) => {
-  const query = e.target.value.trim().toLowerCase();
+function renderTagCatalogResults(tags) {
   const resultsEl = document.getElementById("tag-catalog-results");
-  if (!query) {
-    resultsEl.innerHTML = "";
-    return;
+  resultsEl.innerHTML = "";
+  for (const t of tags) {
+    const row = document.createElement("div");
+    row.className = "registry-row";
+    row.innerHTML = `<span>${escapeHtml(t.tag_name)}</span>`;
+    row.appendChild(
+      makeButton("추가", async () => {
+        await apiCall("/api/watched-tags", { method: "POST", body: JSON.stringify({ tag_id: t.tag_id, tag_name: t.tag_name }) });
+        loadTagList();
+      })
+    );
+    resultsEl.appendChild(row);
   }
+}
+
+async function loadTagCatalogAll() {
+  const resultsEl = document.getElementById("tag-catalog-results");
+  resultsEl.innerHTML = "<p>불러오는 중...</p>";
   try {
     const catalog = await ensureTagCatalog();
-    const matches = catalog.filter((t) => t.tag_name.toLowerCase().includes(query)).slice(0, 20);
-    resultsEl.innerHTML = "";
-    for (const t of matches) {
-      const row = document.createElement("div");
-      row.className = "registry-row";
-      row.innerHTML = `<span>${escapeHtml(t.tag_name)}</span>`;
-      row.appendChild(
-        makeButton("추가", async () => {
-          await apiCall("/api/watched-tags", { method: "POST", body: JSON.stringify({ tag_id: t.tag_id, tag_name: t.tag_name }) });
-          loadTagList();
-        })
-      );
-      resultsEl.appendChild(row);
-    }
+    renderTagCatalogResults(catalog);
   } catch (e) {
     resultsEl.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
   }
+}
+
+document.getElementById("tag-catalog-search").addEventListener("input", async (e) => {
+  const query = e.target.value.trim().toLowerCase();
+  try {
+    const catalog = await ensureTagCatalog();
+    const matches = query ? catalog.filter((t) => t.tag_name.toLowerCase().includes(query)) : catalog;
+    renderTagCatalogResults(matches);
+  } catch (e2) {
+    document.getElementById("tag-catalog-results").innerHTML = `<p class="error">${escapeHtml(e2.message)}</p>`;
+  }
+});
+
+let authorCandidateCache = [];
+
+async function loadAuthorCandidates() {
+  const container = document.getElementById("author-candidates");
+  container.innerHTML = "<p>불러오는 중...</p>";
+  try {
+    authorCandidateCache = await apiCall("/api/authors/candidates");
+    renderAuthorCandidates(authorCandidateCache);
+  } catch (e) {
+    container.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+  }
+}
+
+function renderAuthorCandidates(names) {
+  const container = document.getElementById("author-candidates");
+  container.innerHTML = "";
+  for (const name of names) {
+    const row = document.createElement("div");
+    row.className = "registry-row";
+    row.innerHTML = `<span>${escapeHtml(name)}</span>`;
+    row.appendChild(
+      makeButton("검색·등록", () => {
+        document.getElementById("author-search-input").value = name;
+        document.getElementById("btn-search-author").click();
+      })
+    );
+    container.appendChild(row);
+  }
+}
+
+document.getElementById("author-candidate-filter").addEventListener("input", (e) => {
+  const query = e.target.value.trim().toLowerCase();
+  const filtered = query ? authorCandidateCache.filter((n) => n.toLowerCase().includes(query)) : authorCandidateCache;
+  renderAuthorCandidates(filtered);
 });
 
 async function loadTagList() {
@@ -854,9 +902,66 @@ async function loadSettingsPage() {
     document.getElementById("settings-save-result").textContent = e.message;
   }
   loadDiscordSettings();
+  loadJobHistory();
   await refreshJobStatus();
   startJobPolling();
 }
+
+const JOB_NAME_LABEL = { discovery: "신작 스캔", download: "다운로드", manual: "수동 다운로드", registry: "작가/태그 재동기화" };
+
+async function loadJobHistory() {
+  const container = document.getElementById("job-history-list");
+  container.innerHTML = "<p>불러오는 중...</p>";
+  try {
+    const history = await apiCall("/api/jobs/history");
+    container.innerHTML = "";
+    if (history.length === 0) {
+      container.innerHTML = "<p>아직 실행된 기록이 없습니다.</p>";
+      return;
+    }
+    for (const entry of history) {
+      const wrap = document.createElement("div");
+      wrap.className = "job-history-entry";
+
+      const startedLabel = entry.started_at && entry.started_at.length >= 19 ? entry.started_at.slice(0, 19).replace("T", " ") : entry.started_at;
+      const summary = document.createElement("div");
+      summary.className = "job-history-summary";
+      summary.innerHTML = `
+        <span class="job-history-name">${escapeHtml(JOB_NAME_LABEL[entry.job_name] || entry.job_name)}</span>
+        <span class="job-history-time">${escapeHtml(startedLabel || "")}</span>
+        <span class="badge job-${entry.status}">${entry.status}</span>
+      `;
+
+      const logEl = document.createElement("div");
+      logEl.className = "job-log";
+
+      summary.addEventListener("click", () => {
+        wrap.classList.toggle("expanded");
+        if (wrap.classList.contains("expanded") && !logEl.dataset.rendered) {
+          logEl.innerHTML = entry.log
+            .map((line) => {
+              const sep = line.indexOf(" — ");
+              const ts = sep >= 0 ? line.slice(0, sep) : "";
+              const msg = sep >= 0 ? line.slice(sep + 3) : line;
+              const timeLabel = ts.length >= 19 ? ts.slice(11, 19) : ts;
+              const isError = /오류|실패/.test(msg);
+              return `<div class="log-line${isError ? " log-error" : ""}"><span class="log-time">${escapeHtml(timeLabel)}</span>${escapeHtml(msg)}</div>`;
+            })
+            .join("");
+          logEl.dataset.rendered = "true";
+        }
+      });
+
+      wrap.appendChild(summary);
+      wrap.appendChild(logEl);
+      container.appendChild(wrap);
+    }
+  } catch (e) {
+    container.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+  }
+}
+
+document.getElementById("btn-refresh-history").addEventListener("click", loadJobHistory);
 
 document.getElementById("btn-run-discovery").addEventListener("click", async () => {
   await apiCall("/api/jobs/discovery/run", { method: "POST" });
