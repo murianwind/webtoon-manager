@@ -166,9 +166,11 @@ async def browse_naver_list():
 
     existing = await asyncio.to_thread(repository.list_all)
     existing_by_id = {w.title_id: w for w in existing}
+    seen_ids: set[str] = set()
 
     result = []
     for item in items:
+        seen_ids.add(item.title_id)
         tracked = existing_by_id.get(item.title_id)
         result.append(
             {
@@ -186,6 +188,30 @@ async def browse_naver_list():
                 "has_new_episode": item.has_update,
             }
         )
+
+    # 네이버의 요일별 목록 API는 장기 휴재작을 응답에서 아예 빼버린다. 그래서 위 루프만
+    # 돌면 이미 추적 중인(구독중/구독해제) 웹툰이 화면에서 통째로 사라질 수 있다 —
+    # DB에만 남아있는 건 우리가 갖고 있는 정보로 채워서라도 계속 보이게 한다.
+    for wt in existing:
+        if wt.title_id in seen_ids or wt.status == repository.STATUS_EXCLUDED:
+            continue
+        result.append(
+            {
+                "title_id": wt.title_id,
+                "title": wt.title,
+                "thumbnail_url": wt.thumbnail_url,
+                "weekdays": [],
+                "is_finished": wt.is_finished,
+                "is_paused": wt.is_paused,
+                "is_adult": wt.is_adult,
+                "author_summary": "",
+                "status": wt.status,
+                "genres": wt.genres,
+                "tags": wt.tags,
+                "has_new_episode": wt.latest_episode_no > wt.last_downloaded_no > 0,
+            }
+        )
+
     return result
 
 
