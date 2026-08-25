@@ -67,6 +67,7 @@ document.querySelectorAll(".main-tab").forEach((tab) => {
     const page = tab.dataset.page;
     document.getElementById(`page-${page}`).classList.remove("hidden");
     stopJobPolling();
+    stopRegistryPolling();
     pageLoaders[page]?.();
   });
 });
@@ -477,11 +478,56 @@ async function refreshManualStatus() {
 
 // ── 작가/태그 관리 (별도 페이지) ───────────────────────────
 
+let registryPollTimer = null;
+
 async function loadRegistryPage() {
   loadAuthorList();
   loadTagList();
   document.getElementById("author-search-results").innerHTML = "";
   document.getElementById("tag-catalog-results").innerHTML = "";
+  await refreshRegistryResyncStatus();
+}
+
+document.getElementById("btn-resync-registry").addEventListener("click", async () => {
+  await apiCall("/api/registry/resync", { method: "POST" });
+  startRegistryPolling();
+});
+
+async function refreshRegistryResyncStatus() {
+  let statuses;
+  try {
+    statuses = await apiCall("/api/jobs/status");
+  } catch (e) {
+    return;
+  }
+  const st = statuses.registry;
+  const statusEl = document.getElementById("registry-resync-status");
+  if (!st) return;
+  if (st.status === "running") {
+    statusEl.textContent = "재동기화 중...";
+  } else if (st.status === "success") {
+    statusEl.textContent = "완료됨";
+    loadAuthorList();
+    loadTagList();
+    stopRegistryPolling();
+  } else if (st.status === "error") {
+    statusEl.textContent = "오류 발생 (설정 탭 로그 참고)";
+    stopRegistryPolling();
+  } else {
+    statusEl.textContent = "";
+  }
+}
+
+function startRegistryPolling() {
+  stopRegistryPolling();
+  refreshRegistryResyncStatus();
+  registryPollTimer = setInterval(refreshRegistryResyncStatus, 2000);
+}
+function stopRegistryPolling() {
+  if (registryPollTimer) {
+    clearInterval(registryPollTimer);
+    registryPollTimer = null;
+  }
 }
 
 document.getElementById("btn-search-author").addEventListener("click", async () => {
@@ -695,31 +741,47 @@ document.getElementById("btn-save-settings").addEventListener("click", async () 
 
 // ── 설정: 디스코드 ───────────────────────────────────────
 
+const BOT_TOKEN_MASK = "••••••••••••••••";
+
 async function loadDiscordSettings() {
   try {
     const s = await apiCall("/api/settings/discord");
     document.getElementById("discord-webhook-url").value = s.webhook_url;
     document.getElementById("discord-channel-id").value = s.notify_channel_id;
-    document.getElementById("discord-bot-token").placeholder = s.bot_token_set ? "설정됨 (변경하려면 입력)" : "미설정";
+
+    const tokenInput = document.getElementById("discord-bot-token");
+    tokenInput.value = s.bot_token_set ? BOT_TOKEN_MASK : "";
+    tokenInput.dataset.masked = s.bot_token_set ? "true" : "false";
+
     document.getElementById("discord-bot-status").textContent = s.bot_ready ? "🟢 봇 연결됨" : "⚪ 봇 연결 안 됨";
   } catch (e) {
     document.getElementById("discord-save-result").textContent = e.message;
   }
 }
 
+document.getElementById("discord-bot-token").addEventListener("focus", (e) => {
+  if (e.target.dataset.masked === "true") {
+    e.target.value = "";
+    e.target.dataset.masked = "false";
+  }
+});
+
 document.getElementById("btn-save-discord").addEventListener("click", async () => {
   const resultEl = document.getElementById("discord-save-result");
   resultEl.textContent = "";
   try {
+    const tokenInput = document.getElementById("discord-bot-token");
+    const rawToken = tokenInput.value.trim();
+    const tokenToSend = rawToken === BOT_TOKEN_MASK ? "" : rawToken; // 마스킹 그대로면 "안 바꿈"
+
     await apiCall("/api/settings/discord", {
       method: "POST",
       body: JSON.stringify({
         webhook_url: document.getElementById("discord-webhook-url").value.trim(),
-        bot_token: document.getElementById("discord-bot-token").value.trim(),
+        bot_token: tokenToSend,
         notify_channel_id: document.getElementById("discord-channel-id").value.trim(),
       }),
     });
-    document.getElementById("discord-bot-token").value = "";
     resultEl.style.color = "";
     resultEl.textContent = "저장했습니다. 봇을 재연결하는 중입니다 (몇 초 걸릴 수 있음).";
     setTimeout(loadDiscordSettings, 3000);

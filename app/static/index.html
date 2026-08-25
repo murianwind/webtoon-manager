@@ -95,6 +95,14 @@
   <!-- 작가/태그 관리 -->
   <section id="page-registry" class="page hidden">
     <div class="settings-card">
+      <div class="registry-resync-row">
+        <button id="btn-resync-registry">지금 전체 재동기화</button>
+        <span id="registry-resync-status" class="hint-inline"></span>
+      </div>
+      <p class="hint">구독중/구독해제된 웹툰을 전부 훑어서 작가/태그를 다시 채웁니다. 목록이 비어있을 때 눌러주세요.</p>
+    </div>
+
+    <div class="settings-card">
       <h2>작가</h2>
       <div class="registry-add-row">
         <input id="author-search-input" type="text" placeholder="작가 이름으로 검색" />

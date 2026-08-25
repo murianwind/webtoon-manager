@@ -377,12 +377,32 @@ async def get_tag_catalog():
 
 @router.get("/authors/search")
 async def search_authors(name: str):
-    """작가 이름으로 검색 — 네이버 전체목록에서 이름이 포함된 작품을 찾아 실제 author_id를 알아낸다."""
+    """작가 이름으로 검색 — 네이버 통합검색으로 실제 author_id를 알아낸다."""
     if not name.strip():
         raise HTTPException(status_code=400, detail="검색할 이름을 입력해주세요.")
     settings = get_settings()
     async with aiohttp.ClientSession() as session:
         return await tracker.search_authors_by_name(session, name.strip(), settings)
+
+
+@router.post("/registry/resync")
+async def resync_registry():
+    """지금 추적 중인 모든 웹툰을 훑어서 작가/태그 레지스트리를 즉시 채운다."""
+    async def _run():
+        settings = get_settings()
+        job_status.start("registry")
+        job_status.log_line("registry", "작가/태그 재동기화 시작")
+        try:
+            async with aiohttp.ClientSession() as session:
+                count = await tracker.resync_registry(session, settings)
+            job_status.log_line("registry", f"{count}개 웹툰 처리 완료")
+            job_status.finish("registry", success=True)
+        except Exception as e:
+            job_status.log_line("registry", f"오류: {e}")
+            job_status.finish("registry", success=False)
+
+    asyncio.create_task(_run())
+    return {"status": "started"}
 
 
 # ── 수동 다운로드 ──────────────────────────────────────────────────

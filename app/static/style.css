@@ -361,6 +361,12 @@ button:hover { border-color: var(--accent); }
   color: var(--muted);
   margin: 16px 0 8px;
 }
+.registry-resync-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
 
 .registry-row .registry-meta {
   color: var(--muted);

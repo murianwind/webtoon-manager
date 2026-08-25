@@ -148,6 +148,33 @@ async def enrich_one(session: aiohttp.ClientSession, title_id: str, settings: Se
         log.error("즉시 정보 보강 중 예외 (titleId=%s): %s", title_id, e)
 
 
+async def resync_registry(session: aiohttp.ClientSession, settings: Settings) -> int:
+    """
+    지금 추적 중인(구독중/구독해제) 모든 웹툰을 한 번에 훑어서 작가/태그 레지스트리를
+    채운다. enrich_one은 구독하는 "그 순간"에만 동작하는데, 그 기능이 생기기 전에
+    이미 구독해뒀던 웹툰들은 정기 스캔이 돌기 전까지 계속 비어있는 문제가 있어서
+    — 설정 페이지에서 사용자가 바로 눌러서 즉시 채울 수 있게 하는 수동 트리거다.
+    """
+    targets = [wt for wt in repository.list_all() if wt.status != repository.STATUS_EXCLUDED]
+    if not targets:
+        return 0
+
+    semaphore = asyncio.Semaphore(_ARTIST_SCAN_CONCURRENCY)
+
+    async def _run_one(title_id: str) -> bool:
+        async with semaphore:
+            try:
+                await enrich_one(session, title_id, settings)
+                await asyncio.sleep(settings.delay_seconds)
+                return True
+            except Exception as e:
+                log.error("레지스트리 재동기화 중 예외 (titleId=%s): %s", title_id, e)
+                return False
+
+    results = await asyncio.gather(*(_run_one(wt.title_id) for wt in targets))
+    return sum(1 for r in results if r)
+
+
 async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, settings: Settings) -> None:
     """구독 중인(status=active) 모든 웹툰의 완결/휴재/장르 갱신 + 등록된 작가 신작 자동추가."""
     active_webtoons = repository.list_by_status(repository.STATUS_ACTIVE)
