@@ -25,9 +25,11 @@ class TitleInfo:
     writer_names: list[str] = field(default_factory=list)
     painter_names: list[str] = field(default_factory=list)
     writer_ids: set[str] = field(default_factory=set)
+    writer_id_name_pairs: list[tuple[str, str]] = field(default_factory=list)
     genres: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     age_description: str = ""
+    is_paused: bool = False
 
 
 @dataclass
@@ -57,3 +59,21 @@ class WebtoonRecord:
     finish_ack: bool
     thumbnail_url: str = ""
     finish_notified: bool = False
+    genres: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    latest_episode_no: int = 0
+    is_paused: bool = False
+
+
+@dataclass
+class WatchedAuthor:
+    author_id: str
+    author_name: str
+    enabled: bool
+
+
+@dataclass
+class WatchedTag:
+    tag_id: str
+    tag_name: str
+    enabled: bool

@@ -1,12 +1,9 @@
 """
 완결 확인용 디스코드 Gateway 봇.
 
-기존 REST 폴링 + 텍스트 명령 스레드 방식 대신, discord.py로 Gateway(웹소켓)에
-상시 연결해서 버튼 클릭을 실시간으로 받는다. "확인 주기"라는 개념 자체가 없어진다 —
-사용자가 몇 초 뒤에 누르든 몇 시간 뒤에 누르든 즉시 처리된다.
-
-WEBTOON_BOT_TOKEN / WEBTOON_NOTIFY_CHANNEL_ID가 설정되어 있을 때만 동작하고,
-없으면 조용히 비활성 상태로 남는다 (에러 아님).
+REST 폴링 대신 discord.py로 Gateway(웹소켓)에 상시 연결해서 버튼 클릭을
+실시간으로 받는다. 설정(토큰/채널ID)은 discord_config를 통해 DB 우선으로 읽는다
+— 설정이 없으면 조용히 비활성 상태로 남는다 (에러 아님).
 
 구독해제/알람제외는 API를 거치지 않고 같은 프로세스 안에서 repository 함수를
 직접 호출한다 (같은 컨테이너 안이라 별도 HTTP 왕복이 필요 없음).
@@ -17,8 +14,7 @@ import logging
 
 import discord
 
-from app import repository
-from app.config import Settings
+from app import discord_config, repository
 
 log = logging.getLogger(__name__)
 
@@ -92,26 +88,32 @@ class CompletionBotClient(discord.Client):
         )
         await channel.send(content=f"📗 **{title}** 완결되었습니다. 구독을 해제할까요?", view=view)
 
+    async def send_plain_message(self, content: str) -> None:
+        channel = self.get_channel(self.notify_channel_id)
+        if channel is None:
+            channel = await self.fetch_channel(self.notify_channel_id)
+        await channel.send(content=content)
 
-def is_enabled(settings: Settings) -> bool:
-    return bool(settings.webtoon_bot_token and settings.webtoon_notify_channel_id)
+
+def is_ready() -> bool:
+    return _client is not None and _client.is_ready()
 
 
-async def start_bot(settings: Settings) -> None:
+async def start_bot() -> None:
     global _client, _run_task
 
-    if not is_enabled(settings):
-        log.info("WEBTOON_BOT_TOKEN / WEBTOON_NOTIFY_CHANNEL_ID 미설정 — 완결 확인 봇 비활성")
+    if not discord_config.is_bot_configured():
+        log.info("디스코드 봇 토큰/채널ID 미설정 — 완결 확인 봇 비활성")
         return
 
     try:
-        channel_id = int(settings.webtoon_notify_channel_id)
+        channel_id = int(discord_config.get_notify_channel_id())
     except ValueError:
-        log.error("WEBTOON_NOTIFY_CHANNEL_ID가 숫자가 아닙니다: %s", settings.webtoon_notify_channel_id)
+        log.error("알림 채널ID가 숫자가 아닙니다: %s", discord_config.get_notify_channel_id())
         return
 
     _client = CompletionBotClient(notify_channel_id=channel_id)
-    _run_task = asyncio.create_task(_client.start(settings.webtoon_bot_token))
+    _run_task = asyncio.create_task(_client.start(discord_config.get_bot_token()))
     log.info("완결 확인 디스코드 봇 시작 중...")
 
 
@@ -125,11 +127,30 @@ async def stop_bot() -> None:
         _run_task = None
 
 
+async def restart_bot() -> None:
+    """설정(토큰/채널ID)이 바뀐 뒤 호출 — 기존 연결을 끊고 새 설정으로 다시 연결한다."""
+    await stop_bot()
+    await start_bot()
+
+
 async def send_completion_prompt(title_id: str, title: str) -> None:
-    if _client is None or not _client.is_ready():
+    if not is_ready():
         log.warning("완결 확인 봇이 아직 준비되지 않아 알림을 보내지 못했습니다 (titleId=%s)", title_id)
         return
     try:
         await _client.send_completion_prompt(title_id, title)
     except Exception as e:
         log.error("완결 알림 전송 실패 (titleId=%s): %s", title_id, e)
+
+
+async def send_test_message() -> tuple[bool, str]:
+    """설정 페이지의 '봇 테스트' 버튼에서 호출. (성공 여부, 사용자에게 보여줄 메시지)."""
+    if not discord_config.is_bot_configured():
+        return False, "봇 토큰/채널ID가 설정되지 않았습니다."
+    if not is_ready():
+        return False, "봇이 아직 연결되지 않았습니다 (설정 저장 직후라면 몇 초 후 다시 시도해주세요)."
+    try:
+        await _client.send_plain_message("✅ 완결 확인 봇 테스트 메시지입니다. 정상적으로 연결되어 있습니다.")
+        return True, "테스트 메시지를 전송했습니다."
+    except Exception as e:
+        return False, f"전송 실패: {e}"

@@ -27,6 +27,10 @@ CREATE TABLE IF NOT EXISTS webtoons (
     finish_ack INTEGER NOT NULL DEFAULT 0,
     thumbnail_url TEXT NOT NULL DEFAULT '',
     finish_notified INTEGER NOT NULL DEFAULT 0,
+    genres TEXT NOT NULL DEFAULT '[]',            -- JSON 배열
+    tags TEXT NOT NULL DEFAULT '[]',              -- JSON 배열
+    latest_episode_no INTEGER NOT NULL DEFAULT 0, -- 마지막으로 확인한 네이버 최신 무료회차 no
+    is_paused INTEGER NOT NULL DEFAULT 0,         -- 휴재 여부 (best-effort)
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -35,13 +39,33 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+
+CREATE TABLE IF NOT EXISTS watched_authors (
+    author_id TEXT PRIMARY KEY,
+    author_name TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS watched_tags (
+    tag_id TEXT PRIMARY KEY,
+    tag_name TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
-# 기존에 이미 만들어진 DB(위 스키마에 thumbnail_url 컬럼이 없던 버전)를 위한 마이그레이션.
+# 기존에 이미 만들어진 DB(위 스키마에 없던 컬럼이 있던 버전)를 위한 마이그레이션.
 # CREATE TABLE IF NOT EXISTS는 이미 있는 테이블의 컬럼을 추가해주지 않기 때문에 별도로 처리한다.
 _MIGRATIONS = [
     ("webtoons", "thumbnail_url", "ALTER TABLE webtoons ADD COLUMN thumbnail_url TEXT NOT NULL DEFAULT ''"),
     ("webtoons", "finish_notified", "ALTER TABLE webtoons ADD COLUMN finish_notified INTEGER NOT NULL DEFAULT 0"),
+    ("webtoons", "genres", "ALTER TABLE webtoons ADD COLUMN genres TEXT NOT NULL DEFAULT '[]'"),
+    ("webtoons", "tags", "ALTER TABLE webtoons ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'"),
+    ("webtoons", "latest_episode_no", "ALTER TABLE webtoons ADD COLUMN latest_episode_no INTEGER NOT NULL DEFAULT 0"),
+    ("webtoons", "is_paused", "ALTER TABLE webtoons ADD COLUMN is_paused INTEGER NOT NULL DEFAULT 0"),
 ]
 
 

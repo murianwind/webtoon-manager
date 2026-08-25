@@ -56,6 +56,10 @@ def _parse_title_info(raw: dict, title_id: str) -> TitleInfo:
     if not writer_ids:
         writer_ids = {str(w["id"]) for w in writer_entries if w.get("id")}
 
+    writer_id_name_pairs = [
+        (str(w["id"]), w.get("name", "")) for w in writer_entries if w.get("id")
+    ]
+
     return TitleInfo(
         title_id=title_id,
         title_name=raw.get("titleName", ""),
@@ -67,9 +71,12 @@ def _parse_title_info(raw: dict, title_id: str) -> TitleInfo:
         writer_names=[w.get("name", "") for w in writer_entries if w.get("name")],
         painter_names=[p.get("name", "") for p in painter_entries if p.get("name")],
         writer_ids=writer_ids,
+        writer_id_name_pairs=writer_id_name_pairs,
         genres=list(gfp.get("genreTypes") or []),
         tags=list(gfp.get("tags") or []),
         age_description=age.get("description", ""),
+        # 'rest'는 네이버 응답에서 확인되지 않은 필드일 수 있어 best-effort로 파싱한다.
+        is_paused=bool(raw.get("rest", False)),
     )
 
 

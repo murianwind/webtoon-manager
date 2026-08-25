@@ -25,6 +25,7 @@ class _JobStatus:
 _statuses: dict[str, _JobStatus] = {
     "discovery": _JobStatus(),
     "download": _JobStatus(),
+    "manual": _JobStatus(),
 }
 
 

@@ -5,8 +5,15 @@ LAN 전용, 인증 없음. 입력값 검증 실패 시 크래시 대신 명확�
 
 - 구독중/구독해제/제외됨 조회 및 상태 전환 : /webtoons/*
 - 네이버 전체 웹툰 목록 조회 + 거기서 바로 구독/제외 : /naver-list/*
-- 다운로드/스캔 주기 설정 : /settings
+- 작가/태그 자동추가 레지스트리 관리 : /watched-authors/*, /watched-tags/*
+- 수동 다운로드 : /manual-download/*
+- 다운로드/스캔 스케줄 설정 : /settings
+- 디스코드 설정 + 테스트 : /settings/discord*
+- 백업/복원 : /backup, /restore
 - 수동 실행 + 진행상황 조회 : /jobs/*
+
+정렬/검색은 데이터 양이 많지 않아 서버에서 별도 파라미터를 두지 않고
+프론트엔드에서 이미 받아온 목록을 가지고 처리한다 (요청 왕복을 줄임).
 """
 
 import asyncio
@@ -16,7 +23,16 @@ import aiohttp
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
-from app import job_status, naver_api, repository, schedule_config
+from app import (
+    discord_bot,
+    discord_config,
+    discord_notify,
+    job_status,
+    manual_download,
+    naver_api,
+    repository,
+    schedule_config,
+)
 from app import scheduler as scheduler_mod
 from app.config import get_settings
 
@@ -34,6 +50,11 @@ class WebtoonOut(BaseModel):
     is_finished: bool
     finish_ack: bool
     thumbnail_url: str
+    genres: list[str]
+    tags: list[str]
+    latest_episode_no: int
+    is_paused: bool
+    has_new_episode: bool
 
 
 def _to_out(wt) -> WebtoonOut:
@@ -47,6 +68,11 @@ def _to_out(wt) -> WebtoonOut:
         is_finished=wt.is_finished,
         finish_ack=wt.finish_ack,
         thumbnail_url=wt.thumbnail_url,
+        genres=wt.genres,
+        tags=wt.tags,
+        latest_episode_no=wt.latest_episode_no,
+        is_paused=wt.is_paused,
+        has_new_episode=wt.latest_episode_no > wt.last_downloaded_no > 0,
     )
 
 
@@ -126,20 +152,29 @@ async def browse_naver_list():
         items = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
 
     existing = await asyncio.to_thread(repository.list_all)
-    existing_status = {w.title_id: w.status for w in existing}
+    existing_by_id = {w.title_id: w for w in existing}
 
-    return [
-        {
-            "title_id": item.title_id,
-            "title": item.title_name,
-            "thumbnail_url": item.thumbnail_url,
-            "weekdays": item.weekdays,
-            "is_finished": item.is_finished,
-            "author_summary": item.author_summary,
-            "status": existing_status.get(item.title_id),
-        }
-        for item in items
-    ]
+    result = []
+    for item in items:
+        tracked = existing_by_id.get(item.title_id)
+        result.append(
+            {
+                "title_id": item.title_id,
+                "title": item.title_name,
+                "thumbnail_url": tracked.thumbnail_url if tracked and tracked.thumbnail_url else item.thumbnail_url,
+                "weekdays": item.weekdays,
+                "is_finished": tracked.is_finished if tracked else item.is_finished,
+                "author_summary": item.author_summary,
+                "status": tracked.status if tracked else None,
+                "genres": tracked.genres if tracked else [],
+                "tags": tracked.tags if tracked else [],
+                "is_paused": tracked.is_paused if tracked else False,
+                "has_new_episode": (
+                    tracked.latest_episode_no > tracked.last_downloaded_no > 0 if tracked else False
+                ),
+            }
+        )
+    return result
 
 
 @router.post("/naver-list/{title_id}/subscribe")
@@ -172,6 +207,179 @@ async def naver_list_exclude(title_id: str, payload: NaverListEntryIn):
         )
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_EXCLUDED)
     return _to_out(await asyncio.to_thread(repository.get, title_id))
+
+
+# ── 작가/태그 자동추가 레지스트리 ──────────────────────────────────
+
+class WatchedAuthorOut(BaseModel):
+    author_id: str
+    author_name: str
+    enabled: bool
+
+
+class WatchedTagOut(BaseModel):
+    tag_id: str
+    tag_name: str
+    enabled: bool
+
+
+class WatchedAuthorIn(BaseModel):
+    author_id: str
+    author_name: str = ""
+
+    @field_validator("author_id")
+    @classmethod
+    def author_id_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("author_id가 비어있습니다.")
+        return v.strip()
+
+
+class WatchedTagIn(BaseModel):
+    tag_id: str
+    tag_name: str = ""
+
+    @field_validator("tag_id")
+    @classmethod
+    def tag_id_numeric(cls, v: str) -> str:
+        if not v.strip().isdigit():
+            raise ValueError("tag_id는 숫자만 입력할 수 있습니다.")
+        return v.strip()
+
+
+@router.get("/watched-authors", response_model=list[WatchedAuthorOut])
+async def list_watched_authors():
+    rows = await asyncio.to_thread(repository.list_watched_authors)
+    return [WatchedAuthorOut(author_id=r.author_id, author_name=r.author_name, enabled=r.enabled) for r in rows]
+
+
+@router.post("/watched-authors", response_model=WatchedAuthorOut)
+async def add_watched_author(payload: WatchedAuthorIn):
+    await asyncio.to_thread(repository.upsert_watched_author, payload.author_id, payload.author_name, True)
+    rows = await asyncio.to_thread(repository.list_watched_authors)
+    match = next(r for r in rows if r.author_id == payload.author_id)
+    return WatchedAuthorOut(author_id=match.author_id, author_name=match.author_name, enabled=match.enabled)
+
+
+@router.post("/watched-authors/{author_id}/enable", response_model=WatchedAuthorOut)
+async def enable_watched_author(author_id: str):
+    await asyncio.to_thread(repository.set_watched_author_enabled, author_id, True)
+    rows = await asyncio.to_thread(repository.list_watched_authors)
+    match = next((r for r in rows if r.author_id == author_id), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="등록되지 않은 작가입니다.")
+    return WatchedAuthorOut(author_id=match.author_id, author_name=match.author_name, enabled=match.enabled)
+
+
+@router.post("/watched-authors/{author_id}/disable", response_model=WatchedAuthorOut)
+async def disable_watched_author(author_id: str):
+    await asyncio.to_thread(repository.set_watched_author_enabled, author_id, False)
+    rows = await asyncio.to_thread(repository.list_watched_authors)
+    match = next((r for r in rows if r.author_id == author_id), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="등록되지 않은 작가입니다.")
+    return WatchedAuthorOut(author_id=match.author_id, author_name=match.author_name, enabled=match.enabled)
+
+
+@router.get("/watched-tags", response_model=list[WatchedTagOut])
+async def list_watched_tags():
+    rows = await asyncio.to_thread(repository.list_watched_tags)
+    return [WatchedTagOut(tag_id=r.tag_id, tag_name=r.tag_name, enabled=r.enabled) for r in rows]
+
+
+@router.post("/watched-tags", response_model=WatchedTagOut)
+async def add_watched_tag(payload: WatchedTagIn):
+    tag_name = payload.tag_name
+    if not tag_name:
+        settings = get_settings()
+        async with aiohttp.ClientSession() as session:
+            tag_name = await naver_api.fetch_curation_title_name(
+                session, int(payload.tag_id), settings.request_timeout_seconds
+            )
+    await asyncio.to_thread(repository.upsert_watched_tag, payload.tag_id, tag_name, True)
+    rows = await asyncio.to_thread(repository.list_watched_tags)
+    match = next(r for r in rows if r.tag_id == payload.tag_id)
+    return WatchedTagOut(tag_id=match.tag_id, tag_name=match.tag_name, enabled=match.enabled)
+
+
+@router.post("/watched-tags/{tag_id}/enable", response_model=WatchedTagOut)
+async def enable_watched_tag(tag_id: str):
+    await asyncio.to_thread(repository.set_watched_tag_enabled, tag_id, True)
+    rows = await asyncio.to_thread(repository.list_watched_tags)
+    match = next((r for r in rows if r.tag_id == tag_id), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="등록되지 않은 태그입니다.")
+    return WatchedTagOut(tag_id=match.tag_id, tag_name=match.tag_name, enabled=match.enabled)
+
+
+@router.post("/watched-tags/{tag_id}/disable", response_model=WatchedTagOut)
+async def disable_watched_tag(tag_id: str):
+    await asyncio.to_thread(repository.set_watched_tag_enabled, tag_id, False)
+    rows = await asyncio.to_thread(repository.list_watched_tags)
+    match = next((r for r in rows if r.tag_id == tag_id), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="등록되지 않은 태그입니다.")
+    return WatchedTagOut(tag_id=match.tag_id, tag_name=match.tag_name, enabled=match.enabled)
+
+
+@router.delete("/watched-tags/{tag_id}")
+async def remove_watched_tag(tag_id: str):
+    await asyncio.to_thread(repository.delete_watched_tag, tag_id)
+    return {"status": "deleted"}
+
+
+# ── 수동 다운로드 ──────────────────────────────────────────────────
+
+class ManualAnalyzeEpisodeOut(BaseModel):
+    episode_no: int
+    subtitle: str
+    owned: bool
+    is_locked: bool
+
+
+class ManualAnalyzeOut(BaseModel):
+    title_id: str
+    title: str
+    episodes: list[ManualAnalyzeEpisodeOut]
+
+
+class ManualDownloadIn(BaseModel):
+    title_id: str
+    episode_nos: list[int]
+
+    @field_validator("episode_nos")
+    @classmethod
+    def not_empty(cls, v: list[int]) -> list[int]:
+        if not v:
+            raise ValueError("다운로드할 회차를 하나 이상 선택해주세요.")
+        return v
+
+
+@router.get("/manual-download/analyze", response_model=ManualAnalyzeOut)
+async def manual_download_analyze(title_id: str):
+    if not title_id.strip().isdigit():
+        raise HTTPException(status_code=400, detail="titleId는 숫자만 입력할 수 있습니다.")
+    settings = get_settings()
+    info, rows = await manual_download.analyze(title_id, settings)
+    if info is None:
+        raise HTTPException(status_code=400, detail="해당 titleId 정보를 네이버에서 찾지 못했습니다.")
+    return ManualAnalyzeOut(
+        title_id=title_id,
+        title=info.title_name,
+        episodes=[
+            ManualAnalyzeEpisodeOut(
+                episode_no=r.episode_no, subtitle=r.subtitle, owned=r.owned, is_locked=r.is_locked
+            )
+            for r in rows
+        ],
+    )
+
+
+@router.post("/manual-download/run")
+async def manual_download_run(payload: ManualDownloadIn):
+    settings = get_settings()
+    asyncio.create_task(manual_download.download_selected(payload.title_id, payload.episode_nos, settings))
+    return {"status": "started"}
 
 
 # ── 설정 (잡별 스케줄: 끄기 / N분마다 / 특정 요일·시각) ────────────────
@@ -255,6 +463,64 @@ async def update_schedules(payload: SchedulesIn, request: Request):
 
     return await get_schedules()
 
+
+# ── 디스코드 설정 + 테스트 ─────────────────────────────────────────
+
+class DiscordSettingsOut(BaseModel):
+    webhook_url: str
+    bot_token_set: bool
+    notify_channel_id: str
+    bot_ready: bool
+
+
+class DiscordSettingsIn(BaseModel):
+    webhook_url: str = ""
+    bot_token: str = ""  # 비워두면 기존 값 유지
+    notify_channel_id: str = ""
+
+
+@router.get("/settings/discord", response_model=DiscordSettingsOut)
+async def get_discord_settings():
+    return DiscordSettingsOut(
+        webhook_url=await asyncio.to_thread(discord_config.get_webhook_url),
+        bot_token_set=bool(await asyncio.to_thread(discord_config.get_bot_token)),
+        notify_channel_id=await asyncio.to_thread(discord_config.get_notify_channel_id),
+        bot_ready=discord_bot.is_ready(),
+    )
+
+
+@router.post("/settings/discord", response_model=DiscordSettingsOut)
+async def update_discord_settings(payload: DiscordSettingsIn):
+    await asyncio.to_thread(discord_config.set_webhook_url, payload.webhook_url)
+    await asyncio.to_thread(discord_config.set_bot_token, payload.bot_token)
+    await asyncio.to_thread(discord_config.set_notify_channel_id, payload.notify_channel_id)
+    await discord_bot.restart_bot()
+    return await get_discord_settings()
+
+
+@router.post("/settings/discord/test-webhook")
+async def test_discord_webhook():
+    success, message = await discord_notify.send_test_webhook_message()
+    return {"success": success, "message": message}
+
+
+@router.post("/settings/discord/test-bot")
+async def test_discord_bot():
+    success, message = await discord_bot.send_test_message()
+    return {"success": success, "message": message}
+
+
+# ── 백업 / 복원 ────────────────────────────────────────────────────
+
+@router.get("/backup")
+async def download_backup():
+    return await asyncio.to_thread(repository.export_all)
+
+
+@router.post("/restore")
+async def restore_backup(data: dict):
+    await asyncio.to_thread(repository.restore_all, data)
+    return {"status": "restored"}
 
 
 # ── 수동 실행 + 진행상황 ──────────────────────────────────────────

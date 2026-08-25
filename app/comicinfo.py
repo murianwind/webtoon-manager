@@ -66,10 +66,10 @@ def build_comicinfo_xml(info: TitleInfo) -> str:
 
 
 def needs_comicinfo(webtoon_dir: Path) -> bool:
-    """ComicInfo.xml이나 커버 이미지 중 하나라도 없으면 True."""
+    """info.xml이나 커버 이미지 중 하나라도 없으면 True."""
     if not webtoon_dir.is_dir():
         return True
-    has_xml = (webtoon_dir / "ComicInfo.xml").is_file()
+    has_xml = (webtoon_dir / "info.xml").is_file()
     has_cover = any(webtoon_dir.glob("cover.*"))
     return not (has_xml and has_cover)
 
@@ -77,7 +77,7 @@ def needs_comicinfo(webtoon_dir: Path) -> bool:
 def write_comicinfo_file(webtoon_dir: Path, info: TitleInfo) -> None:
     webtoon_dir.mkdir(parents=True, exist_ok=True)
     xml_content = build_comicinfo_xml(info)
-    (webtoon_dir / "ComicInfo.xml").write_text(xml_content, encoding="utf-8")
+    (webtoon_dir / "info.xml").write_text(xml_content, encoding="utf-8")
 
 
 async def download_cover_image(

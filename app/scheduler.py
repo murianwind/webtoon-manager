@@ -66,6 +66,9 @@ async def _download_new_episodes_for_one(session: aiohttp.ClientSession, setting
     )
     free_episodes = naver_api.free_episodes_only(all_episodes)
 
+    if free_episodes:
+        repository.update_latest_episode_no(title_id, free_episodes[-1].episode_no)
+
     # DB에 저장된 last_downloaded_no만 믿지 않고, 매번 실제 폴더의 마지막 zip 파일명을
     # 부제목 기준으로 네이버 회차 목록과 대조해서 확인한다. 네이버 회차 번호(no)는
     # 가끔 건너뛰기 때문에(예: 109 다음이 111), 로컬 zip 개수를 세서 위치로 추론하면

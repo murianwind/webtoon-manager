@@ -10,7 +10,7 @@ import logging
 
 import aiohttp
 
-from app.config import Settings
+from app import discord_config
 from app.constants import DISCORD_MESSAGE_CHUNK_LIMIT
 
 log = logging.getLogger(__name__)
@@ -31,13 +31,31 @@ def _split_message(text: str, limit: int = DISCORD_MESSAGE_CHUNK_LIMIT) -> list[
     return chunks
 
 
-async def send_webhook_notification(session: aiohttp.ClientSession, settings: Settings, message: str) -> None:
-    if not settings.webtoon_webhook_url or not message.strip():
+async def send_webhook_notification(session: aiohttp.ClientSession, settings, message: str) -> None:
+    webhook_url = discord_config.get_webhook_url()
+    if not webhook_url or not message.strip():
         return
     for chunk in _split_message(message):
         try:
-            async with session.post(settings.webtoon_webhook_url, json={"content": chunk}) as resp:
+            async with session.post(webhook_url, json={"content": chunk}) as resp:
                 if resp.status != 204:
                     log.error("웹훅 전송 실패: %s %s", resp.status, await resp.text())
         except Exception as e:
             log.error("웹훅 전송 예외: %s", e)
+
+
+async def send_test_webhook_message() -> tuple[bool, str]:
+    """설정 페이지의 '웹훅 테스트' 버튼에서 호출."""
+    webhook_url = discord_config.get_webhook_url()
+    if not webhook_url:
+        return False, "웹훅 URL이 설정되지 않았습니다."
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                webhook_url, json={"content": "✅ 웹훅 테스트 메시지입니다. 정상적으로 연결되어 있습니다."}
+            ) as resp:
+                if resp.status == 204:
+                    return True, "테스트 메시지를 전송했습니다."
+                return False, f"전송 실패: HTTP {resp.status} — {await resp.text()}"
+    except Exception as e:
+        return False, f"전송 실패: {e}"

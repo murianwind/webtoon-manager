@@ -1,12 +1,15 @@
 """
 구독 중인 웹툰을 스캔해서
-  1) 완결 여부를 갱신하고
-  2) 같은 글작가의 다른 신작을 자동 구독에 추가하고
-  3) 지정된 태그(큐레이션)에 새로 편입된 작품을 자동 구독에 추가한다.
+  1) 완결/휴재 여부, 장르·태그를 갱신하고
+  2) "등록된 작가"(watched_authors, enabled=1)의 다른 신작을 자동 구독에 추가하고
+  3) "등록된 태그"(watched_tags, enabled=1)에 새로 편입된 작품을 자동 구독에 추가한다.
 
-기존 webtoon_manager.py의 스캔 로직을 그대로 옮기되, 파일 대신 SQLite(repository)를
-데이터 소스로 쓴다. 웹툰 하나 처리 중 예외가 나도 전체 스캔은 계속되도록
-개별 웹툰 단위로 예외를 격리한다.
+작가/태그는 구독 여부와 분리된 별도 레지스트리(watched_authors/watched_tags)로 관리한다.
+구독 중인 웹툰의 작가는 스캔할 때 자동으로 레지스트리에 등록되지만(enabled=1 기본값),
+사용자가 설정 페이지에서 명시적으로 끄면 그 작가의 신작은 더 이상 자동추가되지 않는다
+(구독 자체는 유지된 채로) — 이미 있는 항목의 enabled는 upsert가 덮어쓰지 않는다.
+
+웹툰 하나 처리 중 예외가 나도 전체 스캔은 계속되도록 개별 웹툰 단위로 예외를 격리한다.
 """
 
 import asyncio
@@ -22,6 +25,16 @@ from app.models import TitleInfo
 log = logging.getLogger(__name__)
 
 _ARTIST_SCAN_CONCURRENCY = 5
+
+DEFAULT_TAG_IDS_AND_NAMES = {"134": "", "133": ""}
+
+
+def ensure_default_tags_seeded() -> None:
+    """watched_tags 테이블이 비어있으면(최초 실행) 기본 태그를 채운다. 이후엔 건드리지 않는다."""
+    if repository.list_watched_tags():
+        return
+    for tag_id in DEFAULT_TAG_IDS_AND_NAMES:
+        repository.upsert_watched_tag(tag_id, "", enabled=True)
 
 
 async def _fetch_info_and_others(
@@ -42,11 +55,9 @@ async def _fetch_info_and_others(
             return title_id, None, []
 
 
-def _matches_by_writer(other: dict, writer_ids: set[str]) -> bool:
-    if not writer_ids:
-        return False
+def _matches_enabled_writer(other: dict, enabled_author_ids: set[str]) -> bool:
     other_writer_ids = {str(w.get("id")) for w in (other.get("author") or {}).get("writers") or []}
-    return bool(writer_ids & other_writer_ids)
+    return bool(enabled_author_ids & other_writer_ids)
 
 
 async def _is_other_finished(
@@ -63,8 +74,7 @@ async def backfill_missing_thumbnails(session: aiohttp.ClientSession, settings: 
     """
     상태(구독중/구독해제/제외됨)와 무관하게, 썸네일 URL이 아직 없는 모든 웹툰의
     썸네일을 채운다. 신작 자동추가 같은 부수효과는 없이 정보 조회만 한다 —
-    그래서 목록제외된 웹툰도 여기서는 대상에 포함된다 (원래 신작 스캔은 구독중만
-    보기 때문에 제외된 웹툰은 이 백필이 없으면 썸네일을 영영 못 채운다).
+    그래서 목록제외된 웹툰도 여기서는 대상에 포함된다.
     """
     targets = [wt for wt in repository.list_all() if not wt.thumbnail_url]
     if not targets:
@@ -90,13 +100,15 @@ async def backfill_missing_thumbnails(session: aiohttp.ClientSession, settings: 
             continue
         repository.update_thumbnail_url(title_id, info.thumbnail_url)
         repository.update_is_adult(title_id, info.is_adult)
+        repository.update_genres_and_tags(title_id, info.genres, info.tags)
+        repository.update_is_paused(title_id, info.is_paused)
         filled += 1
 
     return filled
 
 
 async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, settings: Settings) -> None:
-    """구독 중인(status=active) 모든 웹툰의 완결 여부 갱신 + 작가 신작 자동추가."""
+    """구독 중인(status=active) 모든 웹툰의 완결/휴재/장르 갱신 + 등록된 작가 신작 자동추가."""
     active_webtoons = repository.list_by_status(repository.STATUS_ACTIVE)
     if not active_webtoons:
         return
@@ -118,16 +130,24 @@ async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, setting
 
         repository.update_is_adult(title_id, info.is_adult)
         repository.update_thumbnail_url(title_id, info.thumbnail_url)
+        repository.update_genres_and_tags(title_id, info.genres, info.tags)
+        repository.update_is_paused(title_id, info.is_paused)
 
         if info.writer_ids:
             repository.update_writer_ids(title_id, sorted(info.writer_ids))
+
+        # 구독중인 작품의 작가는 자동으로 레지스트리에 등록된다 (이미 있으면 enabled는 안 건드림).
+        for writer_id, writer_name in info.writer_id_name_pairs:
+            repository.upsert_watched_author(writer_id, writer_name, enabled=True)
+
+        enabled_author_ids = repository.get_enabled_author_ids()
 
         for other in others:
             other_title_id = str(other.get("titleId", ""))
             if not other_title_id or repository.exists(other_title_id):
                 continue
-            if not _matches_by_writer(other, info.writer_ids):
-                continue  # 그림작가만 겹치는 작품은 제외 (글작가 기준만 인정)
+            if not _matches_enabled_writer(other, enabled_author_ids):
+                continue  # 등록 해제된 작가이거나 그림작가만 겹치는 작품은 제외
             if await _is_other_finished(session, other, other_title_id, settings):
                 continue  # 이미 완결된 작품은 신규로 추가하지 않음
 
@@ -145,17 +165,19 @@ async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, setting
 
 
 async def scan_curation_tags(session: aiohttp.ClientSession, settings: Settings) -> None:
-    """설정된 태그(큐레이션)에 새로 편입된 완결되지 않은 작품을 자동 구독에 추가한다."""
+    """등록된(watched_tags, enabled=1) 태그(큐레이션)에 새로 편입된 완결되지 않은 작품을 자동 구독에 추가한다."""
+    tag_ids = repository.get_enabled_tag_ids()
     new_entry_lines: list[str] = []
 
-    for tag_id in settings.tag_ids:
+    for tag_id in tag_ids:
         try:
             tag_name = await naver_api.fetch_curation_title_name(
-                session, tag_id, settings.request_timeout_seconds
+                session, int(tag_id), settings.request_timeout_seconds
             )
+            repository.upsert_watched_tag(tag_id, tag_name, enabled=True)
             await asyncio.sleep(settings.delay_seconds)
             items = await naver_api.fetch_curation_titles(
-                session, tag_id, settings.request_timeout_seconds, settings.delay_seconds
+                session, int(tag_id), settings.request_timeout_seconds, settings.delay_seconds
             )
         except Exception as e:
             log.error("태그(tag_id=%s) 스캔 중 예외 — 이 태그만 건너뜁니다: %s", tag_id, e)
