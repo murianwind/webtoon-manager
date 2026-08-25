@@ -41,6 +41,9 @@ class NaverListItem:
     thumbnail_url: str
     weekdays: list[str] = field(default_factory=list)
     is_finished: bool = False
+    is_paused: bool = False  # 네이버 API의 'rest' 필드 (휴재)
+    has_update: bool = False  # 네이버 API의 'up' 필드 (새 에피소드 업데이트 = UP 아이콘)
+    is_adult: bool = False
     author_summary: str = ""
 
 

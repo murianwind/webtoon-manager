@@ -163,15 +163,14 @@ async def browse_naver_list():
                 "title": item.title_name,
                 "thumbnail_url": tracked.thumbnail_url if tracked and tracked.thumbnail_url else item.thumbnail_url,
                 "weekdays": item.weekdays,
-                "is_finished": tracked.is_finished if tracked else item.is_finished,
+                "is_finished": item.is_finished,
+                "is_paused": item.is_paused,
+                "is_adult": item.is_adult,
                 "author_summary": item.author_summary,
                 "status": tracked.status if tracked else None,
                 "genres": tracked.genres if tracked else [],
                 "tags": tracked.tags if tracked else [],
-                "is_paused": tracked.is_paused if tracked else False,
-                "has_new_episode": (
-                    tracked.latest_episode_no > tracked.last_downloaded_no > 0 if tracked else False
-                ),
+                "has_new_episode": item.has_update,
             }
         )
     return result
