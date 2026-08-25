@@ -22,7 +22,7 @@ from app.constants import (
     NAVER_WEEKDAY_LIST_URL,
     RETRY_BACKOFF_BASE_SECONDS,
 )
-from app.models import EpisodeInfo, NaverListItem, TitleInfo
+from app.models import EpisodeInfo, NaverListItem, SearchResultItem, TitleInfo
 
 log = logging.getLogger(__name__)
 
@@ -260,6 +260,73 @@ async def fetch_tag_catalog(
         for item in data.get("tagItemList") or []
         if item.get("type") == "CUSTOM_TAG" and item.get("id") is not None
     ]
+
+
+async def search_webtoons(
+    session: aiohttp.ClientSession, keyword: str, timeout_seconds: int
+) -> list[SearchResultItem]:
+    """
+    네이버 통합검색. 제목뿐 아니라 작가 이름으로도 매칭되고, 요일별 목록 API와 달리
+    장기 휴재작도 검색 결과에 나온다 (weekday API의 한계를 우회할 수 있는 유일한 경로).
+
+    응답에 여러 카테고리(searchWebtoonResult, searchNbooksComicResult 등)가 섞여 있는데,
+    실제 titleId를 담고 있는 카테고리만(예: searchNbooksComicResult는 titleId가 아니라
+    별개의 contentId라 여기서 걸러진다) 골라서 파싱한다.
+    """
+    try:
+        async with session.get(
+            NAVER_SEARCH_ALL_URL,
+            params={"keyword": keyword},
+            headers=DEFAULT_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+        ) as response:
+            if response.status != 200:
+                log.error("통합검색 실패 (keyword=%s): HTTP %s", keyword, response.status)
+                return []
+            data = await response.json()
+    except Exception as e:
+        log.error("통합검색 예외 (keyword=%s): %s", keyword, e)
+        return []
+
+    results: list[SearchResultItem] = []
+    seen_ids: set[str] = set()
+
+    for category in data.values():
+        if not isinstance(category, dict):
+            continue
+        for item in category.get("searchViewList") or []:
+            title_id = item.get("titleId")
+            if title_id is None:  # contentId만 있는(titleId 없는) 카테고리는 건너뜀
+                continue
+            title_id = str(title_id)
+            if title_id in seen_ids:
+                continue
+            seen_ids.add(title_id)
+
+            authors = [
+                (str(a["artistId"]), a.get("name", ""))
+                for a in item.get("communityArtists") or []
+                if a.get("artistId") is not None
+            ]
+            genres = [g.get("description", "") for g in item.get("genreList") or [] if g.get("description")]
+            tags = [t.get("tagName", "") for t in item.get("tagList") or [] if t.get("tagName")]
+
+            results.append(
+                SearchResultItem(
+                    title_id=title_id,
+                    title_name=item.get("titleName", ""),
+                    thumbnail_url=item.get("thumbnailUrl", ""),
+                    is_finished=bool(item.get("finished")),
+                    is_paused=bool(item.get("rest")),
+                    is_adult=bool(item.get("adult")),
+                    has_update=bool(item.get("up")),
+                    author_ids_names=authors,
+                    genres=genres,
+                    tags=tags,
+                )
+            )
+
+    return results
 
 
 async def fetch_other_titles_by_artist(

@@ -48,6 +48,20 @@ class NaverListItem:
 
 
 @dataclass
+class SearchResultItem:
+    title_id: str
+    title_name: str
+    thumbnail_url: str
+    is_finished: bool
+    is_paused: bool
+    is_adult: bool
+    has_update: bool
+    author_ids_names: list[tuple[str, str]] = field(default_factory=list)
+    genres: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+
+
+@dataclass
 class WebtoonRecord:
     """SQLite webtoons 테이블 한 행에 대응."""
 

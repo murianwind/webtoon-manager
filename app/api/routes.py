@@ -414,19 +414,16 @@ class ManualDownloadIn(BaseModel):
 
 @router.get("/manual-download/search")
 async def manual_download_search_title(query: str):
-    """titleId를 모를 때 제목으로 후보를 찾는다 (네이버 전체목록에서 검색)."""
+    """titleId를 모를 때 제목/작가로 후보를 찾는다 (네이버 통합검색 — 장기휴재작도 나옴)."""
     if not query.strip():
         raise HTTPException(status_code=400, detail="검색할 제목을 입력해주세요.")
     settings = get_settings()
     async with aiohttp.ClientSession() as session:
-        items = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
-    query_lower = query.strip().lower()
-    matches = [
+        results = await naver_api.search_webtoons(session, query.strip(), settings.request_timeout_seconds)
+    return [
         {"title_id": item.title_id, "title": item.title_name, "thumbnail_url": item.thumbnail_url}
-        for item in items
-        if query_lower in item.title_name.lower()
-    ][:10]
-    return matches
+        for item in results[:10]
+    ]
 
 
 @router.get("/manual-download/analyze", response_model=ManualAnalyzeOut)

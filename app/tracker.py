@@ -73,33 +73,16 @@ async def _is_other_finished(
 async def search_authors_by_name(
     session: aiohttp.ClientSession, name: str, settings: Settings
 ) -> list[dict]:
-    """
-    네이버에는 작가 이름 검색 API가 없어서, 전체 웹툰 목록의 저자 텍스트에서
-    이름이 포함된 작품을 찾은 뒤 그 작품들의 상세정보로 실제 author_id를 알아낸다.
-    """
-    catalog = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
-    candidates = [item for item in catalog if name in item.author_summary][:8]
-    if not candidates:
-        return []
-
-    semaphore = asyncio.Semaphore(_ARTIST_SCAN_CONCURRENCY)
-
-    async def _fetch(item):
-        async with semaphore:
-            info = await naver_api.fetch_title_info(session, item.title_id, settings.request_timeout_seconds)
-            return item, info
-
-    results = await asyncio.gather(*(_fetch(c) for c in candidates))
+    """네이버 통합검색으로 작가 이름을 찾는다 (검색 결과에 작가 id/이름이 직접 들어있음)."""
+    results = await naver_api.search_webtoons(session, name, settings.request_timeout_seconds)
 
     found: dict[str, dict] = {}
-    for item, info in results:
-        if info is None:
-            continue
-        for writer_id, writer_name in info.writer_id_name_pairs:
-            if name in writer_name and writer_id not in found:
-                found[writer_id] = {
-                    "author_id": writer_id,
-                    "author_name": writer_name,
+    for item in results:
+        for author_id, author_name in item.author_ids_names:
+            if name in author_name and author_id not in found:
+                found[author_id] = {
+                    "author_id": author_id,
+                    "author_name": author_name,
                     "sample_title": item.title_name,
                     "sample_title_id": item.title_id,
                 }
