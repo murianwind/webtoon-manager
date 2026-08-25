@@ -158,7 +158,8 @@ function renderNaverList() {
   const filterStatus = document.getElementById("naver-list-filter-status").value;
   const sortBy = document.getElementById("naver-list-sort").value;
 
-  let rows = naverListCache.filter((w) => w.status !== "excluded");
+  // 구독해제/목록제외한 작품은 여기서 안 보이고, 각자의 탭(구독해제/제외됨)에서만 보인다.
+  let rows = naverListCache.filter((w) => w.status !== "excluded" && w.status !== "unsubscribed");
 
   if (filterStatus === "active") rows = rows.filter((w) => w.status === "active");
   if (filterStatus === "not-active") rows = rows.filter((w) => w.status !== "active");
@@ -212,7 +213,7 @@ function patchNaverListCard(titleId, webtoon, newStatus) {
   if (cacheIndex >= 0) naverListCache[cacheIndex] = { ...naverListCache[cacheIndex], status: newStatus };
 
   const card = document.querySelector(`#naver-list-grid .webtoon-card[data-title-id="${titleId}"]`);
-  if (newStatus === "excluded") {
+  if (newStatus === "excluded" || newStatus === "unsubscribed") {
     card?.remove();
     const grid = document.getElementById("naver-list-grid");
     document.getElementById("naver-list-empty").classList.toggle("hidden", grid.children.length > 0);
