@@ -98,10 +98,13 @@ function buildNaverListCard(w) {
   `;
 
   const actions = card.querySelector(".webtoon-card-actions");
-  if (w.status !== "active") {
+  if (w.status === "active") {
+    // 이미 구독중인 항목은 "목록제외"가 필요 없다 — 구독해제 버튼 하나만 보여준다.
+    actions.appendChild(makeButton("구독해제", () => naverListUnsubscribe(w)));
+  } else {
     actions.appendChild(makeButton("구독", () => naverListAction(w, "subscribe")));
+    actions.appendChild(makeButton("목록제외", () => naverListAction(w, "exclude")));
   }
-  actions.appendChild(makeButton("목록제외", () => naverListAction(w, "exclude")));
 
   return card;
 }
@@ -129,22 +132,35 @@ async function naverListAction(webtoon, action) {
       method: "POST",
       body: JSON.stringify({ title, thumbnail_url: thumbnailUrl || "" }),
     });
-
-    // 서버를 다시 조회하지 않고, 캐시와 화면에서 이 카드 하나만 즉시 반영한다
-    // (전체 목록을 다시 그리면 모든 이미지가 리로드되며 깜빡인다).
-    const cacheIndex = naverListCache.findIndex((w) => w.title_id === titleId);
-    if (cacheIndex >= 0) naverListCache[cacheIndex] = { ...naverListCache[cacheIndex], status: updated.status };
-
-    const card = document.querySelector(`#naver-list-grid .webtoon-card[data-title-id="${titleId}"]`);
-    if (updated.status === "excluded") {
-      card?.remove();
-      const grid = document.getElementById("naver-list-grid");
-      document.getElementById("naver-list-empty").classList.toggle("hidden", grid.children.length > 0);
-    } else if (card) {
-      card.replaceWith(buildNaverListCard({ ...webtoon, status: updated.status }));
-    }
+    patchNaverListCard(titleId, webtoon, updated.status);
   } catch (e) {
     alert(e.message);
+  }
+}
+
+async function naverListUnsubscribe(webtoon) {
+  const { title_id: titleId } = webtoon;
+  try {
+    const updated = await apiCall(`/api/webtoons/${titleId}/unsubscribe`, { method: "POST" });
+    patchNaverListCard(titleId, webtoon, updated.status);
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+function patchNaverListCard(titleId, webtoon, newStatus) {
+  // 서버를 다시 조회하지 않고, 캐시와 화면에서 이 카드 하나만 즉시 반영한다
+  // (전체 목록을 다시 그리면 모든 이미지가 리로드되며 깜빡인다).
+  const cacheIndex = naverListCache.findIndex((w) => w.title_id === titleId);
+  if (cacheIndex >= 0) naverListCache[cacheIndex] = { ...naverListCache[cacheIndex], status: newStatus };
+
+  const card = document.querySelector(`#naver-list-grid .webtoon-card[data-title-id="${titleId}"]`);
+  if (newStatus === "excluded") {
+    card?.remove();
+    const grid = document.getElementById("naver-list-grid");
+    document.getElementById("naver-list-empty").classList.toggle("hidden", grid.children.length > 0);
+  } else if (card) {
+    card.replaceWith(buildNaverListCard({ ...webtoon, status: newStatus }));
   }
 }
 
