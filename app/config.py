@@ -17,11 +17,6 @@ class Settings(BaseSettings):
     database_path: str = "/data/webtoons.db"
     cookie_file_path: str = "/data/cookies/chokobo_murian.json"
 
-    # 디스코드
-    webtoon_webhook_url: str = ""
-    webtoon_bot_token: str = ""
-    webtoon_notify_channel_id: str = ""
-
     # 태그 자동추가 (콤마 구분 문자열로 받아서 파싱)
     webtoon_tag_ids: str = "134,133"
 

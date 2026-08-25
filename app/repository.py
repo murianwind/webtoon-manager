@@ -326,11 +326,22 @@ def get_enabled_tag_ids() -> list[str]:
 
 # ── 백업/복원 ───────────────────────────────────────────────────────
 
+_SECRET_SETTING_KEYS = {"discord_webhook_url", "discord_bot_token", "discord_notify_channel_id"}
+
+
 def export_all() -> dict:
+    """백업에는 디스코드 비밀값을 포함하지 않는다 — 암호화 키가 없는 다른 환경으로
+    복원하면 어차피 복호화가 안 되고, 백업 파일 자체가 새어나갈 경우의 위험도 줄인다.
+    새 환경에서는 설정 페이지에서 다시 입력하면 된다."""
     conn = get_connection()
+    settings_rows = [
+        dict(r)
+        for r in conn.execute("SELECT * FROM settings").fetchall()
+        if r["key"] not in _SECRET_SETTING_KEYS
+    ]
     return {
         "webtoons": [dict(r) for r in conn.execute("SELECT * FROM webtoons").fetchall()],
-        "settings": [dict(r) for r in conn.execute("SELECT * FROM settings").fetchall()],
+        "settings": settings_rows,
         "watched_authors": [dict(r) for r in conn.execute("SELECT * FROM watched_authors").fetchall()],
         "watched_tags": [dict(r) for r in conn.execute("SELECT * FROM watched_tags").fetchall()],
     }

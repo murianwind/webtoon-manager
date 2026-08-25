@@ -67,12 +67,21 @@ Playwright `storage_state()` 형식(JSON)으로 export한 브라우저 쿠키 �
    - `APP_DATA_HOST_PATH` — DB 등을 저장할 빈 폴더
    - `COOKIE_DIR_HOST_PATH` — 쿠키 export 파일이 있는 폴더
    - `COOKIE_FILE_NAME` — 쿠키 파일명 (기본 `cookies.json`)
-   - `WEBTOON_WEBHOOK_URL` (선택, `WEBTOON_BOT_TOKEN`/`WEBTOON_NOTIFY_CHANNEL_ID`는 완결 확인
-     스레드 기능을 쓸 때만 필요)
 4. Deploy the stack
-5. `http://<호스트>:8000` 접속
+5. `http://<호스트>:8000` 접속 → 설정 탭에서 디스코드 웹훅/봇 토큰/채널ID 입력 (아래 참고)
 
 자동 업데이트가 필요 없으면 `docker-compose.yml`의 `labels` 블록은 지워도 됩니다.
+
+## 디스코드 설정
+
+환경변수로 설정하지 않는다 — 배포 후 웹페이지의 **설정 탭**에서 입력한다.
+DB에 저장될 때 암호화되며, 암호화 키는 `APP_DATA_HOST_PATH` 폴더 안에
+(`DATABASE_PATH`와 같은 위치에) 최초 실행 시 자동 생성된다 — 별도로 관리할
+값이 없다. 백업/복원 기능은 이 키가 환경마다 다르다는 전제로, 디스코드 설정
+값 자체는 백업에 포함하지 않는다(새 환경에서는 설정 탭에서 다시 입력).
+
+이 프로젝트를 외부에서 접근 가능한 네트워크에 노출한다면, 설정 페이지 자체에
+인증이 없으므로 리버스 프록시 등으로 별도 인증을 앞단에 붙이는 것을 권장한다.
 
 ## 로컬 실행 (개발용)
 
