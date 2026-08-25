@@ -37,6 +37,7 @@ def _row_to_record(row) -> WebtoonRecord:
         is_finished=bool(row["is_finished"]),
         finish_ack=bool(row["finish_ack"]),
         thumbnail_url=row["thumbnail_url"] or "",
+        finish_notified=bool(row["finish_notified"]),
     )
 
 
@@ -151,10 +152,19 @@ def mark_finished(title_id: str) -> None:
 
 
 def acknowledge_finish(title_id: str) -> None:
-    """디스코드 '제외' 명령: 완결 알림은 그만 받되 구독/다운로드는 유지."""
+    """알람 제외: 구독은 그대로 유지하고 완결 알림만 그만 받는다."""
     with write_transaction() as conn:
         conn.execute(
             "UPDATE webtoons SET finish_ack = 1, updated_at = ? WHERE title_id = ?",
+            (_now(), title_id),
+        )
+
+
+def set_finish_notified(title_id: str) -> None:
+    """완결 확인 디스코드 메시지를 보냈음을 기록한다 (중복 알림 방지용)."""
+    with write_transaction() as conn:
+        conn.execute(
+            "UPDATE webtoons SET finish_notified = 1, updated_at = ? WHERE title_id = ?",
             (_now(), title_id),
         )
 

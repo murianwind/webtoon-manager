@@ -89,6 +89,22 @@ async def unsubscribe(title_id: str):
     return _to_out(await asyncio.to_thread(repository.get, title_id))
 
 
+@router.post("/webtoons/{title_id}/acknowledge-finish", response_model=WebtoonOut)
+async def acknowledge_finish(title_id: str):
+    """알람 제외: 구독은 그대로 유지하고, 완결 알림(구독해제 여부 물어보는 것)만 그만 받는다."""
+    await asyncio.to_thread(_get_or_404, title_id)
+    await asyncio.to_thread(repository.acknowledge_finish, title_id)
+    return _to_out(await asyncio.to_thread(repository.get, title_id))
+
+
+@router.get("/webtoons/pending-completion", response_model=list[WebtoonOut])
+async def list_pending_completion():
+    """완결됐는데 아직 구독해제/알람제외 처리를 안 한 구독중인 웹툰 목록 (완결 확인 봇이 폴링)."""
+    rows = await asyncio.to_thread(repository.list_by_status, repository.STATUS_ACTIVE)
+    pending = [r for r in rows if r.is_finished and not r.finish_ack]
+    return [_to_out(r) for r in pending]
+
+
 # ── 네이버 전체 웹툰 목록 (여기서 바로 구독/목록제외) ──────────────────
 
 class NaverListEntryIn(BaseModel):
@@ -207,7 +223,6 @@ class JobScheduleIn(BaseModel):
 class SchedulesIn(BaseModel):
     discovery_job: JobScheduleIn
     download_job: JobScheduleIn
-    commands_job: JobScheduleIn
 
 
 def _schedule_to_dict(job_id: str) -> dict:

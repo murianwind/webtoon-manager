@@ -56,3 +56,4 @@ class WebtoonRecord:
     is_finished: bool
     finish_ack: bool
     thumbnail_url: str = ""
+    finish_notified: bool = False

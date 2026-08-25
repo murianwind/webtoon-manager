@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS webtoons (
     is_finished INTEGER NOT NULL DEFAULT 0,
     finish_ack INTEGER NOT NULL DEFAULT 0,
     thumbnail_url TEXT NOT NULL DEFAULT '',
+    finish_notified INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS settings (
 # CREATE TABLE IF NOT EXISTS는 이미 있는 테이블의 컬럼을 추가해주지 않기 때문에 별도로 처리한다.
 _MIGRATIONS = [
     ("webtoons", "thumbnail_url", "ALTER TABLE webtoons ADD COLUMN thumbnail_url TEXT NOT NULL DEFAULT ''"),
+    ("webtoons", "finish_notified", "ALTER TABLE webtoons ADD COLUMN finish_notified INTEGER NOT NULL DEFAULT 0"),
 ]
 
 

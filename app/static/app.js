@@ -244,7 +244,7 @@ async function subscriptionAction(titleId, action, currentTab) {
 let jobPollTimer = null;
 
 const DAY_LABEL = { mon: "월", tue: "화", wed: "수", thu: "목", fri: "금", sat: "토", sun: "일" };
-const SCHEDULE_JOB_IDS = ["discovery_job", "download_job", "commands_job"];
+const SCHEDULE_JOB_IDS = ["discovery_job", "download_job"];
 
 function buildScheduleControls(jobId, schedule) {
   const wrap = document.createElement("div");

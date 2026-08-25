@@ -1,15 +1,17 @@
 """
 주기 작업 정의 + 진행상황 로깅 + 잡별 스케줄(끄기/N분마다/특정 요일·시각) 관리.
 
-세 가지 독립적인 작업으로 나눈다:
-  - discovery_job   : 완결 감지 + 작가/태그 신작 자동추가
+두 가지 독립적인 작업으로 나눈다:
+  - discovery_job   : 완결 감지(+감지 즉시 디스코드 봇으로 확인 메시지 전송) + 작가/태그 신작 자동추가
   - download_job    : 구독 중인 웹툰의 새 회차 다운로드 (회차 하나마다 압축까지 끝내고 다음 화로 진행)
-  - commands_job    : 디스코드 완결-확인 스레드의 사용자 명령만 확인
+
+(예전에는 디스코드 완결-확인 스레드를 폴링하는 commands_job이 따로 있었지만,
+discord_bot.py의 실시간 Gateway 봇으로 대체되어 더 이상 필요 없다 — 폴링 자체가 없어짐.)
 
 각 잡은 웹툰 하나 처리 중 예외가 나도 다른 웹툰 처리를 막지 않도록 individually try/except.
 각 잡의 스케줄은 DB(settings 테이블)에 사용자가 저장한 값이 있으면 그걸 쓰고, 없으면
-기본값(신작 스캔 6시간마다 / 다운로드 1시간마다 / 명령확인 5분마다, 전부 interval 모드)을
-쓴다 — 설정 페이지에서 바꾸면 reschedule_all()로 즉시 반영된다.
+기본값(신작 스캔 6시간마다 / 다운로드 1시간마다, 전부 interval 모드)을 쓴다 —
+설정 페이지에서 바꾸면 reschedule_all()로 즉시 반영된다.
 """
 
 import asyncio
@@ -21,10 +23,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app import comicinfo, job_status, naver_api, repository, schedule_config, tracker
+from app import comicinfo, discord_bot, job_status, naver_api, repository, schedule_config, tracker
 from app.config import Settings, get_settings
 from app.cookie_loader import get_adult_cookies
-from app.discord_notify import sync_completion_thread
 from app.downloader import download_single_episode
 from app.file_utils import remove_forbidden_str
 from app.folder_scanner import find_last_downloaded_episode_no
@@ -36,7 +37,6 @@ log = logging.getLogger(__name__)
 DEFAULT_SCHEDULES: dict[str, JobSchedule] = {
     "discovery_job": JobSchedule(mode="interval", interval_minutes=360),
     "download_job": JobSchedule(mode="interval", interval_minutes=60),
-    "commands_job": JobSchedule(mode="interval", interval_minutes=5),
 }
 
 
@@ -141,6 +141,28 @@ async def run_download_job() -> None:
     job_status.finish("download", success=not had_error)
 
 
+async def _notify_newly_finished() -> None:
+    """완결 감지됐는데 아직 디스코드로 알리지 않은 웹툰에 실시간 봇으로 확인 메시지를 보낸다."""
+    to_notify = [
+        wt
+        for wt in repository.list_by_status(repository.STATUS_ACTIVE)
+        if wt.is_finished and not wt.finish_notified and not wt.finish_ack
+    ]
+    if not to_notify:
+        return
+
+    sent = 0
+    for wt in to_notify:
+        try:
+            await discord_bot.send_completion_prompt(wt.title_id, wt.title)
+            repository.set_finish_notified(wt.title_id)
+            sent += 1
+        except Exception as e:
+            log.error("완결 알림 전송 중 예외 (titleId=%s): %s", wt.title_id, e)
+
+    job_status.log_line("discovery", f"완결 확인 알림 {sent}건 전송")
+
+
 async def run_discovery_job() -> None:
     settings = get_settings()
     job_status.start("discovery")
@@ -174,28 +196,18 @@ async def run_discovery_job() -> None:
             log.error("태그 기반 신작 스캔 중 예외: %s", e)
             job_status.log_line("discovery", f"태그 기반 신작 스캔 오류: {e}")
 
+    try:
+        await _notify_newly_finished()
+    except Exception as e:
+        had_error = True
+        log.error("완결 알림 처리 중 예외: %s", e)
+
     job_status.finish("discovery", success=not had_error)
-
-
-async def run_commands_job() -> None:
-    settings = get_settings()
-    job_status.start("commands")
-    had_error = False
-    async with aiohttp.ClientSession() as session:
-        try:
-            await sync_completion_thread(session, settings)
-            job_status.log_line("commands", "디스코드 명령 확인 완료")
-        except Exception as e:
-            had_error = True
-            log.error("디스코드 명령 처리 중 예외: %s", e)
-            job_status.log_line("commands", f"오류: {e}")
-    job_status.finish("commands", success=not had_error)
 
 
 _JOB_FUNCS = {
     "discovery_job": run_discovery_job,
     "download_job": run_download_job,
-    "commands_job": run_commands_job,
 }
 
 

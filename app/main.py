@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router as api_router
 from app.config import get_settings
+from app.discord_bot import start_bot, stop_bot
 from app.scheduler import create_scheduler
 
 
@@ -48,11 +49,14 @@ def _configure_logging() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _configure_logging()
+    settings = get_settings()
+    await start_bot(settings)
     scheduler = create_scheduler()
     scheduler.start()
     app.state.scheduler = scheduler
     yield
     scheduler.shutdown(wait=False)
+    await stop_bot()
 
 
 app = FastAPI(title="웹툰 구독 관리", lifespan=lifespan)
