@@ -50,18 +50,21 @@
   <!-- 설정 -->
   <section id="page-settings" class="page hidden">
     <div class="settings-card">
-      <h2>실행 주기</h2>
-      <div class="settings-form">
-        <label>신작 스캔 주기 (분)
-          <input id="setting-scan" type="number" min="1" />
-        </label>
-        <label>다운로드 주기 (분)
-          <input id="setting-download" type="number" min="1" />
-        </label>
-        <label>디스코드 명령 확인 주기 (분)
-          <input id="setting-commands" type="number" min="1" />
-        </label>
+      <h2>실행 스케줄</h2>
+
+      <div class="schedule-block" data-job="discovery_job">
+        <h3>신작 스캔</h3>
+        <div class="schedule-controls"></div>
       </div>
+      <div class="schedule-block" data-job="download_job">
+        <h3>다운로드</h3>
+        <div class="schedule-controls"></div>
+      </div>
+      <div class="schedule-block" data-job="commands_job">
+        <h3>디스코드 명령 확인</h3>
+        <div class="schedule-controls"></div>
+      </div>
+
       <button id="btn-save-settings">저장</button>
       <span id="settings-save-result" class="error"></span>
     </div>
@@ -75,11 +78,11 @@
 
       <div class="job-status-block">
         <h3>신작 스캔 상태 <span id="discovery-status-badge" class="badge">idle</span></h3>
-        <pre id="discovery-log" class="job-log"></pre>
+        <div id="discovery-log" class="job-log"></div>
       </div>
       <div class="job-status-block">
         <h3>다운로드 상태 <span id="download-status-badge" class="badge">idle</span></h3>
-        <pre id="download-log" class="job-log"></pre>
+        <div id="download-log" class="job-log"></div>
       </div>
     </div>
   </section>

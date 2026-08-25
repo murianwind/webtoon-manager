@@ -243,12 +243,77 @@ async function subscriptionAction(titleId, action, currentTab) {
 
 let jobPollTimer = null;
 
+const DAY_LABEL = { mon: "월", tue: "화", wed: "수", thu: "목", fri: "금", sat: "토", sun: "일" };
+const SCHEDULE_JOB_IDS = ["discovery_job", "download_job", "commands_job"];
+
+function buildScheduleControls(jobId, schedule) {
+  const wrap = document.createElement("div");
+
+  const modeSelect = document.createElement("select");
+  modeSelect.className = "schedule-mode";
+  modeSelect.innerHTML = `
+    <option value="off">끄기</option>
+    <option value="interval">주기(분)마다</option>
+    <option value="cron">특정 시각</option>
+  `;
+  modeSelect.value = schedule.mode;
+
+  const intervalRow = document.createElement("div");
+  intervalRow.className = "schedule-row schedule-interval-row";
+  intervalRow.innerHTML = `<input type="number" min="1" class="schedule-interval" value="${schedule.interval_minutes}" /> 분마다`;
+
+  const cronRow = document.createElement("div");
+  cronRow.className = "schedule-row schedule-cron-row";
+  const hourOptions = Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, "0")}</option>`).join("");
+  const minuteOptions = Array.from({ length: 60 }, (_, m) => `<option value="${m}">${String(m).padStart(2, "0")}</option>`).join("");
+  const dayCheckboxes = Object.entries(DAY_LABEL)
+    .map(
+      ([day, label]) => `
+      <label class="day-checkbox">
+        <input type="checkbox" class="schedule-day" value="${day}" ${schedule.cron_days.includes(day) ? "checked" : ""} />
+        ${label}
+      </label>`
+    )
+    .join("");
+  cronRow.innerHTML = `
+    <select class="schedule-hour">${hourOptions}</select> 시
+    <select class="schedule-minute">${minuteOptions}</select> 분
+    <span class="day-checkbox-group">${dayCheckboxes}<span class="schedule-day-hint">(아무 요일도 안 고르면 매일)</span></span>
+  `;
+  cronRow.querySelector(".schedule-hour").value = schedule.cron_hour;
+  cronRow.querySelector(".schedule-minute").value = schedule.cron_minute;
+
+  function updateVisibility() {
+    intervalRow.classList.toggle("hidden", modeSelect.value !== "interval");
+    cronRow.classList.toggle("hidden", modeSelect.value !== "cron");
+  }
+  modeSelect.addEventListener("change", updateVisibility);
+  updateVisibility();
+
+  wrap.appendChild(modeSelect);
+  wrap.appendChild(intervalRow);
+  wrap.appendChild(cronRow);
+  return wrap;
+}
+
+function readScheduleControls(wrap) {
+  return {
+    mode: wrap.querySelector(".schedule-mode").value,
+    interval_minutes: Number(wrap.querySelector(".schedule-interval").value) || 60,
+    cron_hour: Number(wrap.querySelector(".schedule-hour").value) || 0,
+    cron_minute: Number(wrap.querySelector(".schedule-minute").value) || 0,
+    cron_days: Array.from(wrap.querySelectorAll(".schedule-day:checked")).map((el) => el.value),
+  };
+}
+
 async function loadSettingsPage() {
   try {
-    const settings = await apiCall("/api/settings");
-    document.getElementById("setting-scan").value = settings.scan_interval_minutes;
-    document.getElementById("setting-download").value = settings.download_interval_minutes;
-    document.getElementById("setting-commands").value = settings.commands_only_interval_minutes;
+    const schedules = await apiCall("/api/settings");
+    for (const jobId of SCHEDULE_JOB_IDS) {
+      const block = document.querySelector(`.schedule-block[data-job="${jobId}"] .schedule-controls`);
+      block.innerHTML = "";
+      block.appendChild(buildScheduleControls(jobId, schedules[jobId]));
+    }
   } catch (e) {
     document.getElementById("settings-save-result").textContent = e.message;
   }
@@ -260,14 +325,12 @@ document.getElementById("btn-save-settings").addEventListener("click", async () 
   const resultEl = document.getElementById("settings-save-result");
   resultEl.textContent = "";
   try {
-    await apiCall("/api/settings", {
-      method: "POST",
-      body: JSON.stringify({
-        scan_interval_minutes: Number(document.getElementById("setting-scan").value),
-        download_interval_minutes: Number(document.getElementById("setting-download").value),
-        commands_only_interval_minutes: Number(document.getElementById("setting-commands").value),
-      }),
-    });
+    const payload = {};
+    for (const jobId of SCHEDULE_JOB_IDS) {
+      const wrap = document.querySelector(`.schedule-block[data-job="${jobId}"] .schedule-controls`);
+      payload[jobId] = readScheduleControls(wrap);
+    }
+    await apiCall("/api/settings", { method: "POST", body: JSON.stringify(payload) });
     resultEl.style.color = "";
     resultEl.textContent = "저장했습니다.";
   } catch (e) {
@@ -285,6 +348,21 @@ document.getElementById("btn-run-download").addEventListener("click", async () =
   await refreshJobStatus();
 });
 
+function renderJobLog(jobName, lines) {
+  const container = document.getElementById(`${jobName}-log`);
+  container.innerHTML = lines
+    .map((line) => {
+      const separatorIndex = line.indexOf(" — ");
+      const timestamp = separatorIndex >= 0 ? line.slice(0, separatorIndex) : "";
+      const message = separatorIndex >= 0 ? line.slice(separatorIndex + 3) : line;
+      const timeLabel = timestamp.length >= 19 ? timestamp.slice(11, 19) : timestamp;
+      const isError = /오류|실패/.test(message);
+      return `<div class="log-line${isError ? " log-error" : ""}"><span class="log-time">${escapeHtml(timeLabel)}</span>${escapeHtml(message)}</div>`;
+    })
+    .join("");
+  container.scrollTop = container.scrollHeight;
+}
+
 async function refreshJobStatus() {
   let statuses;
   try {
@@ -299,7 +377,7 @@ async function refreshJobStatus() {
     const badge = document.getElementById(`${jobName}-status-badge`);
     badge.textContent = st.status;
     badge.className = `badge job-${st.status}`;
-    document.getElementById(`${jobName}-log`).textContent = st.log.join("\n");
+    renderJobLog(jobName, st.log);
   }
 }
 

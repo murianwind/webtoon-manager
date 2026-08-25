@@ -16,7 +16,7 @@ import aiohttp
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
-from app import job_status, naver_api, repository
+from app import job_status, naver_api, repository, schedule_config
 from app import scheduler as scheduler_mod
 from app.config import get_settings
 
@@ -158,51 +158,88 @@ async def naver_list_exclude(title_id: str, payload: NaverListEntryIn):
     return _to_out(await asyncio.to_thread(repository.get, title_id))
 
 
-# ── 설정 (다운로드/스캔 주기) ──────────────────────────────────────
+# ── 설정 (잡별 스케줄: 끄기 / N분마다 / 특정 요일·시각) ────────────────
 
-class IntervalSettingsOut(BaseModel):
-    scan_interval_minutes: int
-    download_interval_minutes: int
-    commands_only_interval_minutes: int
+class JobScheduleIn(BaseModel):
+    mode: str  # off | interval | cron
+    interval_minutes: int = 60
+    cron_hour: int = 3
+    cron_minute: int = 0
+    cron_days: list[str] = []
 
-
-class IntervalSettingsIn(BaseModel):
-    scan_interval_minutes: int
-    download_interval_minutes: int
-    commands_only_interval_minutes: int
-
-    @field_validator("scan_interval_minutes", "download_interval_minutes", "commands_only_interval_minutes")
+    @field_validator("mode")
     @classmethod
-    def must_be_positive(cls, v: int) -> int:
+    def mode_must_be_valid(cls, v: str) -> str:
+        if v not in schedule_config.VALID_MODES:
+            raise ValueError(f"mode는 {schedule_config.VALID_MODES} 중 하나여야 합니다.")
+        return v
+
+    @field_validator("interval_minutes")
+    @classmethod
+    def interval_positive(cls, v: int) -> int:
         if v < 1:
             raise ValueError("주기는 1분 이상이어야 합니다.")
         return v
 
+    @field_validator("cron_hour")
+    @classmethod
+    def hour_in_range(cls, v: int) -> int:
+        if not (0 <= v <= 23):
+            raise ValueError("시(hour)는 0~23이어야 합니다.")
+        return v
 
-@router.get("/settings", response_model=IntervalSettingsOut)
-async def get_interval_settings():
-    return IntervalSettingsOut(
-        scan_interval_minutes=await asyncio.to_thread(scheduler_mod.get_effective_interval, "scan_interval_minutes"),
-        download_interval_minutes=await asyncio.to_thread(
-            scheduler_mod.get_effective_interval, "download_interval_minutes"
-        ),
-        commands_only_interval_minutes=await asyncio.to_thread(
-            scheduler_mod.get_effective_interval, "commands_only_interval_minutes"
-        ),
+    @field_validator("cron_minute")
+    @classmethod
+    def minute_in_range(cls, v: int) -> int:
+        if not (0 <= v <= 59):
+            raise ValueError("분(minute)은 0~59여야 합니다.")
+        return v
+
+    @field_validator("cron_days")
+    @classmethod
+    def days_must_be_valid(cls, v: list[str]) -> list[str]:
+        invalid = [d for d in v if d not in schedule_config.VALID_DAYS]
+        if invalid:
+            raise ValueError(f"알 수 없는 요일: {invalid}")
+        return v
+
+
+class SchedulesIn(BaseModel):
+    discovery_job: JobScheduleIn
+    download_job: JobScheduleIn
+    commands_job: JobScheduleIn
+
+
+def _schedule_to_dict(job_id: str) -> dict:
+    s = schedule_config.get_schedule(job_id, scheduler_mod.DEFAULT_SCHEDULES[job_id])
+    return {
+        "mode": s.mode,
+        "interval_minutes": s.interval_minutes,
+        "cron_hour": s.cron_hour,
+        "cron_minute": s.cron_minute,
+        "cron_days": s.cron_days,
+    }
+
+
+@router.get("/settings")
+async def get_schedules():
+    return await asyncio.to_thread(
+        lambda: {job_id: _schedule_to_dict(job_id) for job_id in scheduler_mod.DEFAULT_SCHEDULES}
     )
 
 
-@router.post("/settings", response_model=IntervalSettingsOut)
-async def update_interval_settings(payload: IntervalSettingsIn, request: Request):
-    for field_name, key in scheduler_mod.INTERVAL_SETTING_KEYS.items():
-        value = getattr(payload, field_name)
-        await asyncio.to_thread(repository.set_setting, key, str(value))
+@router.post("/settings")
+async def update_schedules(payload: SchedulesIn, request: Request):
+    for job_id, job_in in payload.model_dump().items():
+        job_schedule = schedule_config.JobSchedule(**job_in)
+        await asyncio.to_thread(schedule_config.set_schedule, job_id, job_schedule)
 
     scheduler = getattr(request.app.state, "scheduler", None)
     if scheduler is not None:
         await asyncio.to_thread(scheduler_mod.reschedule_all, scheduler)
 
-    return await get_interval_settings()
+    return await get_schedules()
+
 
 
 # ── 수동 실행 + 진행상황 ──────────────────────────────────────────

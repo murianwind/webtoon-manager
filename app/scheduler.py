@@ -1,14 +1,15 @@
 """
-주기 작업 정의 + 진행상황 로깅 + 설정 기반 동적 주기 조정.
+주기 작업 정의 + 진행상황 로깅 + 잡별 스케줄(끄기/N분마다/특정 요일·시각) 관리.
 
-세 가지 독립적인 주기로 나눈다:
+세 가지 독립적인 작업으로 나눈다:
   - discovery_job   : 완결 감지 + 작가/태그 신작 자동추가
   - download_job    : 구독 중인 웹툰의 새 회차 다운로드 (회차 하나마다 압축까지 끝내고 다음 화로 진행)
   - commands_job    : 디스코드 완결-확인 스레드의 사용자 명령만 확인
 
 각 잡은 웹툰 하나 처리 중 예외가 나도 다른 웹툰 처리를 막지 않도록 individually try/except.
-주기는 DB(settings 테이블)에 사용자가 저장한 값이 있으면 그걸 쓰고, 없으면 환경변수
-기본값을 쓴다 — 설정 페이지에서 바꾸면 reschedule_all()로 즉시 반영된다.
+각 잡의 스케줄은 DB(settings 테이블)에 사용자가 저장한 값이 있으면 그걸 쓰고, 없으면
+기본값(신작 스캔 6시간마다 / 다운로드 1시간마다 / 명령확인 5분마다, 전부 interval 모드)을
+쓴다 — 설정 페이지에서 바꾸면 reschedule_all()로 즉시 반영된다.
 """
 
 import asyncio
@@ -17,33 +18,26 @@ from pathlib import Path
 
 import aiohttp
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
-from app import comicinfo, job_status, naver_api, repository, tracker
+from app import comicinfo, job_status, naver_api, repository, schedule_config, tracker
 from app.config import Settings, get_settings
 from app.cookie_loader import get_adult_cookies
 from app.discord_notify import sync_completion_thread
 from app.downloader import download_single_episode
 from app.file_utils import remove_forbidden_str
-from app.folder_scanner import count_existing_episode_entries
+from app.folder_scanner import find_last_downloaded_episode_no
+from app.schedule_config import JobSchedule
 from app.zipper import zip_episode_folders
 
 log = logging.getLogger(__name__)
 
-# DB(settings 테이블)에 저장할 때 쓰는 키. Settings 필드명과 짝지어서 get/set 양쪽에서 공유한다.
-INTERVAL_SETTING_KEYS = {
-    "scan_interval_minutes": "interval_scan_minutes",
-    "download_interval_minutes": "interval_download_minutes",
-    "commands_only_interval_minutes": "interval_commands_minutes",
+DEFAULT_SCHEDULES: dict[str, JobSchedule] = {
+    "discovery_job": JobSchedule(mode="interval", interval_minutes=360),
+    "download_job": JobSchedule(mode="interval", interval_minutes=60),
+    "commands_job": JobSchedule(mode="interval", interval_minutes=5),
 }
-
-
-def get_effective_interval(field_name: str) -> int:
-    settings = get_settings()
-    default_value = getattr(settings, field_name)
-    override = repository.get_setting(INTERVAL_SETTING_KEYS[field_name])
-    if override and override.isdigit() and int(override) >= 1:
-        return int(override)
-    return default_value
 
 
 async def _download_new_episodes_for_one(session: aiohttp.ClientSession, settings: Settings, title_id: str) -> None:
@@ -72,21 +66,19 @@ async def _download_new_episodes_for_one(session: aiohttp.ClientSession, setting
     )
     free_episodes = naver_api.free_episodes_only(all_episodes)
 
-    # last_downloaded_no가 0(=아직 한 번도 추론 안 됨)인데 폴더에 파일이 이미 있으면
-    # (예: 이전 시스템에서 넘어온 웹툰), 폴더에 있는 회차 수를 기준으로 몇 화까지
-    # 받았는지 한 번 추론해서 기록한다. 그래야 전체를 다시 받지 않는다.
+    # DB에 저장된 last_downloaded_no만 믿지 않고, 매번 실제 폴더의 마지막 zip 파일명을
+    # 부제목 기준으로 네이버 회차 목록과 대조해서 확인한다. 네이버 회차 번호(no)는
+    # 가끔 건너뛰기 때문에(예: 109 다음이 111), 로컬 zip 개수를 세서 위치로 추론하면
+    # 어긋난다 — 그래서 반드시 부제목 텍스트로 실제 회차를 찾아야 한다.
     last_no = webtoon.last_downloaded_no
-    if last_no == 0:
-        existing_count = count_existing_episode_entries(webtoon_dir)
-        if existing_count > 0:
-            inferred_index = min(existing_count, len(free_episodes)) - 1
-            if inferred_index >= 0:
-                last_no = free_episodes[inferred_index].episode_no
-                repository.update_last_downloaded_no(title_id, last_no)
-                job_status.log_line(
-                    "download",
-                    f"[{info.title_name}] 기존 폴더에서 {existing_count}개 회차 발견 → {last_no}화까지 완료로 표시",
-                )
+    folder_last_no = find_last_downloaded_episode_no(webtoon_dir, free_episodes)
+    if folder_last_no > last_no:
+        job_status.log_line(
+            "download",
+            f"[{info.title_name}] 폴더 확인 결과 {folder_last_no}화까지 완료 (DB 기록 {last_no}화에서 갱신)",
+        )
+        last_no = folder_last_no
+        repository.update_last_downloaded_no(title_id, last_no)
 
     if comicinfo.needs_comicinfo(webtoon_dir):
         webtoon_dir.mkdir(parents=True, exist_ok=True)
@@ -200,32 +192,46 @@ async def run_commands_job() -> None:
     job_status.finish("commands", success=not had_error)
 
 
+_JOB_FUNCS = {
+    "discovery_job": run_discovery_job,
+    "download_job": run_download_job,
+    "commands_job": run_commands_job,
+}
+
+
+def _build_trigger(schedule: JobSchedule):
+    """off면 None(=스케줄 없음), interval이면 N분마다, cron이면 지정한 시:분/요일에."""
+    if schedule.mode == "off":
+        return None
+    if schedule.mode == "cron":
+        day_of_week = ",".join(schedule.cron_days) if schedule.cron_days else "*"
+        return CronTrigger(hour=schedule.cron_hour, minute=schedule.cron_minute, day_of_week=day_of_week)
+    return IntervalTrigger(minutes=schedule.interval_minutes)
+
+
+def _apply_job_schedule(scheduler: AsyncIOScheduler, job_id: str) -> None:
+    schedule = schedule_config.get_schedule(job_id, DEFAULT_SCHEDULES[job_id])
+    trigger = _build_trigger(schedule)
+    existing = scheduler.get_job(job_id)
+
+    if trigger is None:
+        if existing:
+            scheduler.remove_job(job_id)
+        return
+
+    if existing:
+        scheduler.reschedule_job(job_id, trigger=trigger)
+    else:
+        scheduler.add_job(_JOB_FUNCS[job_id], trigger=trigger, id=job_id)
+
+
 def create_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(
-        run_discovery_job,
-        "interval",
-        minutes=get_effective_interval("scan_interval_minutes"),
-        id="discovery_job",
-    )
-    scheduler.add_job(
-        run_download_job,
-        "interval",
-        minutes=get_effective_interval("download_interval_minutes"),
-        id="download_job",
-    )
-    scheduler.add_job(
-        run_commands_job,
-        "interval",
-        minutes=get_effective_interval("commands_only_interval_minutes"),
-        id="commands_job",
-    )
+    for job_id in DEFAULT_SCHEDULES:
+        _apply_job_schedule(scheduler, job_id)
     return scheduler
 
 
 def reschedule_all(scheduler: AsyncIOScheduler) -> None:
-    scheduler.reschedule_job("discovery_job", trigger="interval", minutes=get_effective_interval("scan_interval_minutes"))
-    scheduler.reschedule_job("download_job", trigger="interval", minutes=get_effective_interval("download_interval_minutes"))
-    scheduler.reschedule_job(
-        "commands_job", trigger="interval", minutes=get_effective_interval("commands_only_interval_minutes")
-    )
+    for job_id in DEFAULT_SCHEDULES:
+        _apply_job_schedule(scheduler, job_id)
