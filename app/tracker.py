@@ -186,10 +186,15 @@ async def resync_registry(session: aiohttp.ClientSession, settings: Settings) ->
     async def _run_one(wt) -> bool:
         nonlocal registered_count
         async with semaphore:
-            success, message = await enrich_one(session, wt.title_id, settings)
+            # 제외된 웹툰의 정보는 채우되(썸네일/장르/태그 등), 그 저자를 "등록된 작가"로
+            # 올리진 않는다 — 목록제외한 웹툰의 작가가 관심작가가 되면 안 되기 때문.
+            register_authors_enabled = wt.status != repository.STATUS_EXCLUDED
+            success, message = await enrich_one(
+                session, wt.title_id, settings, register_authors_enabled=register_authors_enabled
+            )
             job_status.log_line("registry", f"[{wt.title}] {message}")
             await asyncio.sleep(settings.delay_seconds)
-            return success and message.startswith("작가 등록")
+            return success and message.startswith("작가 등록") and register_authors_enabled
 
     results = await asyncio.gather(*(_run_one(wt) for wt in targets))
     registered_count = sum(1 for r in results if r)

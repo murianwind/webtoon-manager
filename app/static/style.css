@@ -33,13 +33,17 @@ button {
 }
 button:hover { border-color: var(--accent); }
 
-/* 상단 탭 */
+/* 상단 탭: 스크롤해도 항상 보이게 고정 */
 .main-tabs {
   display: flex;
   gap: 4px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 20px;
   flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 20;
 }
 .main-tab {
   background: transparent;
@@ -362,6 +366,82 @@ button:hover { border-color: var(--accent); }
   margin-bottom: 16px;
 }
 
+/* 작가/태그 관리: 칩(pill) 스타일 — 선택됨/사용가능 두 칸, 클릭으로 이동 */
+.chip-section {
+  display: flex;
+  gap: 28px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.chip-column {
+  flex: 1;
+  min-width: 240px;
+}
+.chip-column h4 {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 0 10px;
+  font-weight: 600;
+}
+.chip-filter {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.chip-container {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 8px;
+  min-height: 40px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.chip-empty-message {
+  font-size: 12px;
+  color: var(--muted);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  border: none;
+  line-height: 1.4;
+}
+.chip:hover { filter: brightness(0.95); }
+.chip.chip-selected {
+  background: #e6f0ff;
+  color: #1a5fd6;
+}
+.chip.chip-available {
+  background: #f0f0f0;
+  color: var(--text);
+}
+.chip .chip-icon {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.registry-manual-add {
+  margin-top: 18px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.registry-manual-add summary {
+  cursor: pointer;
+}
+.registry-manual-add .registry-add-row {
+  margin-top: 10px;
+}
+
 .registry-subheading {
   font-size: 13px;
   color: var(--muted);
@@ -372,6 +452,9 @@ button:hover { border-color: var(--accent); }
   align-items: center;
   gap: 10px;
   margin-bottom: 6px;
+}
+.registry-resync-row + .hint {
+  margin-top: 4px;
 }
 
 /* 실행 이력 */

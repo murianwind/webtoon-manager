@@ -35,8 +35,8 @@
         <option value="new-episode">새 에피소드 먼저</option>
       </select>
       <button id="btn-refresh-naver-list">새로고침</button>
-      <span id="naver-list-refresh-status" class="hint-inline"></span>
     </div>
+    <p id="naver-list-refresh-status" class="hint"></p>
     <div id="naver-list-grid" class="webtoon-grid"></div>
     <p id="naver-list-empty" class="hidden empty-message">불러온 목록이 없습니다.</p>
   </section>
@@ -105,46 +105,41 @@
 
     <div class="settings-card">
       <h2>작가</h2>
-      <p class="hint">구독중인 웹툰들의 저자가 자동으로 "등록된 작가"에 뜹니다. "전체 작가 목록"은
-      네이버 연재중 작품 목록에서 뽑은 이름 후보입니다(추가 조회 없이 즉시 표시) — 클릭하면
-      정확한 검색으로 등록됩니다.</p>
-      <div class="registry-columns">
-        <div class="registry-column">
-          <h3>등록된 작가</h3>
-          <div id="author-registered-list" class="registry-list registry-list-scroll"></div>
+      <p class="hint">구독중인 웹툰들의 저자가 자동으로 "선택됨"에 뜹니다. "사용 가능"은 네이버 연재중
+      작품 목록에서 뽑은 이름 후보입니다(추가 조회 없이 즉시 표시) — 클릭하면 정확한 검색으로 등록됩니다.</p>
+      <div class="chip-section">
+        <div class="chip-column">
+          <h4>선택됨</h4>
+          <div id="author-registered-chips" class="chip-container"></div>
         </div>
-        <div class="registry-column">
-          <h3>전체 작가 목록</h3>
-          <input id="author-candidate-filter" type="text" placeholder="이름으로 좁혀보기" />
-          <div id="author-all-list" class="registry-list registry-list-scroll"></div>
+        <div class="chip-column">
+          <h4>사용 가능</h4>
+          <input id="author-candidate-filter" type="text" class="chip-filter" placeholder="이름으로 좁혀보기" />
+          <div id="author-all-chips" class="chip-container"></div>
         </div>
       </div>
 
-      <h3 class="registry-subheading">이름으로 직접 검색해서 등록</h3>
-      <div class="registry-add-row">
-        <input id="author-search-input" type="text" placeholder="작가 이름으로 정확히 검색해서 등록" />
-        <button id="btn-search-author">검색</button>
-      </div>
-      <div id="author-search-results" class="registry-list"></div>
-
-      <div class="registry-add-row">
-        <input id="add-author-id" type="text" placeholder="author_id (직접 등록)" />
-        <input id="add-author-name" type="text" placeholder="이름(선택)" />
-        <button id="btn-add-author">직접 추가</button>
-      </div>
+      <details class="registry-manual-add">
+        <summary>author_id를 직접 알고 있다면</summary>
+        <div class="registry-add-row">
+          <input id="add-author-id" type="text" placeholder="author_id (직접 등록)" />
+          <input id="add-author-name" type="text" placeholder="이름(선택)" />
+          <button id="btn-add-author">직접 추가</button>
+        </div>
+      </details>
     </div>
 
     <div class="settings-card">
       <h2>태그</h2>
-      <div class="registry-columns">
-        <div class="registry-column">
-          <h3>등록된 태그</h3>
-          <div id="tag-registered-list" class="registry-list registry-list-scroll"></div>
+      <div class="chip-section">
+        <div class="chip-column">
+          <h4>선택됨</h4>
+          <div id="tag-registered-chips" class="chip-container"></div>
         </div>
-        <div class="registry-column">
-          <h3>전체 태그 목록</h3>
-          <input id="tag-catalog-search" type="text" placeholder="이름으로 좁혀보기" />
-          <div id="tag-all-list" class="registry-list registry-list-scroll"></div>
+        <div class="chip-column">
+          <h4>사용 가능</h4>
+          <input id="tag-catalog-search" type="text" class="chip-filter" placeholder="이름으로 좁혀보기" />
+          <div id="tag-all-chips" class="chip-container"></div>
         </div>
       </div>
     </div>

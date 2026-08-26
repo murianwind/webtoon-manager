@@ -29,6 +29,18 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// 로그의 타임스탬프는 서버가 UTC로 찍어서 보내므로(예: "...+00:00"), 그냥 문자열을
+// 잘라 쓰면 한국시간이 아니라 UTC 그대로 보인다 — 항상 이 함수로 KST 변환해서 쓴다.
+function formatKoreanTime(isoString, options = {}) {
+  const date = new Date(isoString);
+  if (isNaN(date.getTime())) return isoString || "";
+  return date.toLocaleString("ko-KR", { timeZone: "Asia/Seoul", ...options });
+}
+
+function formatKoreanTimeOnly(isoString) {
+  return formatKoreanTime(isoString, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
+
 function makeButton(label, onClick) {
   const btn = document.createElement("button");
   btn.textContent = label;
@@ -59,16 +71,22 @@ const pageLoaders = {
   settings: loadSettingsPage,
 };
 
+const ACTIVE_TAB_KEY = "activeMainTab";
+
+function switchToTab(page) {
+  document.querySelectorAll(".main-tab").forEach((t) => t.classList.toggle("active", t.dataset.page === page));
+  document.querySelectorAll(".page").forEach((p) => p.classList.add("hidden"));
+  document.getElementById(`page-${page}`).classList.remove("hidden");
+  stopJobPolling();
+  stopRegistryPolling();
+  pageLoaders[page]?.();
+}
+
 document.querySelectorAll(".main-tab").forEach((tab) => {
   tab.addEventListener("click", () => {
-    document.querySelectorAll(".main-tab").forEach((t) => t.classList.remove("active"));
-    document.querySelectorAll(".page").forEach((p) => p.classList.add("hidden"));
-    tab.classList.add("active");
     const page = tab.dataset.page;
-    document.getElementById(`page-${page}`).classList.remove("hidden");
-    stopJobPolling();
-    stopRegistryPolling();
-    pageLoaders[page]?.();
+    localStorage.setItem(ACTIVE_TAB_KEY, page);
+    switchToTab(page);
   });
 });
 
@@ -158,7 +176,7 @@ async function loadNaverList() {
   try {
     naverListCache = await apiCall("/api/naver-list");
     renderNaverList();
-    statusEl.textContent = `마지막 새로고침: ${new Date().toLocaleString("ko-KR")} (${naverListCache.length}개)`;
+    statusEl.textContent = `마지막 새로고침: ${formatKoreanTime(new Date().toISOString())} (${naverListCache.length}개)`;
   } catch (e) {
     if (grid.children.length === 0) {
       emptyMsg.textContent = `목록을 불러오지 못했습니다: ${e.message}`;
@@ -510,7 +528,6 @@ async function refreshManualStatus() {
 let registryPollTimer = null;
 
 async function loadRegistryPage() {
-  document.getElementById("author-search-results").innerHTML = "";
   await loadAuthorList();
   await loadTagList();
   await refreshRegistryJobStatuses();
@@ -558,48 +575,44 @@ function stopRegistryPolling() {
   }
 }
 
-async function searchAndRegisterAuthor(name, resultsEl) {
-  resultsEl.innerHTML = "<p>검색 중...</p>";
+// 칩 하나를 만든다. selected=true면 파란 "선택됨" 칩(× 아이콘, 클릭 시 onAction),
+// false면 회색 "사용 가능" 칩(+ 아이콘, 클릭 시 onAction).
+function buildChip(label, selected, onAction) {
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = `chip ${selected ? "chip-selected" : "chip-available"}`;
+  chip.innerHTML = `<span>${escapeHtml(label)}</span><span class="chip-icon">${selected ? "×" : "+"}</span>`;
+  chip.addEventListener("click", onAction);
+  return chip;
+}
+
+async function searchAndRegisterAuthor(name) {
   try {
     const results = await apiCall(`/api/authors/search?name=${encodeURIComponent(name)}`);
-    resultsEl.innerHTML = "";
     if (results.length === 0) {
-      resultsEl.innerHTML = "<p>일치하는 작가를 찾지 못했습니다. 이름이 정확한지 확인해주세요.</p>";
+      alert(`"${name}"과 일치하는 작가를 찾지 못했습니다.`);
       return;
     }
-    for (const r of results) {
-      const row = document.createElement("div");
-      row.className = "registry-row";
-      row.innerHTML = `<span>${escapeHtml(r.author_name)} <span class="registry-meta">(예: ${escapeHtml(r.sample_title)})</span></span>`;
-      row.appendChild(
-        makeButton("등록", async () => {
-          await apiCall("/api/watched-authors", {
-            method: "POST",
-            body: JSON.stringify({ author_id: r.author_id, author_name: r.author_name }),
-          });
-          loadAuthorList();
-        })
-      );
-      resultsEl.appendChild(row);
-    }
+    // 이름으로 정확히 검색했을 때 후보가 여러 명이면(동명이인 등) 첫 번째로 등록한다 —
+    // 후보가 여러 개 나오는 경우는 드물고, 필요하면 언제든 "제외"로 되돌릴 수 있다.
+    const r = results[0];
+    await apiCall("/api/watched-authors", {
+      method: "POST",
+      body: JSON.stringify({ author_id: r.author_id, author_name: r.author_name }),
+    });
+    loadAuthorList();
   } catch (e) {
-    resultsEl.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+    alert(e.message);
   }
 }
 
-document.getElementById("btn-search-author").addEventListener("click", () => {
-  const name = document.getElementById("author-search-input").value.trim();
-  if (!name) return;
-  searchAndRegisterAuthor(name, document.getElementById("author-search-results"));
-});
-
-// 등록된 작가 = watched_authors(enabled=true). 전체 작가 목록 = 이미 불러온 네이버
-// 목록의 저자 텍스트에서 뽑은 이름 후보 중 아직 등록 안 한 것 — 추가 조회 없이 즉시 표시.
+// 등록된 작가(watchedAuthorsCache, enabled=true) / 사용 가능(네이버 연재중 목록에서
+// 뽑은 이름 후보 중 아직 등록 안 한 것) — 칩을 클릭하면 서로 반대쪽으로 이동한다.
 let watchedAuthorsCache = [];
 let authorCandidatesCache = [];
 
 async function loadAuthorList() {
-  const registeredEl = document.getElementById("author-registered-list");
+  const registeredEl = document.getElementById("author-registered-chips");
   try {
     watchedAuthorsCache = await apiCall("/api/authors/interested");
   } catch (e) {
@@ -612,7 +625,7 @@ async function loadAuthorList() {
     try {
       authorCandidatesCache = await apiCall("/api/authors/candidates");
     } catch (e) {
-      document.getElementById("author-all-list").innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+      document.getElementById("author-all-chips").innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
       return;
     }
   }
@@ -620,21 +633,17 @@ async function loadAuthorList() {
 }
 
 function renderRegisteredAuthors() {
-  const container = document.getElementById("author-registered-list");
+  const container = document.getElementById("author-registered-chips");
   const registered = watchedAuthorsCache.filter((a) => a.enabled);
   container.innerHTML = "";
   if (registered.length === 0) {
     container.innerHTML =
-      '구독중인 웹툰이 없거나, 아직 저자 정보를 확인하지 못했습니다. "지금 전체 재동기화"를 눌러보세요.';
+      '<p class="chip-empty-message">구독중인 웹툰이 없거나, 아직 저자 정보를 확인하지 못했습니다. "지금 전체 재동기화"를 눌러보세요.</p>';
     return;
   }
   for (const a of registered) {
-    const row = document.createElement("div");
-    row.className = "registry-row";
-    row.innerHTML = `<span>${escapeHtml(a.author_name || a.author_id)}</span>`;
-    const actionsWrap = document.createElement("span");
-    actionsWrap.appendChild(
-      makeButton("제외", async () => {
+    container.appendChild(
+      buildChip(a.author_name || a.author_id, true, async () => {
         await apiCall(`/api/watched-authors/${a.author_id}/disable`, {
           method: "POST",
           body: JSON.stringify({ author_name: a.author_name }),
@@ -642,20 +651,11 @@ function renderRegisteredAuthors() {
         loadAuthorList();
       })
     );
-    actionsWrap.appendChild(
-      makeButton("삭제", async () => {
-        if (!confirm(`"${a.author_name || a.author_id}"를 완전히 지울까요?`)) return;
-        await apiCall(`/api/watched-authors/${a.author_id}`, { method: "DELETE" });
-        loadAuthorList();
-      })
-    );
-    row.appendChild(actionsWrap);
-    container.appendChild(row);
   }
 }
 
 function renderAllAuthors() {
-  const container = document.getElementById("author-all-list");
+  const container = document.getElementById("author-all-chips");
   const query = document.getElementById("author-candidate-filter").value.trim().toLowerCase();
   const registeredNames = new Set(watchedAuthorsCache.filter((a) => a.enabled).map((a) => a.author_name));
 
@@ -665,27 +665,31 @@ function renderAllAuthors() {
 
   container.innerHTML = "";
   if (candidates.length === 0) {
-    container.innerHTML = "<p>표시할 후보가 없습니다.</p>";
+    container.innerHTML = '<p class="chip-empty-message">표시할 후보가 없습니다.</p>';
     return;
   }
   for (const name of candidates) {
-    const row = document.createElement("div");
-    row.className = "registry-row";
-    row.innerHTML = `<span>${escapeHtml(name)}</span>`;
-    const resultBox = document.createElement("div");
-    row.appendChild(
-      makeButton("검색·등록", () => {
-        searchAndRegisterAuthor(name, resultBox);
-      })
-    );
-    container.appendChild(row);
-    container.appendChild(resultBox);
+    container.appendChild(buildChip(name, false, () => searchAndRegisterAuthor(name)));
   }
 }
 
 document.getElementById("author-candidate-filter").addEventListener("input", renderAllAuthors);
 
-// 등록된 태그(enabled) / 전체 태그 목록(네이버 카탈로그 전체 중 아직 등록 안 한 것)
+document.getElementById("btn-add-author").addEventListener("click", async () => {
+  const authorId = document.getElementById("add-author-id").value.trim();
+  const authorName = document.getElementById("add-author-name").value.trim();
+  if (!authorId) return;
+  try {
+    await apiCall("/api/watched-authors", { method: "POST", body: JSON.stringify({ author_id: authorId, author_name: authorName }) });
+    document.getElementById("add-author-id").value = "";
+    document.getElementById("add-author-name").value = "";
+    loadAuthorList();
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
+// 등록된 태그(enabled) / 사용 가능(네이버 전체 카탈로그 중 아직 등록 안 한 것)
 let tagCatalogCache = [];
 let watchedTagsCache = [];
 
@@ -699,7 +703,7 @@ async function loadTagList() {
   try {
     watchedTagsCache = await apiCall("/api/watched-tags");
   } catch (e) {
-    document.getElementById("tag-registered-list").innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+    document.getElementById("tag-registered-chips").innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
     return;
   }
   renderRegisteredTags();
@@ -707,29 +711,25 @@ async function loadTagList() {
 }
 
 function renderRegisteredTags() {
-  const container = document.getElementById("tag-registered-list");
+  const container = document.getElementById("tag-registered-chips");
   const registered = watchedTagsCache.filter((t) => t.enabled);
   container.innerHTML = "";
   if (registered.length === 0) {
-    container.innerHTML = "<p>등록된 태그가 없습니다.</p>";
+    container.innerHTML = '<p class="chip-empty-message">등록된 태그가 없습니다.</p>';
     return;
   }
   for (const t of registered) {
-    const row = document.createElement("div");
-    row.className = "registry-row";
-    row.innerHTML = `<span>${escapeHtml(t.tag_name || t.tag_id)}</span>`;
-    row.appendChild(
-      makeButton("제외", async () => {
+    container.appendChild(
+      buildChip(t.tag_name || t.tag_id, true, async () => {
         await apiCall(`/api/watched-tags/${t.tag_id}/disable`, { method: "POST" });
         loadTagList();
       })
     );
-    container.appendChild(row);
   }
 }
 
 async function renderAllTags() {
-  const container = document.getElementById("tag-all-list");
+  const container = document.getElementById("tag-all-chips");
   const query = document.getElementById("tag-catalog-search").value.trim().toLowerCase();
   container.innerHTML = "<p>불러오는 중...</p>";
   try {
@@ -739,17 +739,17 @@ async function renderAllTags() {
     if (query) items = items.filter((t) => t.tag_name.toLowerCase().includes(query));
 
     container.innerHTML = "";
+    if (items.length === 0) {
+      container.innerHTML = '<p class="chip-empty-message">표시할 태그가 없습니다.</p>';
+      return;
+    }
     for (const t of items) {
-      const row = document.createElement("div");
-      row.className = "registry-row";
-      row.innerHTML = `<span>${escapeHtml(t.tag_name)}</span>`;
-      row.appendChild(
-        makeButton("추가", async () => {
+      container.appendChild(
+        buildChip(t.tag_name, false, async () => {
           await apiCall("/api/watched-tags", { method: "POST", body: JSON.stringify({ tag_id: t.tag_id, tag_name: t.tag_name }) });
           loadTagList();
         })
       );
-      container.appendChild(row);
     }
   } catch (e) {
     container.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
@@ -757,184 +757,6 @@ async function renderAllTags() {
 }
 
 document.getElementById("tag-catalog-search").addEventListener("input", renderAllTags);
-
-// ── 설정: 스케줄 ─────────────────────────────────────────
-
-function buildScheduleControls(jobId, schedule) {
-  const wrap = document.createElement("div");
-
-  const modeSelect = document.createElement("select");
-  modeSelect.className = "schedule-mode";
-  modeSelect.innerHTML = `
-    <option value="off">끄기</option>
-    <option value="interval">주기(분)마다</option>
-    <option value="cron">특정 시각</option>
-  `;
-  modeSelect.value = schedule.mode;
-
-  const intervalRow = document.createElement("div");
-  intervalRow.className = "schedule-row schedule-interval-row";
-  intervalRow.innerHTML = `<input type="number" min="1" class="schedule-interval" value="${schedule.interval_minutes}" /> 분마다`;
-
-  const cronRow = document.createElement("div");
-  cronRow.className = "schedule-row schedule-cron-row";
-  const hourOptions = Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, "0")}</option>`).join("");
-  const minuteOptions = Array.from({ length: 60 }, (_, m) => `<option value="${m}">${String(m).padStart(2, "0")}</option>`).join("");
-  const dayCheckboxes = Object.entries(DAY_LABEL)
-    .map(
-      ([day, label]) => `
-      <label class="day-checkbox">
-        <input type="checkbox" class="schedule-day" value="${day}" ${schedule.cron_days.includes(day) ? "checked" : ""} />
-        ${label}
-      </label>`
-    )
-    .join("");
-  cronRow.innerHTML = `
-    <select class="schedule-hour">${hourOptions}</select> 시
-    <select class="schedule-minute">${minuteOptions}</select> 분
-    <span class="day-checkbox-group">${dayCheckboxes}<span class="schedule-day-hint">(아무 요일도 안 고르면 매일)</span></span>
-  `;
-  cronRow.querySelector(".schedule-hour").value = schedule.cron_hour;
-  cronRow.querySelector(".schedule-minute").value = schedule.cron_minute;
-
-  function updateVisibility() {
-    intervalRow.classList.toggle("hidden", modeSelect.value !== "interval");
-    cronRow.classList.toggle("hidden", modeSelect.value !== "cron");
-  }
-  modeSelect.addEventListener("change", updateVisibility);
-  updateVisibility();
-
-  wrap.appendChild(modeSelect);
-  wrap.appendChild(intervalRow);
-  wrap.appendChild(cronRow);
-  return wrap;
-}
-
-function readScheduleControls(wrap) {
-  return {
-    mode: wrap.querySelector(".schedule-mode").value,
-    interval_minutes: Number(wrap.querySelector(".schedule-interval").value) || 60,
-    cron_hour: Number(wrap.querySelector(".schedule-hour").value) || 0,
-    cron_minute: Number(wrap.querySelector(".schedule-minute").value) || 0,
-    cron_days: Array.from(wrap.querySelectorAll(".schedule-day:checked")).map((el) => el.value),
-  };
-}
-
-document.getElementById("btn-save-settings").addEventListener("click", async () => {
-  const resultEl = document.getElementById("settings-save-result");
-  resultEl.textContent = "";
-  try {
-    const payload = {};
-    for (const jobId of SCHEDULE_JOB_IDS) {
-      const wrap = document.querySelector(`.schedule-block[data-job="${jobId}"] .schedule-controls`);
-      payload[jobId] = readScheduleControls(wrap);
-    }
-    await apiCall("/api/settings", { method: "POST", body: JSON.stringify(payload) });
-    resultEl.style.color = "";
-    resultEl.textContent = "저장했습니다.";
-  } catch (e) {
-    resultEl.textContent = e.message;
-  }
-});
-
-// ── 설정: 디스코드 ───────────────────────────────────────
-
-const BOT_TOKEN_MASK = "••••••••••••••••";
-
-async function loadDiscordSettings() {
-  try {
-    const s = await apiCall("/api/settings/discord");
-    document.getElementById("discord-webhook-url").value = s.webhook_url;
-    document.getElementById("discord-channel-id").value = s.notify_channel_id;
-
-    const tokenInput = document.getElementById("discord-bot-token");
-    tokenInput.value = s.bot_token_set ? BOT_TOKEN_MASK : "";
-    tokenInput.dataset.masked = s.bot_token_set ? "true" : "false";
-
-    document.getElementById("discord-bot-status").textContent = s.bot_ready ? "🟢 봇 연결됨" : "⚪ 봇 연결 안 됨";
-  } catch (e) {
-    document.getElementById("discord-save-result").textContent = e.message;
-  }
-}
-
-document.getElementById("discord-bot-token").addEventListener("focus", (e) => {
-  if (e.target.dataset.masked === "true") {
-    e.target.value = "";
-    e.target.dataset.masked = "false";
-  }
-});
-
-document.getElementById("btn-save-discord").addEventListener("click", async () => {
-  const resultEl = document.getElementById("discord-save-result");
-  resultEl.textContent = "";
-  try {
-    const tokenInput = document.getElementById("discord-bot-token");
-    const rawToken = tokenInput.value.trim();
-    const tokenToSend = rawToken === BOT_TOKEN_MASK ? "" : rawToken; // 마스킹 그대로면 "안 바꿈"
-
-    await apiCall("/api/settings/discord", {
-      method: "POST",
-      body: JSON.stringify({
-        webhook_url: document.getElementById("discord-webhook-url").value.trim(),
-        bot_token: tokenToSend,
-        notify_channel_id: document.getElementById("discord-channel-id").value.trim(),
-      }),
-    });
-    resultEl.style.color = "";
-    resultEl.textContent = "저장했습니다. 봇을 재연결하는 중입니다 (몇 초 걸릴 수 있음).";
-    setTimeout(loadDiscordSettings, 3000);
-  } catch (e) {
-    resultEl.textContent = e.message;
-  }
-});
-
-document.getElementById("btn-test-webhook").addEventListener("click", async () => {
-  const result = await apiCall("/api/settings/discord/test-webhook", { method: "POST" });
-  alert(result.message);
-});
-
-document.getElementById("btn-test-bot").addEventListener("click", async () => {
-  const result = await apiCall("/api/settings/discord/test-bot", { method: "POST" });
-  alert(result.message);
-});
-
-// ── 설정: 백업/복원 ──────────────────────────────────────
-
-document.getElementById("btn-backup-download").addEventListener("click", async () => {
-  try {
-    const backup = await apiCall("/api/backup");
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `webtoon-manager-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  } catch (e) {
-    document.getElementById("backup-result").textContent = e.message;
-  }
-});
-
-document.getElementById("restore-file-input").addEventListener("change", async (event) => {
-  const file = event.target.files[0];
-  if (!file) return;
-  const resultEl = document.getElementById("backup-result");
-  resultEl.textContent = "";
-  try {
-    const text = await file.text();
-    const data = JSON.parse(text);
-    if (!confirm("현재 데이터를 모두 지우고 이 백업으로 복원합니다. 계속할까요?")) {
-      event.target.value = "";
-      return;
-    }
-    await apiCall("/api/restore", { method: "POST", body: JSON.stringify(data) });
-    resultEl.style.color = "";
-    resultEl.textContent = "복원 완료. 페이지를 새로고침해주세요.";
-  } catch (e) {
-    resultEl.textContent = `복원 실패: ${e.message}`;
-  }
-  event.target.value = "";
-});
 
 // ── 설정: 수동 실행 + 진행상황 ────────────────────────────
 
@@ -973,7 +795,7 @@ async function loadJobHistory() {
       const wrap = document.createElement("div");
       wrap.className = "job-history-entry";
 
-      const startedLabel = entry.started_at && entry.started_at.length >= 19 ? entry.started_at.slice(0, 19).replace("T", " ") : entry.started_at;
+      const startedLabel = entry.started_at ? formatKoreanTime(entry.started_at) : "";
       const summary = document.createElement("div");
       summary.className = "job-history-summary";
       summary.innerHTML = `
@@ -993,7 +815,7 @@ async function loadJobHistory() {
               const sep = line.indexOf(" — ");
               const ts = sep >= 0 ? line.slice(0, sep) : "";
               const msg = sep >= 0 ? line.slice(sep + 3) : line;
-              const timeLabel = ts.length >= 19 ? ts.slice(11, 19) : ts;
+              const timeLabel = ts ? formatKoreanTimeOnly(ts) : "";
               const isError = /오류|실패/.test(msg);
               return `<div class="log-line${isError ? " log-error" : ""}"><span class="log-time">${escapeHtml(timeLabel)}</span>${escapeHtml(msg)}</div>`;
             })
@@ -1030,7 +852,7 @@ function renderJobLog(jobName, lines) {
       const separatorIndex = line.indexOf(" — ");
       const timestamp = separatorIndex >= 0 ? line.slice(0, separatorIndex) : "";
       const message = separatorIndex >= 0 ? line.slice(separatorIndex + 3) : line;
-      const timeLabel = timestamp.length >= 19 ? timestamp.slice(11, 19) : timestamp;
+      const timeLabel = timestamp ? formatKoreanTimeOnly(timestamp) : "";
       const isError = /오류|실패/.test(message);
       return `<div class="log-line${isError ? " log-error" : ""}"><span class="log-time">${escapeHtml(timeLabel)}</span>${escapeHtml(message)}</div>`;
     })
@@ -1071,4 +893,10 @@ function stopJobPolling() {
 // ── 초기 로드 ────────────────────────────────────────────
 
 restoreNaverListPrefs();
-loadNaverList();
+
+const savedTab = localStorage.getItem(ACTIVE_TAB_KEY);
+if (savedTab && document.getElementById(`page-${savedTab}`)) {
+  switchToTab(savedTab);
+} else {
+  loadNaverList();
+}
