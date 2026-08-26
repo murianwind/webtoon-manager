@@ -42,25 +42,27 @@ class NaverApiError(Exception):
 
 def _parse_title_info(raw: dict, title_id: str) -> TitleInfo:
     age = raw.get("age") or {}
-    author = raw.get("author") or {}
     gfp = raw.get("gfpAdCustomParam") or {}
 
-    writer_entries = author.get("writers") or []
-    painter_entries = author.get("painters") or []
-
-    # communityArtists는 없을 수도 있는 확장 필드라 안전하게 조회
+    # 실제 응답에는 "author" 필드가 없다(항상 null) — 작가 정보는 전부
+    # communityArtists 하나에 artistId/name/artistTypeList로 들어있다.
+    # (예전 코드는 존재하지도 않는 author.writers를 읽고 있어서 이름이 단 한 번도
+    # 채워진 적이 없었다 — 실제 API 응답을 다시 캡처해서 확인한 뒤 고쳤다.)
+    writer_id_name_pairs: list[tuple[str, str]] = []
+    painter_names: list[str] = []
     writer_ids: set[str] = set()
-    for artist in raw.get("communityArtists") or []:
-        artist_types = artist.get("artistTypeList") or []
-        if "ARTIST_WRITER" in artist_types and artist.get("artistId") is not None:
-            writer_ids.add(str(artist["artistId"]))
-    # communityArtists가 없는 응답 대비: author.writers의 id도 보조로 채운다
-    if not writer_ids:
-        writer_ids = {str(w["id"]) for w in writer_entries if w.get("id")}
 
-    writer_id_name_pairs = [
-        (str(w["id"]), w.get("name", "")) for w in writer_entries if w.get("id")
-    ]
+    for artist in raw.get("communityArtists") or []:
+        artist_id = artist.get("artistId")
+        artist_name = artist.get("name", "")
+        artist_types = artist.get("artistTypeList") or []
+        if artist_id is None:
+            continue
+        if "ARTIST_WRITER" in artist_types:
+            writer_ids.add(str(artist_id))
+            writer_id_name_pairs.append((str(artist_id), artist_name))
+        if "ARTIST_PAINTER" in artist_types and artist_name:
+            painter_names.append(artist_name)
 
     return TitleInfo(
         title_id=title_id,
@@ -70,14 +72,13 @@ def _parse_title_info(raw: dict, title_id: str) -> TitleInfo:
         webtoon_type=_WEBTOON_CODE_TO_TYPE.get(raw.get("webtoonLevelCode", ""), "webtoon"),
         is_finished=bool(raw.get("finished")),
         thumbnail_url=raw.get("thumbnailUrl", ""),
-        writer_names=[w.get("name", "") for w in writer_entries if w.get("name")],
-        painter_names=[p.get("name", "") for p in painter_entries if p.get("name")],
+        writer_names=[name for _id, name in writer_id_name_pairs if name],
+        painter_names=painter_names,
         writer_ids=writer_ids,
         writer_id_name_pairs=writer_id_name_pairs,
         genres=list(gfp.get("genreTypes") or []),
         tags=list(gfp.get("tags") or []),
         age_description=age.get("description", ""),
-        # 'rest'는 네이버 응답에서 확인되지 않은 필드일 수 있어 best-effort로 파싱한다.
         is_paused=bool(raw.get("rest", False)),
     )
 
