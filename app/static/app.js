@@ -1115,6 +1115,7 @@ function stopJobPolling() {
 // ── 다운로드 이력 (회차 단위) ─────────────────────────────
 
 async function loadEpisodeHistory(page) {
+  loadRetentionDays();
   const tbody = document.getElementById("episode-history-tbody");
   const emptyEl = document.getElementById("episode-history-empty");
   const status = document.getElementById("episode-history-status").value;
@@ -1174,6 +1175,32 @@ document.getElementById("btn-clear-episode-history").addEventListener("click", a
   if (!confirm("다운로드 이력을 전부 지웁니다 (받은 파일은 그대로 유지됩니다). 계속할까요?")) return;
   await apiCall("/api/episode-history", { method: "DELETE" });
   loadEpisodeHistory(1);
+});
+
+async function loadRetentionDays() {
+  try {
+    const data = await apiCall("/api/episode-history/retention-days");
+    document.getElementById("episode-history-retention-days").value = data.retention_days || "";
+  } catch (e) {
+    // 조용히 무시 — 핵심 목록 표시에 지장 없어야 함
+  }
+}
+
+document.getElementById("btn-save-retention-days").addEventListener("click", async () => {
+  const resultEl = document.getElementById("retention-save-result");
+  resultEl.textContent = "";
+  const input = document.getElementById("episode-history-retention-days");
+  const days = Number(input.value) || 0;
+  try {
+    await apiCall("/api/episode-history/retention-days", {
+      method: "POST",
+      body: JSON.stringify({ retention_days: days }),
+    });
+    resultEl.style.color = "";
+    resultEl.textContent = days > 0 ? "저장했습니다." : "자동삭제 껐습니다.";
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
 });
 
 // ── 초기 로드 ────────────────────────────────────────────

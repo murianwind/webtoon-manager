@@ -7,7 +7,7 @@ SQL을 직접 다루지 않는다 (SRP). 모든 함수는 동기(sync)이며, �
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.db import get_connection, write_transaction
 from app.models import WatchedAuthor, WatchedTag, WebtoonRecord
@@ -466,6 +466,14 @@ def clear_episode_history() -> None:
     """이력만 지운다 (다운로드된 파일은 그대로 유지됨)."""
     with write_transaction() as conn:
         conn.execute("DELETE FROM episode_history")
+
+
+def delete_episode_history_older_than(days: int) -> int:
+    """다운로드된 지 N일 넘은 이력을 지운다 (파일은 그대로 유지됨). 지운 개수를 반환."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    with write_transaction() as conn:
+        cursor = conn.execute("DELETE FROM episode_history WHERE downloaded_at < ?", (cutoff,))
+        return cursor.rowcount
 
 
 # ── 백업/복원 ───────────────────────────────────────────────────────

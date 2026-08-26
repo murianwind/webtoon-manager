@@ -208,8 +208,27 @@ async def _run_download_job_impl() -> None:
             except Exception as e:
                 log.error("실패 요약 알림 전송 중 예외: %s", e)
 
+    try:
+        _cleanup_old_episode_history()
+    except Exception as e:
+        log.error("다운로드 이력 보관기간 정리 중 예외: %s", e)
+
     job_status.log_line("download", "다운로드 스캔 종료")
     job_status.finish("download", success=not had_error)
+
+
+def _cleanup_old_episode_history() -> None:
+    """설정된 보관 기간(일)이 있으면, 그보다 오래된 다운로드 이력을 정리한다
+    (파일은 그대로 유지됨). 설정 안 했으면(0 또는 미설정) 아무것도 안 함."""
+    retention_raw = repository.get_setting("episode_history_retention_days")
+    if not retention_raw:
+        return
+    retention_days = int(retention_raw)
+    if retention_days <= 0:
+        return
+    deleted = repository.delete_episode_history_older_than(retention_days)
+    if deleted:
+        job_status.log_line("download", f"보관기간({retention_days}일) 초과 다운로드 이력 {deleted}건 정리")
 
 
 async def _notify_download_failures(

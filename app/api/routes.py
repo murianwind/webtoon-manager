@@ -793,6 +793,40 @@ async def clear_all_episode_history():
     return {"status": "cleared"}
 
 
+_KEY_EPISODE_HISTORY_RETENTION_DAYS = "episode_history_retention_days"
+
+
+class RetentionDaysOut(BaseModel):
+    retention_days: int  # 0 = 자동삭제 끔
+
+
+class RetentionDaysIn(BaseModel):
+    retention_days: int
+
+    @field_validator("retention_days")
+    @classmethod
+    def non_negative(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("보관 기간은 0 이상이어야 합니다 (0 = 자동삭제 끔).")
+        return v
+
+
+@router.get("/episode-history/retention-days", response_model=RetentionDaysOut)
+async def get_retention_days():
+    value = await asyncio.to_thread(repository.get_setting, _KEY_EPISODE_HISTORY_RETENTION_DAYS)
+    return RetentionDaysOut(retention_days=int(value) if value else 0)
+
+
+@router.post("/episode-history/retention-days", response_model=RetentionDaysOut)
+async def set_retention_days(payload: RetentionDaysIn):
+    await asyncio.to_thread(
+        repository.set_setting,
+        _KEY_EPISODE_HISTORY_RETENTION_DAYS,
+        str(payload.retention_days) if payload.retention_days > 0 else None,
+    )
+    return await get_retention_days()
+
+
 @router.post("/jobs/discovery/run")
 async def trigger_discovery_job():
     asyncio.create_task(scheduler_mod.run_discovery_job())

@@ -390,6 +390,21 @@ button:hover { border-color: var(--accent); }
 }
 .pagination button { font-size: 12px; padding: 5px 12px; }
 
+.retention-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 6px;
+  font-size: 13px;
+}
+.retention-row input[type="number"] {
+  width: 100px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
 .webtoon-grid.small {
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   margin-bottom: 16px;
