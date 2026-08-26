@@ -209,6 +209,31 @@ async def sync_metadata_for_all(settings) -> int:
     return fixed
 
 
+async def refresh_inactive_metadata(session: aiohttp.ClientSession, settings: Settings) -> int:
+    """
+    구독중(active)이 아닌(구독해제/제외됨) 웹툰들의 정보(태그/장르/휴재/신작 등)를
+    가볍게 갱신한다. 신작 스캔(scan_subscriptions_for_updates)은 구독중인 것만
+    처리하기 때문에, 구독해제/제외됨은 사용자가 수동으로 "지금 전체 재동기화"를
+    누르지 않는 한 계속 예전 정보(빈 태그, 신작 여부 등)로 남아있는 문제가 있었다 —
+    이걸 신작 스캔이 돌 때마다 자동으로 같이 처리해서, 수동 재동기화가 항상 필요하지
+    않도록 한다. 저자를 "등록된 작가"로 올리지는 않는다(구독한 게 아니므로).
+    """
+    targets = [wt for wt in repository.list_all() if wt.status != repository.STATUS_ACTIVE]
+    if not targets:
+        return 0
+
+    semaphore = asyncio.Semaphore(settings.artist_scan_concurrency)
+
+    async def _run_one(wt) -> bool:
+        async with semaphore:
+            success, _message = await enrich_one(session, wt.title_id, settings, register_authors_enabled=False)
+            await asyncio.sleep(settings.delay_seconds)
+            return success
+
+    results = await asyncio.gather(*(_run_one(wt) for wt in targets))
+    return sum(1 for r in results if r)
+
+
 async def resync_registry(session: aiohttp.ClientSession, settings: Settings) -> int:
     """
     지금 추적 중인(구독중/구독해제) 모든 웹툰을 한 번에 훑어서 작가/태그 레지스트리를

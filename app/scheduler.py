@@ -309,6 +309,15 @@ async def _run_discovery_job_impl() -> None:
             log.error("태그 기반 신작 스캔 중 예외: %s", e)
             job_status.log_line("discovery", f"태그 기반 신작 스캔 오류: {e}")
 
+        try:
+            job_status.log_line("discovery", "구독해제/제외됨 정보 갱신 시작")
+            refreshed = await tracker.refresh_inactive_metadata(session, settings)
+            job_status.log_line("discovery", f"구독해제/제외됨 {refreshed}개 정보 갱신 완료")
+        except Exception as e:
+            had_error = True
+            log.error("구독해제/제외됨 정보 갱신 중 예외: %s", e)
+            job_status.log_line("discovery", f"구독해제/제외됨 정보 갱신 오류: {e}")
+
     try:
         await _notify_newly_finished()
     except Exception as e:
