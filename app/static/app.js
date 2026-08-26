@@ -520,11 +520,6 @@ document.getElementById("btn-resync-registry").addEventListener("click", async (
   startRegistryPolling();
 });
 
-document.getElementById("btn-populate-authors").addEventListener("click", async () => {
-  await apiCall("/api/registry/populate-author-catalog", { method: "POST" });
-  startRegistryPolling();
-});
-
 async function refreshRegistryJobStatuses() {
   let statuses;
   try {
@@ -533,11 +528,8 @@ async function refreshRegistryJobStatuses() {
     return;
   }
   applyJobStatusToLabel(statuses.registry, "registry-resync-status", "재동기화 중...");
-  applyJobStatusToLabel(statuses.author_catalog, "author-catalog-status", "작가 목록 채우는 중...");
 
-  const stillRunning =
-    statuses.registry?.status === "running" || statuses.author_catalog?.status === "running";
-  if (!stillRunning) {
+  if (statuses.registry?.status !== "running") {
     loadAuthorList();
     loadTagList();
     stopRegistryPolling();
@@ -565,16 +557,13 @@ function stopRegistryPolling() {
   }
 }
 
-document.getElementById("btn-search-author").addEventListener("click", async () => {
-  const name = document.getElementById("author-search-input").value.trim();
-  const resultsEl = document.getElementById("author-search-results");
-  if (!name) return;
+async function searchAndRegisterAuthor(name, resultsEl) {
   resultsEl.innerHTML = "<p>검색 중...</p>";
   try {
     const results = await apiCall(`/api/authors/search?name=${encodeURIComponent(name)}`);
     resultsEl.innerHTML = "";
     if (results.length === 0) {
-      resultsEl.innerHTML = "<p>일치하는 작가를 찾지 못했습니다. 아래 직접 추가를 이용해주세요.</p>";
+      resultsEl.innerHTML = "<p>일치하는 작가를 찾지 못했습니다. 이름이 정확한지 확인해주세요.</p>";
       return;
     }
     for (const r of results) {
@@ -582,7 +571,7 @@ document.getElementById("btn-search-author").addEventListener("click", async () 
       row.className = "registry-row";
       row.innerHTML = `<span>${escapeHtml(r.author_name)} <span class="registry-meta">(예: ${escapeHtml(r.sample_title)})</span></span>`;
       row.appendChild(
-        makeButton("관심작가로 등록", async () => {
+        makeButton("등록", async () => {
           await apiCall("/api/watched-authors", {
             method: "POST",
             body: JSON.stringify({ author_id: r.author_id, author_name: r.author_name }),
@@ -595,89 +584,105 @@ document.getElementById("btn-search-author").addEventListener("click", async () 
   } catch (e) {
     resultsEl.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
   }
+}
+
+document.getElementById("btn-search-author").addEventListener("click", () => {
+  const name = document.getElementById("author-search-input").value.trim();
+  if (!name) return;
+  searchAndRegisterAuthor(name, document.getElementById("author-search-results"));
 });
 
-// 관심있는 작가(enabled) / 전체 작가 목록(등록됐지만 꺼둔 것 + 아직 등록 자체가 안 된 후보 이름)
-// 관심있는 작가 = 구독중인 웹툰들에 저장된 저자를 그대로 모은 것 (별도 등록 절차 없음)
-let interestedAuthorsCache = [];
+// 등록된 작가 = watched_authors(enabled=true). 전체 작가 목록 = 이미 불러온 네이버
+// 목록의 저자 텍스트에서 뽑은 이름 후보 중 아직 등록 안 한 것 — 추가 조회 없이 즉시 표시.
+let watchedAuthorsCache = [];
+let authorCandidatesCache = [];
 
 async function loadAuthorList() {
   const registeredEl = document.getElementById("author-registered-list");
   try {
-    interestedAuthorsCache = await apiCall("/api/authors/interested");
+    watchedAuthorsCache = await apiCall("/api/authors/interested");
   } catch (e) {
     registeredEl.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
     return;
   }
   renderRegisteredAuthors();
-  renderAllAuthors();
-}
 
-function buildAuthorRow(a, actionLabel, action) {
-  const row = document.createElement("div");
-  row.className = "registry-row";
-  row.innerHTML = `<span>${escapeHtml(a.author_name || a.author_id)}</span>`;
-  const actionsWrap = document.createElement("span");
-  actionsWrap.appendChild(
-    makeButton(actionLabel, async () => {
-      await apiCall(`/api/watched-authors/${a.author_id}/${action}`, {
-        method: "POST",
-        body: JSON.stringify({ author_name: a.author_name }),
-      });
-      loadAuthorList();
-    })
-  );
-  actionsWrap.appendChild(
-    makeButton("삭제", async () => {
-      if (!confirm(`"${a.author_name || a.author_id}"를 목록에서 완전히 지울까요?`)) return;
-      await apiCall(`/api/watched-authors/${a.author_id}`, { method: "DELETE" });
-      loadAuthorList();
-    })
-  );
-  row.appendChild(actionsWrap);
-  return row;
+  if (authorCandidatesCache.length === 0) {
+    try {
+      authorCandidatesCache = await apiCall("/api/authors/candidates");
+    } catch (e) {
+      document.getElementById("author-all-list").innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+      return;
+    }
+  }
+  renderAllAuthors();
 }
 
 function renderRegisteredAuthors() {
   const container = document.getElementById("author-registered-list");
-  const registered = interestedAuthorsCache.filter((a) => a.enabled);
+  const registered = watchedAuthorsCache.filter((a) => a.enabled);
   container.innerHTML = "";
   if (registered.length === 0) {
     container.innerHTML =
-      '구독중인 웹툰이 없거나, 아직 저자 정보를 확인하지 못했습니다. 설정 탭의 "지금 전체 재동기화"를 눌러보세요.';
+      '구독중인 웹툰이 없거나, 아직 저자 정보를 확인하지 못했습니다. "지금 전체 재동기화"를 눌러보세요.';
     return;
   }
   for (const a of registered) {
-    container.appendChild(buildAuthorRow(a, "제외", "disable"));
+    const row = document.createElement("div");
+    row.className = "registry-row";
+    row.innerHTML = `<span>${escapeHtml(a.author_name || a.author_id)}</span>`;
+    const actionsWrap = document.createElement("span");
+    actionsWrap.appendChild(
+      makeButton("제외", async () => {
+        await apiCall(`/api/watched-authors/${a.author_id}/disable`, {
+          method: "POST",
+          body: JSON.stringify({ author_name: a.author_name }),
+        });
+        loadAuthorList();
+      })
+    );
+    actionsWrap.appendChild(
+      makeButton("삭제", async () => {
+        if (!confirm(`"${a.author_name || a.author_id}"를 완전히 지울까요?`)) return;
+        await apiCall(`/api/watched-authors/${a.author_id}`, { method: "DELETE" });
+        loadAuthorList();
+      })
+    );
+    row.appendChild(actionsWrap);
+    container.appendChild(row);
   }
 }
 
 function renderAllAuthors() {
   const container = document.getElementById("author-all-list");
-  const disabled = interestedAuthorsCache.filter((a) => !a.enabled);
+  const query = document.getElementById("author-candidate-filter").value.trim().toLowerCase();
+  const registeredNames = new Set(watchedAuthorsCache.filter((a) => a.enabled).map((a) => a.author_name));
+
+  const candidates = authorCandidatesCache.filter(
+    (name) => !registeredNames.has(name) && (!query || name.toLowerCase().includes(query))
+  );
+
   container.innerHTML = "";
-  if (disabled.length === 0) {
-    container.innerHTML = "<p>제외된 작가가 없습니다.</p>";
+  if (candidates.length === 0) {
+    container.innerHTML = "<p>표시할 후보가 없습니다.</p>";
     return;
   }
-  for (const a of disabled) {
-    container.appendChild(buildAuthorRow(a, "등록", "enable"));
+  for (const name of candidates) {
+    const row = document.createElement("div");
+    row.className = "registry-row";
+    row.innerHTML = `<span>${escapeHtml(name)}</span>`;
+    const resultBox = document.createElement("div");
+    row.appendChild(
+      makeButton("검색·등록", () => {
+        searchAndRegisterAuthor(name, resultBox);
+      })
+    );
+    container.appendChild(row);
+    container.appendChild(resultBox);
   }
 }
 
-document.getElementById("btn-add-author").addEventListener("click", async () => {
-  const authorId = document.getElementById("add-author-id").value.trim();
-  const authorName = document.getElementById("add-author-name").value.trim();
-  if (!authorId) return;
-  try {
-    await apiCall("/api/watched-authors", { method: "POST", body: JSON.stringify({ author_id: authorId, author_name: authorName }) });
-    document.getElementById("add-author-id").value = "";
-    document.getElementById("add-author-name").value = "";
-    loadAuthorList();
-  } catch (e) {
-    alert(e.message);
-  }
-});
+document.getElementById("author-candidate-filter").addEventListener("input", renderAllAuthors);
 
 // 등록된 태그(enabled) / 전체 태그 목록(네이버 카탈로그 전체 중 아직 등록 안 한 것)
 let tagCatalogCache = [];
@@ -951,7 +956,7 @@ async function loadSettingsPage() {
   startJobPolling();
 }
 
-const JOB_NAME_LABEL = { discovery: "신작 스캔", download: "다운로드", manual: "수동 다운로드", registry: "작가/태그 재동기화", author_catalog: "전체 작가 목록 채우기" };
+const JOB_NAME_LABEL = { discovery: "신작 스캔", download: "다운로드", manual: "수동 다운로드", registry: "작가/태그 재동기화" };
 
 async function loadJobHistory() {
   const container = document.getElementById("job-history-list");

@@ -7,6 +7,7 @@ comic.naver.com 내부 API 호출 전담 모듈.
 
 import asyncio
 import logging
+import re
 from typing import Optional
 
 import aiohttp
@@ -330,6 +331,26 @@ async def search_webtoons(
 
     return results
 
+
+
+def extract_candidate_author_names(items: list[NaverListItem]) -> list[str]:
+    """
+    작가 이름 '전체 목록'을 즉시 보여주기 위해, 이미 불러온 요일별 전체목록의 저자
+    텍스트("박만사, 남자의 이야기 / 정종택" 같은 조합)를 흩어서 이름 후보를 뽑아낸다.
+    추가 API 호출이 전혀 없다 — 748개를 하나씩 조회하는 건 너무 느리고(수 분) 실패도
+    잦아서, 대신 이미 공짜로 갖고 있는 이 텍스트에서 후보를 뽑는 방식으로 바꿨다.
+
+    정확한 author_id는 아니라 "둘러보기용 후보" 성격이고(드물게 부제목 같은 잡음이
+    섞일 수 있음), 실제 등록은 이 이름으로 검색(search_authors_by_name)해서 얻은
+    진짜 id로 한다 — 그 검색은 후보를 실제로 등록할 때만, 1건씩만 호출된다.
+    """
+    names: set[str] = set()
+    for item in items:
+        for part in re.split(r"[/,·]", item.author_summary):
+            name = part.strip()
+            if name:
+                names.add(name)
+    return sorted(names)
 
 
 async def fetch_other_titles_by_artist(

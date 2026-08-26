@@ -28,7 +28,6 @@ _statuses: dict[str, _JobStatus] = {
     "download": _JobStatus(),
     "manual": _JobStatus(),
     "registry": _JobStatus(),
-    "author_catalog": _JobStatus(),
 }
 
 

@@ -196,63 +196,6 @@ async def resync_registry(session: aiohttp.ClientSession, settings: Settings) ->
     return registered_count
 
 
-async def populate_author_catalog(session: aiohttp.ClientSession, settings: Settings) -> int:
-    """
-    '전체 작가 목록'을 채우기 위해, 아직 구독 안 한 웹툰들의 실제 작가까지 알아낸다.
-    네이버 목록 API 자체는 저자 이름을 텍스트로만 주고 실제 id는 안 줘서, 웹툰마다
-    상세정보를 하나씩 조회해야 한다 — 748개 정도면 시간이 걸리므로(요청 사이 delay
-    포함) 신작 스캔에 얹지 않고 필요할 때 수동으로 실행하는 별도 작업으로 분리했다.
-    이미 이름을 아는 작가의 작품은 다시 조회하지 않아서, 두 번째 실행부터는 새로 나온
-    것만 훑는다.
-
-    enrich_one을 그대로 재사용해서(register_authors_enabled=False — 아직 구독 안 했으니
-    "등록된 작가"로는 안 올림) 실패 이유까지 일관되게 얻는다. 웹툰 개수가 많아서 한
-    건씩 로그를 남기면 300줄 제한에 금방 걸리므로, 결과를 이유별로 집계해서
-    "성공 N / 정보조회실패 M / 작가정보없음 K" 식으로 요약 로그 + 예시 1개씩만 남긴다
-    — 예전엔 실패해도 아무 이유가 안 보여서 "0개 등록"만 뜨고 왜 그런지 알 수 없었다.
-    """
-    catalog = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
-
-    # 이미 이름을 아는 작가의 작품이면 다시 조회하지 않는다 (완벽하진 않지만, 두 번째
-    # 실행부터는 대부분 걸러져서 새로 나온 작가만 훑게 된다).
-    known_names = {a.author_name for a in repository.list_watched_authors() if a.author_name}
-    targets = [
-        item for item in catalog if not any(name and name in item.author_summary for name in known_names)
-    ]
-    job_status.log_line(
-        "author_catalog", f"전체 {len(catalog)}개 중 저자 미확인 {len(targets)}개 조회 시작"
-    )
-    if not targets:
-        return 0
-
-    semaphore = asyncio.Semaphore(_ARTIST_SCAN_CONCURRENCY)
-    outcome_counts: dict[str, int] = {}
-    outcome_samples: dict[str, str] = {}
-
-    def _outcome_key(message: str) -> str:
-        # "작가 등록: 홍길동, 김철수" 처럼 구체적인 이름이 붙어도 카테고리는 앞부분으로 묶는다
-        return message.split(":")[0].split("(")[0].strip()
-
-    async def _run_one(item) -> bool:
-        async with semaphore:
-            success, message = await enrich_one(session, item.title_id, settings, register_authors_enabled=False)
-            key = _outcome_key(message)
-            outcome_counts[key] = outcome_counts.get(key, 0) + 1
-            if key not in outcome_samples:
-                outcome_samples[key] = f"{item.title_name}: {message}"
-            await asyncio.sleep(settings.delay_seconds)
-            return success and message.startswith("작가 등록")
-
-    results = await asyncio.gather(*(_run_one(item) for item in targets))
-    registered_count = sum(1 for r in results if r)
-
-    job_status.log_line("author_catalog", f"결과 집계: {outcome_counts}")
-    for sample in outcome_samples.values():
-        job_status.log_line("author_catalog", f"예시 — {sample}")
-    job_status.log_line("author_catalog", f"{registered_count}개 웹툰에서 새 작가를 찾아 등록")
-    return registered_count
-
-
 async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, settings: Settings) -> None:
     """구독 중인(status=active) 모든 웹툰의 완결/휴재/장르 갱신 + 등록된 작가 신작 자동추가."""
     active_webtoons = repository.list_by_status(repository.STATUS_ACTIVE)

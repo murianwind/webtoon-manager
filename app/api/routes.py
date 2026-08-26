@@ -483,24 +483,20 @@ async def resync_registry():
     return {"status": "started"}
 
 
-@router.post("/registry/populate-author-catalog")
-async def populate_author_catalog():
-    """구독 안 한 웹툰까지 포함해서 '전체 작가 목록'을 채운다. 웹툰 개수만큼 네이버
-    API를 호출하므로(첫 실행 기준 최대 수백 건) 시간이 걸릴 수 있다 — 진행상황은
-    실행 이력에서 확인 가능."""
-    async def _run():
-        settings = get_settings()
-        job_status.start("author_catalog")
-        try:
-            async with aiohttp.ClientSession() as session:
-                count = await tracker.populate_author_catalog(session, settings)
-            job_status.finish("author_catalog", success=True)
-        except Exception as e:
-            job_status.log_line("author_catalog", f"오류: {e}")
-            job_status.finish("author_catalog", success=False)
-
-    asyncio.create_task(_run())
-    return {"status": "started"}
+@router.get("/authors/candidates")
+async def list_author_candidates():
+    """
+    이미 불러온 네이버 전체목록의 저자 텍스트에서 이름 후보를 즉시 뽑아 보여준다.
+    추가 API 호출이 없어서 빠르다 — '전체 작가 목록'은 이 목록에서 이미 등록된
+    이름을 뺀 것으로 표시하고, 실제 등록은 이름 검색으로 정확한 id를 확인해서 한다.
+    """
+    settings = get_settings()
+    try:
+        async with aiohttp.ClientSession() as session:
+            items = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
+    except naver_api.NaverApiError as e:
+        raise HTTPException(status_code=502, detail=f"작가 후보 목록을 불러오지 못했습니다: {e}")
+    return naver_api.extract_candidate_author_names(items)
 
 
 # ── 수동 다운로드 ──────────────────────────────────────────────────
