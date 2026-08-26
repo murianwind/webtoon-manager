@@ -361,6 +361,35 @@ button:hover { border-color: var(--accent); }
 #manual-table th { background: #fafafa; color: var(--muted); font-weight: 600; }
 #manual-table tr:last-child td { border-bottom: none; }
 
+#episode-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+#episode-history-table th, #episode-history-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+#episode-history-table th { background: #fafafa; color: var(--muted); font-weight: 600; }
+#episode-history-table tr:last-child td { border-bottom: none; }
+#episode-history-table td button { font-size: 11px; padding: 3px 8px; }
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  justify-content: center;
+  margin: 10px 0 20px;
+}
+.pagination button { font-size: 12px; padding: 5px 12px; }
+
 .webtoon-grid.small {
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   margin-bottom: 16px;

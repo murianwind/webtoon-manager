@@ -131,9 +131,13 @@ async def download_selected(title_id: str, episode_nos: list[int], settings: Set
                 job_status.log_line(
                     JOB_NAME, f"❌ {episode.episode_no}화 \"{episode.subtitle}\" 다운로드 실패 (이미지 URL 수집 또는 다운로드 오류)"
                 )
+                repository.add_episode_history(
+                    title_id, info.title_name, episode.episode_no, episode.subtitle, "failed", "이미지 URL 수집 또는 다운로드 오류"
+                )
                 continue
 
             zip_episode_folders(webtoon_dir)
+            repository.add_episode_history(title_id, info.title_name, episode.episode_no, episode.subtitle, "success")
             job_status.log_line(JOB_NAME, f"✅ {episode.episode_no}화 \"{episode.subtitle}\" 완료 (압축 후 폴더 삭제)")
 
         # 이 titleId가 구독 목록에 있으면 last_downloaded_no를 실제 폴더 상태 기준으로 갱신

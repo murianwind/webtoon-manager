@@ -28,6 +28,7 @@ _statuses: dict[str, _JobStatus] = {
     "download": _JobStatus(),
     "manual": _JobStatus(),
     "registry": _JobStatus(),
+    "metadata_sync": _JobStatus(),
 }
 
 

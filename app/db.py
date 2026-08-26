@@ -66,6 +66,19 @@ CREATE TABLE IF NOT EXISTS job_history (
     log TEXT NOT NULL DEFAULT '[]'  -- JSON 배열 (그 실행의 로그 라인들)
 );
 CREATE INDEX IF NOT EXISTS idx_job_history_job_name ON job_history(job_name, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS episode_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title_id TEXT NOT NULL,
+    title_name TEXT NOT NULL,
+    episode_no INTEGER NOT NULL,
+    subtitle TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,            -- success | failed
+    error_msg TEXT NOT NULL DEFAULT '',
+    downloaded_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_episode_history_title ON episode_history(title_id, downloaded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_episode_history_status ON episode_history(status, downloaded_at DESC);
 """
 
 # 기존에 이미 만들어진 DB(위 스키마에 없던 컬럼이 있던 버전)를 위한 마이그레이션.

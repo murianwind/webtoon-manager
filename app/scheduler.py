@@ -23,7 +23,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app import comicinfo, discord_bot, job_status, naver_api, repository, schedule_config, tracker
+from app import comicinfo, cookie_health, discord_bot, discord_notify, job_status, naver_api, repository, schedule_config, tracker
 from app.config import Settings, get_settings
 from app.cookie_loader import get_adult_cookies
 from app.downloader import download_single_episode
@@ -44,7 +44,13 @@ _download_job_lock = asyncio.Lock()
 _discovery_job_lock = asyncio.Lock()
 
 
-async def _download_new_episodes_for_one(session: aiohttp.ClientSession, settings: Settings, title_id: str) -> None:
+async def _download_new_episodes_for_one(
+    session: aiohttp.ClientSession,
+    settings: Settings,
+    title_id: str,
+    adult_tracker: cookie_health.AdultFetchTracker,
+    failures: list[dict],
+) -> None:
     webtoon = repository.get(title_id)
     if webtoon is None or webtoon.status != repository.STATUS_ACTIVE:
         return
@@ -68,6 +74,10 @@ async def _download_new_episodes_for_one(session: aiohttp.ClientSession, setting
     all_episodes = await naver_api.fetch_all_episodes(
         session, title_id, cookies, settings.request_timeout_seconds
     )
+    if info.is_adult:
+        # 쿠키 만료 감지용 — 별도 API 호출 없이, 이번에 실제로 받아온 회차 개수를 그대로 신호로 쓴다.
+        adult_tracker.record(len(all_episodes))
+
     free_episodes = naver_api.free_episodes_only(all_episodes)
 
     if free_episodes:
@@ -93,38 +103,62 @@ async def _download_new_episodes_for_one(session: aiohttp.ClientSession, setting
         await comicinfo.download_cover_image(session, webtoon_dir, info, settings.request_timeout_seconds)
         job_status.log_line("download", f"[{info.title_name}] ComicInfo.xml / 커버 이미지 생성")
 
-    new_episodes = [ep for ep in free_episodes if ep.episode_no > last_no]
-    if not new_episodes:
+    pending = [ep for ep in free_episodes if ep.episode_no > last_no]
+    if not pending:
         return
 
-    job_status.log_line("download", f"[{info.title_name}] 새 회차 {len(new_episodes)}개 다운로드 시작")
+    total_pending = len(pending)
+    job_status.log_line("download", f"[{info.title_name}] 새 회차 {total_pending}개 다운로드 시작")
 
-    for episode in new_episodes:
-        success, _episode_dir = await download_single_episode(
-            session=session,
-            title_id=title_id,
-            title_name=info.title_name,
-            webtoon_type=info.webtoon_type,
-            episode=episode,
-            cookies=cookies,
-            download_root=settings.download_root,
-            folder_zero_fill=settings.folder_zero_fill,
-            image_zero_fill=settings.image_zero_fill,
-            max_concurrent_downloads=settings.max_concurrent_downloads,
-            timeout_seconds=settings.request_timeout_seconds,
-        )
+    # 상한에 걸리면 "다음 정기 실행까지 대기"가 아니라, 이번 실행 안에서 batch_rest_minutes만큼
+    # 쉬었다가 이어서 계속 받는다 — 하루 한 번처럼 뜸하게 도는 스케줄에서는 다음 정기 실행까지
+    # 기다리면 너무 오래 걸리기 때문. 실패하면(회로차단) 그 즉시 전부 멈추고 다음 실행에서 재시도한다.
+    cap = settings.max_new_episodes_per_title
+    while pending:
+        batch = pending[:cap] if cap > 0 else pending
+        pending = pending[len(batch):]
 
-        if not success:
-            job_status.log_line(
-                "download", f"[{info.title_name}] {episode.episode_no}화 다운로드 실패 — 다음 실행에서 재시도"
+        for episode in batch:
+            success, _episode_dir = await download_single_episode(
+                session=session,
+                title_id=title_id,
+                title_name=info.title_name,
+                webtoon_type=info.webtoon_type,
+                episode=episode,
+                cookies=cookies,
+                download_root=settings.download_root,
+                folder_zero_fill=settings.folder_zero_fill,
+                image_zero_fill=settings.image_zero_fill,
+                max_concurrent_downloads=settings.max_concurrent_downloads,
+                timeout_seconds=settings.request_timeout_seconds,
             )
-            break
 
-        # 다운로드 → 압축 → 폴더 삭제 → (다음 루프에서) 다음 화, 순서로 진행한다.
-        zip_episode_folders(webtoon_dir)
-        repository.update_last_downloaded_no(title_id, episode.episode_no)
-        job_status.log_line("download", f"[{info.title_name}] {episode.episode_no}화 완료 (압축 후 폴더 삭제)")
-        await asyncio.sleep(settings.delay_seconds)
+            if not success:
+                job_status.log_line(
+                    "download", f"[{info.title_name}] {episode.episode_no}화 다운로드 실패 — 다음 실행에서 재시도"
+                )
+                repository.add_episode_history(
+                    title_id, info.title_name, episode.episode_no, episode.subtitle, "failed", "이미지 URL 수집 또는 다운로드 오류"
+                )
+                failures.append(
+                    {"title_name": info.title_name, "episode_no": episode.episode_no, "subtitle": episode.subtitle}
+                )
+                return  # 이 작품은 여기서 완전히 중단 — 배치 남았어도 더 안 받음
+
+            # 다운로드 → 압축 → 폴더 삭제 → (다음 루프에서) 다음 화, 순서로 진행한다.
+            zip_episode_folders(webtoon_dir)
+            repository.update_last_downloaded_no(title_id, episode.episode_no)
+            repository.add_episode_history(title_id, info.title_name, episode.episode_no, episode.subtitle, "success")
+            job_status.log_line("download", f"[{info.title_name}] {episode.episode_no}화 완료 (압축 후 폴더 삭제)")
+            await asyncio.sleep(settings.delay_seconds)
+
+        if pending:
+            rest_minutes = settings.batch_rest_minutes
+            job_status.log_line(
+                "download",
+                f"[{info.title_name}] {cap}화 받음, 남은 {len(pending)}화는 {rest_minutes}분 쉬었다가 이어받기",
+            )
+            await asyncio.sleep(rest_minutes * 60)
 
 
 async def run_download_job() -> None:
@@ -146,17 +180,50 @@ async def _run_download_job_impl() -> None:
     job_status.log_line("download", f"다운로드 스캔 시작 — 구독 중인 웹툰 {len(active_webtoons)}개")
     had_error = False
 
+    adult_tracker = cookie_health.AdultFetchTracker()
+    failures: list[dict] = []
+
     async with aiohttp.ClientSession() as session:
         for webtoon in active_webtoons:
             try:
-                await _download_new_episodes_for_one(session, settings, webtoon.title_id)
+                await _download_new_episodes_for_one(session, settings, webtoon.title_id, adult_tracker, failures)
             except Exception as e:
                 had_error = True
                 log.error("웹툰(titleId=%s) 다운로드 처리 중 예외 — 다음 웹툰으로 진행: %s", webtoon.title_id, e)
                 job_status.log_line("download", f"[{webtoon.title}] 처리 중 오류: {e}")
+                failures.append({"title_name": webtoon.title, "episode_no": None, "subtitle": str(e)})
+            # 새 회차가 없어서 그냥 넘어가는 웹툰들 사이에도 딜레이를 둔다 — 예전엔 이
+            # 경우에만 딜레이가 전혀 없어서, 구독 웹툰이 많으면 순식간에 연속 요청이
+            # 나가는 문제가 있었다(실제로 코드 확인 후 발견됨).
+            await asyncio.sleep(settings.delay_seconds)
+
+        try:
+            await cookie_health.finalize_and_notify(session, settings, adult_tracker)
+        except Exception as e:
+            log.error("쿠키 상태 판단/알림 중 예외: %s", e)
+
+        if failures:
+            try:
+                await _notify_download_failures(session, settings, failures)
+            except Exception as e:
+                log.error("실패 요약 알림 전송 중 예외: %s", e)
 
     job_status.log_line("download", "다운로드 스캔 종료")
     job_status.finish("download", success=not had_error)
+
+
+async def _notify_download_failures(
+    session: aiohttp.ClientSession, settings: Settings, failures: list[dict]
+) -> None:
+    """이번 실행에서 실패한 웹툰/회차를 한 번에 모아서 디스코드로 보낸다 — 실패마다
+    따로 알림을 보내면 스팸이 되니, 실행이 끝날 때 요약 1건으로 보낸다."""
+    lines = [f"⚠️ **다운로드 실패 {len(failures)}건** (이번 실행)"]
+    for f in failures:
+        if f["episode_no"] is not None:
+            lines.append(f"- {f['title_name']} {f['episode_no']}화 \"{f['subtitle']}\"")
+        else:
+            lines.append(f"- {f['title_name']}: {f['subtitle']}")
+    await discord_notify.send_webhook_notification(session, settings, "\n".join(lines))
 
 
 async def _notify_newly_finished() -> None:

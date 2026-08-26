@@ -68,6 +68,7 @@ const pageLoaders = {
   excluded: () => loadSubscriptionTab("excluded"),
   "manual-download": () => {},
   registry: loadRegistryPage,
+  "episode-history": () => loadEpisodeHistory(1),
   settings: loadSettingsPage,
 };
 
@@ -995,7 +996,7 @@ async function loadSettingsPage() {
   startJobPolling();
 }
 
-const JOB_NAME_LABEL = { discovery: "신작 스캔", download: "다운로드", manual: "수동 다운로드", registry: "작가/태그 재동기화" };
+const JOB_NAME_LABEL = { discovery: "신작 스캔", download: "다운로드", manual: "수동 다운로드", registry: "작가/태그 재동기화", metadata_sync: "메타 동기화" };
 
 async function loadJobHistory() {
   const container = document.getElementById("job-history-list");
@@ -1061,6 +1062,11 @@ document.getElementById("btn-run-download").addEventListener("click", async () =
   await refreshJobStatus();
 });
 
+document.getElementById("btn-run-metadata-sync").addEventListener("click", async () => {
+  await apiCall("/api/metadata/sync", { method: "POST" });
+  await refreshJobStatus();
+});
+
 function renderJobLog(jobName, lines) {
   const container = document.getElementById(`${jobName}-log`);
   container.innerHTML = lines
@@ -1084,7 +1090,7 @@ async function refreshJobStatus() {
     return;
   }
 
-  for (const jobName of ["discovery", "download"]) {
+  for (const jobName of ["discovery", "download", "metadata_sync"]) {
     const st = statuses[jobName];
     if (!st) continue;
     const badge = document.getElementById(`${jobName}-status-badge`);
@@ -1105,6 +1111,70 @@ function stopJobPolling() {
     jobPollTimer = null;
   }
 }
+
+// ── 다운로드 이력 (회차 단위) ─────────────────────────────
+
+async function loadEpisodeHistory(page) {
+  const tbody = document.getElementById("episode-history-tbody");
+  const emptyEl = document.getElementById("episode-history-empty");
+  const status = document.getElementById("episode-history-status").value;
+  const search = document.getElementById("episode-history-search").value.trim();
+
+  tbody.innerHTML = "";
+  try {
+    const params = new URLSearchParams({ page: String(page) });
+    if (status) params.set("status", status);
+    if (search) params.set("search", search);
+    const data = await apiCall(`/api/episode-history?${params.toString()}`);
+
+    emptyEl.classList.toggle("hidden", data.items.length > 0);
+    for (const item of data.items) {
+      const tr = document.createElement("tr");
+      const timeLabel = formatKoreanTime(item.downloaded_at);
+      const statusLabel = item.status === "success" ? "성공" : `실패${item.error_msg ? ` (${item.error_msg})` : ""}`;
+      tr.innerHTML = `
+        <td>${escapeHtml(item.title_name)}</td>
+        <td>${item.episode_no}화 ${escapeHtml(item.subtitle)}</td>
+        <td>${escapeHtml(statusLabel)}</td>
+        <td>${escapeHtml(timeLabel)}</td>
+        <td></td>
+      `;
+      tr.querySelector("td:last-child").appendChild(
+        makeButton("삭제", async () => {
+          await apiCall(`/api/episode-history/${item.id}`, { method: "DELETE" });
+          loadEpisodeHistory(page);
+        })
+      );
+      tbody.appendChild(tr);
+    }
+    renderEpisodeHistoryPagination(data.page, data.total, data.page_size);
+  } catch (e) {
+    emptyEl.textContent = e.message;
+    emptyEl.classList.remove("hidden");
+  }
+}
+
+function renderEpisodeHistoryPagination(page, total, pageSize) {
+  const container = document.getElementById("episode-history-pagination");
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  container.innerHTML = "";
+  if (totalPages <= 1) return;
+
+  if (page > 1) container.appendChild(makeButton("이전", () => loadEpisodeHistory(page - 1)));
+  const label = document.createElement("span");
+  label.textContent = ` ${page} / ${totalPages} `;
+  container.appendChild(label);
+  if (page < totalPages) container.appendChild(makeButton("다음", () => loadEpisodeHistory(page + 1)));
+}
+
+document.getElementById("episode-history-search").addEventListener("input", () => loadEpisodeHistory(1));
+document.getElementById("episode-history-status").addEventListener("change", () => loadEpisodeHistory(1));
+
+document.getElementById("btn-clear-episode-history").addEventListener("click", async () => {
+  if (!confirm("다운로드 이력을 전부 지웁니다 (받은 파일은 그대로 유지됩니다). 계속할까요?")) return;
+  await apiCall("/api/episode-history", { method: "DELETE" });
+  loadEpisodeHistory(1);
+});
 
 // ── 초기 로드 ────────────────────────────────────────────
 

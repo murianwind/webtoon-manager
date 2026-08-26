@@ -484,6 +484,25 @@ async def resync_registry():
     return {"status": "started"}
 
 
+@router.post("/metadata/sync")
+async def sync_metadata():
+    """추적 중인 웹툰 폴더를 스캔해서 info.xml/cover.jpg 누락분만 다시 만든다."""
+    async def _run():
+        settings = get_settings()
+        job_status.start("metadata_sync")
+        job_status.log_line("metadata_sync", "메타 동기화 시작")
+        try:
+            count = await tracker.sync_metadata_for_all(settings)
+            job_status.log_line("metadata_sync", f"{count}개 웹툰 정리 완료")
+            job_status.finish("metadata_sync", success=True)
+        except Exception as e:
+            job_status.log_line("metadata_sync", f"오류: {e}")
+            job_status.finish("metadata_sync", success=False)
+
+    asyncio.create_task(_run())
+    return {"status": "started"}
+
+
 @router.get("/authors/candidates")
 async def list_author_candidates():
     """
@@ -728,6 +747,50 @@ async def jobs_status():
 async def jobs_history(limit_per_job: int = 10):
     """스케줄대로 자동 실행된 잡이 실제로 돌았는지/성공했는지 나중에 확인할 수 있는 이력."""
     return await asyncio.to_thread(repository.list_job_history, limit_per_job)
+
+
+# ── 회차 단위 다운로드 이력 ──────────────────────────────────────────
+
+class EpisodeHistoryOut(BaseModel):
+    id: int
+    title_id: str
+    title_name: str
+    episode_no: int
+    subtitle: str
+    status: str
+    error_msg: str
+    downloaded_at: str
+
+
+class EpisodeHistoryPageOut(BaseModel):
+    items: list[EpisodeHistoryOut]
+    total: int
+    page: int
+    page_size: int
+
+
+@router.get("/episode-history", response_model=EpisodeHistoryPageOut)
+async def get_episode_history(status: str | None = None, search: str = "", page: int = 1):
+    if status and status not in ("success", "failed"):
+        raise HTTPException(status_code=400, detail="status는 success/failed 중 하나여야 합니다.")
+    if page < 1:
+        raise HTTPException(status_code=400, detail="page는 1 이상이어야 합니다.")
+    page_size = 30
+    rows, total = await asyncio.to_thread(repository.list_episode_history, status, search, page, page_size)
+    return EpisodeHistoryPageOut(items=rows, total=total, page=page, page_size=page_size)
+
+
+@router.delete("/episode-history/{entry_id}")
+async def delete_episode_history_entry(entry_id: int):
+    await asyncio.to_thread(repository.delete_episode_history, entry_id)
+    return {"status": "deleted"}
+
+
+@router.delete("/episode-history")
+async def clear_all_episode_history():
+    """이력만 지운다 — 실제로 받은 파일은 그대로 유지된다."""
+    await asyncio.to_thread(repository.clear_episode_history)
+    return {"status": "cleared"}
 
 
 @router.post("/jobs/discovery/run")

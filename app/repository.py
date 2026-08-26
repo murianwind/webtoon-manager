@@ -403,6 +403,71 @@ def list_job_history(limit_per_job: int = 10) -> list[dict]:
     return results
 
 
+# ── episode_history (회차 단위 다운로드 이력) ──────────────────────
+
+def add_episode_history(
+    title_id: str, title_name: str, episode_no: int, subtitle: str, status: str, error_msg: str = ""
+) -> None:
+    with write_transaction() as conn:
+        conn.execute(
+            """
+            INSERT INTO episode_history
+                (title_id, title_name, episode_no, subtitle, status, error_msg, downloaded_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (title_id, title_name, episode_no, subtitle, status, error_msg, _now()),
+        )
+
+
+def list_episode_history(
+    status: str | None = None, search: str = "", page: int = 1, page_size: int = 30
+) -> tuple[list[dict], int]:
+    """(행 목록, 전체 개수)를 반환한다 — 상태/제목 검색 필터 + 페이지네이션."""
+    conn = get_connection()
+    where_clauses = []
+    params: list = []
+    if status:
+        where_clauses.append("status = ?")
+        params.append(status)
+    if search:
+        where_clauses.append("(title_name LIKE ? OR subtitle LIKE ?)")
+        pattern = f"%{search}%"
+        params.extend([pattern, pattern])
+    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+    total = conn.execute(f"SELECT COUNT(*) FROM episode_history {where_sql}", params).fetchone()[0]
+    rows = conn.execute(
+        f"SELECT * FROM episode_history {where_sql} ORDER BY downloaded_at DESC LIMIT ? OFFSET ?",
+        [*params, page_size, (page - 1) * page_size],
+    ).fetchall()
+
+    result = [
+        {
+            "id": r["id"],
+            "title_id": r["title_id"],
+            "title_name": r["title_name"],
+            "episode_no": r["episode_no"],
+            "subtitle": r["subtitle"],
+            "status": r["status"],
+            "error_msg": r["error_msg"],
+            "downloaded_at": r["downloaded_at"],
+        }
+        for r in rows
+    ]
+    return result, total
+
+
+def delete_episode_history(entry_id: int) -> None:
+    with write_transaction() as conn:
+        conn.execute("DELETE FROM episode_history WHERE id = ?", (entry_id,))
+
+
+def clear_episode_history() -> None:
+    """이력만 지운다 (다운로드된 파일은 그대로 유지됨)."""
+    with write_transaction() as conn:
+        conn.execute("DELETE FROM episode_history")
+
+
 # ── 백업/복원 ───────────────────────────────────────────────────────
 
 _SECRET_SETTING_KEYS = {"discord_webhook_url", "discord_bot_token", "discord_notify_channel_id"}

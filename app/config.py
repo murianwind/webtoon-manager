@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     image_zero_fill: int = 4
     max_concurrent_downloads: int = 10
     artist_scan_concurrency: int = 5  # 작가/태그 스캔 시 네이버 API 동시 요청 수 제한
+    max_new_episodes_per_title: int = 10  # 다운로드 잡 1회 실행당 작품당 새로 받을 회차 상한(0 이하=무제한)
+    batch_rest_minutes: float = 5.0  # 상한에 걸렸을 때, 다음 배치를 이어받기 전 쉬는 시간(분)
     delay_seconds: float = 1.0
     request_timeout_seconds: int = 10
 

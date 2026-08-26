@@ -14,6 +14,7 @@ GUI 자동화 계층은 제거했다. 회차는 한 번에 하나씩만 처리�
 import asyncio
 import logging
 import random
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -169,4 +170,10 @@ async def download_single_episode(
 
     outcomes = await asyncio.gather(*tasks, return_exceptions=True)
     success = sum(1 for o in outcomes if o is True) == len(img_urls)
-    return success, episode_dir
+    if not success:
+        # 일부만 받은 채로 폴더가 남으면, 다음 재시도 때 그 위에 다시 받으면서
+        # 어떤 이미지가 실제로 실패했었는지 구분이 안 되고 자리만 차지한다 —
+        # 실패하면 통째로 지워서 다음 실행이 깨끗한 상태에서 다시 받게 한다.
+        shutil.rmtree(episode_dir, ignore_errors=True)
+        return False, None
+    return True, episode_dir

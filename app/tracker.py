@@ -14,10 +14,12 @@
 
 import asyncio
 import logging
+from pathlib import Path
 
 import aiohttp
 
-from app import job_status, naver_api, repository
+from app import comicinfo, job_status, naver_api, repository
+from app.file_utils import remove_forbidden_str
 from app.config import Settings
 from app.discord_notify import send_webhook_notification
 from app.models import TitleInfo
@@ -161,6 +163,48 @@ async def enrich_one(
     if registered_names:
         return True, f"작가 등록: {', '.join(registered_names)}"
     return True, "작가 정보 없음 (API 응답에 작가 필드가 비어있음)"
+
+
+async def sync_metadata_for_all(settings) -> int:
+    """
+    추적 중인(구독중/구독해제/제외됨 전부) 웹툰 폴더를 스캔해서, info.xml이나
+    cover.jpg가 없는 것만 다시 만들어준다. 폴더가 아예 없으면(다운로드한 적 없는
+    웹툰) 건너뛴다. 한 웹툰 처리 중 예외가 나도(디스크 오류, 커버 이미지 네트워크
+    실패 등) 전체가 멈추지 않고 다음 웹툰으로 넘어가야 하므로, 다른 스캔 함수들과
+    동일하게 웹툰 단위로 예외를 격리한다.
+    """
+    targets = repository.list_all()
+    fixed = 0
+    async with aiohttp.ClientSession() as session:
+        for wt in targets:
+            try:
+                safe_title = remove_forbidden_str(wt.title)
+                webtoon_dir = Path(settings.download_root) / safe_title
+                if not webtoon_dir.is_dir():
+                    continue
+                if not comicinfo.needs_comicinfo(webtoon_dir):
+                    continue
+
+                info = TitleInfo(
+                    title_id=wt.title_id,
+                    title_name=wt.title,
+                    synopsis="",
+                    is_adult=wt.is_adult,
+                    webtoon_type="webtoon",
+                    is_finished=wt.is_finished,
+                    thumbnail_url=wt.thumbnail_url,
+                    genres=wt.genres,
+                    tags=wt.tags,
+                )
+                comicinfo.write_comicinfo_file(webtoon_dir, info)
+                if wt.thumbnail_url:
+                    await comicinfo.download_cover_image(session, webtoon_dir, info, settings.request_timeout_seconds)
+                job_status.log_line("metadata_sync", f"[{wt.title}] info.xml / 커버 이미지 생성")
+                fixed += 1
+            except Exception as e:
+                log.error("메타 동기화 중 예외 (titleId=%s) — 다음 웹툰으로 진행: %s", wt.title_id, e)
+                job_status.log_line("metadata_sync", f"[{wt.title}] 처리 중 오류: {e}")
+    return fixed
 
 
 async def resync_registry(session: aiohttp.ClientSession, settings: Settings) -> int:

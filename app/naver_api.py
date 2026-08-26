@@ -354,6 +354,7 @@ def extract_candidate_author_names(items: list[NaverListItem]) -> list[str]:
     return sorted(names)
 
 
+
 async def fetch_other_titles_by_artist(
     session: aiohttp.ClientSession, title_id: str, timeout_seconds: int
 ) -> list[dict]:
