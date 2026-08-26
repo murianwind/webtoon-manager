@@ -169,9 +169,9 @@ async def resync_registry(session: aiohttp.ClientSession, settings: Settings) ->
     각 웹툰의 처리 결과(성공/실패 이유)를 job_status 로그에 남겨서, "재동기화는
     끝났다는데 왜 목록이 비었지?"를 실행 이력에서 바로 진단할 수 있게 한다.
     """
-    targets = [wt for wt in repository.list_all() if wt.status != repository.STATUS_EXCLUDED]
+    targets = repository.list_all()  # 제외됨도 포함 — 구독 상태와 무관하게 저자/태그 정보는 채워야 함
     if not targets:
-        job_status.log_line("registry", "재동기화 대상 웹툰이 없습니다 (구독중/구독해제된 것이 없음)")
+        job_status.log_line("registry", "재동기화 대상 웹툰이 없습니다")
         return 0
 
     semaphore = asyncio.Semaphore(_ARTIST_SCAN_CONCURRENCY)

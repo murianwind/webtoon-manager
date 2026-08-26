@@ -145,17 +145,27 @@ function restoreNaverListPrefs() {
 async function loadNaverList() {
   const grid = document.getElementById("naver-list-grid");
   const emptyMsg = document.getElementById("naver-list-empty");
+  const statusEl = document.getElementById("naver-list-refresh-status");
+  const btn = document.getElementById("btn-refresh-naver-list");
+
   if (grid.children.length === 0) {
     grid.innerHTML = "<p>불러오는 중...</p>";
   }
+  btn.disabled = true;
+  statusEl.textContent = "새로고침 중...";
+
   try {
     naverListCache = await apiCall("/api/naver-list");
     renderNaverList();
+    statusEl.textContent = `마지막 새로고침: ${new Date().toLocaleString("ko-KR")} (${naverListCache.length}개)`;
   } catch (e) {
     if (grid.children.length === 0) {
       emptyMsg.textContent = `목록을 불러오지 못했습니다: ${e.message}`;
       emptyMsg.classList.remove("hidden");
     }
+    statusEl.textContent = `새로고침 실패: ${e.message}`;
+  } finally {
+    btn.disabled = false;
   }
 }
 

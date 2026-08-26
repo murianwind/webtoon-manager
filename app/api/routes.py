@@ -154,6 +154,7 @@ async def remove_from_unsubscribed(title_id: str):
     않는다"가 보장된다."""
     await asyncio.to_thread(_get_or_404, title_id)
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_EXCLUDED)
+    _trigger_enrich(title_id)
     return _to_out(await asyncio.to_thread(repository.get, title_id))
 
 
@@ -272,6 +273,7 @@ async def naver_list_exclude(title_id: str, payload: NaverListEntryIn):
             payload.thumbnail_url,
         )
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_EXCLUDED)
+    _trigger_enrich(title_id)  # 제외해도 저자/태그 정보는 채워야 필터 드롭다운에 뜬다
     return _to_out(await asyncio.to_thread(repository.get, title_id))
 
 
