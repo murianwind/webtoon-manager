@@ -325,12 +325,13 @@ _JOB_FUNCS = {
 
 
 def _build_trigger(schedule: JobSchedule):
-    """off면 None(=스케줄 없음), interval이면 N분마다, cron이면 지정한 시:분/요일에."""
+    """off면 None(=스케줄 없음), interval이면 N분마다, cron이면 지정한 시:분/요일에.
+    hour/minute은 한국시간 기준으로 해석된다(스케줄러 자체가 Asia/Seoul로 고정됨)."""
     if schedule.mode == "off":
         return None
     if schedule.mode == "cron":
         day_of_week = ",".join(schedule.cron_days) if schedule.cron_days else "*"
-        return CronTrigger(hour=schedule.cron_hour, minute=schedule.cron_minute, day_of_week=day_of_week)
+        return CronTrigger(hour=schedule.cron_hour, minute=schedule.cron_minute, day_of_week=day_of_week, timezone="Asia/Seoul")
     return IntervalTrigger(minutes=schedule.interval_minutes)
 
 
@@ -351,7 +352,11 @@ def _apply_job_schedule(scheduler: AsyncIOScheduler, job_id: str) -> None:
 
 
 def create_scheduler() -> AsyncIOScheduler:
-    scheduler = AsyncIOScheduler()
+    # 컨테이너의 시스템 시간대(보통 UTC)와 무관하게 항상 한국시간으로 해석하도록
+    # 명시한다 — 명시 안 하면 APScheduler가 컨테이너의 시스템 기본값(UTC)을 쓰는데,
+    # 설정 화면에서 "07:00"이라고 넣으면 사용자는 한국시간 07:00을 기대하지만
+    # 실제로는 UTC 07:00(한국시간 오후 4시)에 실행되고 있었다 — 실제로 확인된 버그.
+    scheduler = AsyncIOScheduler(timezone="Asia/Seoul")
     for job_id in DEFAULT_SCHEDULES:
         _apply_job_schedule(scheduler, job_id)
     return scheduler
