@@ -299,37 +299,6 @@ def get_enabled_author_ids() -> set[str]:
     return {r["author_id"] for r in rows}
 
 
-def get_author_ids_from_non_excluded_webtoons() -> set[str]:
-    """제외되지 않은(구독중/구독해제) 웹툰들에 실제로 저장된 저자 id 전체.
-    "등록된 작가"가 실제로 이 집합과 일치하는지 확인/정리할 때 쓴다."""
-    rows = get_connection().execute(
-        "SELECT writer_ids FROM webtoons WHERE status != ?", (STATUS_EXCLUDED,)
-    ).fetchall()
-    result: set[str] = set()
-    for row in rows:
-        result.update(json.loads(row["writer_ids"] or "[]"))
-    return result
-
-
-def reconcile_enabled_authors() -> int:
-    """
-    예전 버전(제외된 웹툰의 저자까지 등록해버리던 버그)으로 잘못 등록된 작가를 정리한다.
-    지금 enabled=1인 작가 중, 제외되지 않은 어떤 웹툰에도 저자로 안 걸리는 작가는
-    다시 enabled=0으로 되돌린다. 반환값은 되돌린 개수.
-    """
-    valid_ids = get_author_ids_from_non_excluded_webtoons()
-    wrong_ids = [a.author_id for a in list_watched_authors() if a.enabled and a.author_id not in valid_ids]
-    if not wrong_ids:
-        return 0
-    with write_transaction() as conn:
-        for author_id in wrong_ids:
-            conn.execute(
-                "UPDATE watched_authors SET enabled = 0, updated_at = ? WHERE author_id = ?",
-                (_now(), author_id),
-            )
-    return len(wrong_ids)
-
-
 def delete_watched_author(author_id: str) -> None:
     """레지스트리에서 완전히 지운다 (이름 없이 남은 예전 찌꺼기 데이터 정리용)."""
     with write_transaction() as conn:
