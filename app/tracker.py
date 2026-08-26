@@ -24,8 +24,6 @@ from app.models import TitleInfo
 
 log = logging.getLogger(__name__)
 
-_ARTIST_SCAN_CONCURRENCY = 5
-
 DEFAULT_TAG_IDS_AND_NAMES = {"134": "", "133": ""}
 
 
@@ -99,7 +97,7 @@ async def backfill_missing_thumbnails(session: aiohttp.ClientSession, settings: 
     if not targets:
         return 0
 
-    semaphore = asyncio.Semaphore(_ARTIST_SCAN_CONCURRENCY)
+    semaphore = asyncio.Semaphore(settings.artist_scan_concurrency)
 
     async def _fetch_one(title_id: str) -> tuple[str, TitleInfo | None]:
         async with semaphore:
@@ -180,7 +178,7 @@ async def resync_registry(session: aiohttp.ClientSession, settings: Settings) ->
         job_status.log_line("registry", "재동기화 대상 웹툰이 없습니다")
         return 0
 
-    semaphore = asyncio.Semaphore(_ARTIST_SCAN_CONCURRENCY)
+    semaphore = asyncio.Semaphore(settings.artist_scan_concurrency)
     registered_count = 0
 
     async def _run_one(wt) -> bool:
@@ -207,7 +205,7 @@ async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, setting
     if not active_webtoons:
         return
 
-    semaphore = asyncio.Semaphore(_ARTIST_SCAN_CONCURRENCY)
+    semaphore = asyncio.Semaphore(settings.artist_scan_concurrency)
     tasks = [
         _fetch_info_and_others(session, semaphore, wt.title_id, settings) for wt in active_webtoons
     ]

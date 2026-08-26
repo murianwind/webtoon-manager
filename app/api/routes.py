@@ -395,6 +395,7 @@ async def remove_watched_author(author_id: str):
     return {"status": "deleted"}
 
 
+
 @router.get("/watched-tags", response_model=list[WatchedTagOut])
 async def list_watched_tags():
     rows = await asyncio.to_thread(repository.list_watched_tags)
@@ -652,7 +653,7 @@ async def update_schedules(payload: SchedulesIn, request: Request):
 # ── 디스코드 설정 + 테스트 ─────────────────────────────────────────
 
 class DiscordSettingsOut(BaseModel):
-    webhook_url: str
+    webhook_url_set: bool
     bot_token_set: bool
     notify_channel_id: str
     bot_ready: bool
@@ -667,7 +668,7 @@ class DiscordSettingsIn(BaseModel):
 @router.get("/settings/discord", response_model=DiscordSettingsOut)
 async def get_discord_settings():
     return DiscordSettingsOut(
-        webhook_url=await asyncio.to_thread(discord_config.get_webhook_url),
+        webhook_url_set=bool(await asyncio.to_thread(discord_config.get_webhook_url)),
         bot_token_set=bool(await asyncio.to_thread(discord_config.get_bot_token)),
         notify_channel_id=await asyncio.to_thread(discord_config.get_notify_channel_id),
         bot_ready=discord_bot.is_ready(),
@@ -704,7 +705,15 @@ async def download_backup():
 
 @router.post("/restore")
 async def restore_backup(data: dict):
-    await asyncio.to_thread(repository.restore_all, data)
+    try:
+        await asyncio.to_thread(repository.restore_all, data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        # 스키마가 안 맞는 백업(필수 컬럼 없음 등)은 DB 예외가 그대로 올라올 수 있다 —
+        # 원문 그대로 500으로 흘리는 대신 "복원 실패"로 명확히 감싼다. 트랜잭션은
+        # write_transaction이 이미 롤백했으므로 DB는 이전 상태 그대로 안전하다.
+        raise HTTPException(status_code=400, detail=f"백업 파일 형식이 올바르지 않아 복원하지 못했습니다: {e}")
     return {"status": "restored"}
 
 

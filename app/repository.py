@@ -82,14 +82,17 @@ def upsert_new(
     added_source: str = SOURCE_MANUAL,
     thumbnail_url: str = "",
 ) -> None:
-    """이미 존재하면 아무 것도 하지 않는다 (구독 취소/제외 상태를 덮어쓰지 않기 위해)."""
-    if exists(title_id):
-        return
+    """이미 존재하면 아무 것도 하지 않는다 (구독 취소/제외 상태를 덮어쓰지 않기 위해).
+
+    exists() 체크 후 별도로 INSERT하면 두 코루틴(예: 작가 스캔과 태그 스캔이 동시에
+    같은 신작을 발견하는 경우)이 동시에 exists()==False를 보고 둘 다 INSERT를
+    시도해서 IntegrityError로 죽을 수 있다(실제로 스레드 두 개로 재현됨) — INSERT OR
+    IGNORE로 존재 여부 확인과 삽입을 원자적으로 묶어서 이 레이스 자체를 없앤다."""
     now = _now()
     with write_transaction() as conn:
         conn.execute(
             """
-            INSERT INTO webtoons
+            INSERT OR IGNORE INTO webtoons
                 (title_id, title, status, is_adult, writer_ids, added_source,
                  last_downloaded_no, is_finished, finish_ack, thumbnail_url, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?)
@@ -299,6 +302,7 @@ def get_enabled_author_ids() -> set[str]:
     return {r["author_id"] for r in rows}
 
 
+
 def delete_watched_author(author_id: str) -> None:
     """레지스트리에서 완전히 지운다 (이름 없이 남은 예전 찌꺼기 데이터 정리용)."""
     with write_transaction() as conn:
@@ -422,32 +426,51 @@ def export_all() -> dict:
     }
 
 
+_WEBTOON_COLUMNS = (
+    "title_id", "title", "status", "is_adult", "writer_ids", "added_source",
+    "last_downloaded_no", "is_finished", "finish_ack", "thumbnail_url",
+    "finish_notified", "genres", "tags", "latest_episode_no", "is_paused",
+    "writer_names", "created_at", "updated_at",
+)
+_WATCHED_AUTHOR_COLUMNS = ("author_id", "author_name", "enabled", "created_at", "updated_at")
+_WATCHED_TAG_COLUMNS = ("tag_id", "tag_name", "enabled", "created_at", "updated_at")
+
+
+def _insert_validated_rows(conn, table: str, allowed_columns: tuple[str, ...], rows: list[dict]) -> None:
+    """
+    백업 JSON의 키를 SQL 컬럼명으로 그대로 쓰면 조작된 백업 파일로 SQL 인젝션이
+    가능해진다(f-string에 row.keys()를 직접 꽂는 형태였음 — 실제로 이런 문제가
+    있었다). 그래서 컬럼명은 절대 입력에서 가져오지 않고, 여기 하드코딩된
+    allowed_columns 중에서 실제로 그 행에 존재하는 것만, 정해진 순서로만 사용한다.
+    모르는 키는 조용히 무시하고(공격 표면이 안 되도록), 필수 컬럼이 하나라도
+    없으면 이 행 전체를 건너뛴다(스키마가 다른 백업이어도 크래시 없이 처리).
+    """
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        present_columns = [c for c in allowed_columns if c in row]
+        if not present_columns:
+            continue
+        placeholders = ", ".join("?" for _ in present_columns)
+        column_list = ", ".join(present_columns)  # allowed_columns에서만 골랐으므로 안전
+        conn.execute(
+            f"INSERT INTO {table} ({column_list}) VALUES ({placeholders})",
+            [row[c] for c in present_columns],
+        )
+
+
 def restore_all(data: dict) -> None:
     """백업 데이터로 4개 테이블을 완전히 교체한다 (기존 내용은 전부 지워짐)."""
+    if not isinstance(data, dict):
+        raise ValueError("백업 데이터 형식이 올바르지 않습니다 (JSON 객체가 아님).")
+
     with write_transaction() as conn:
         for table in ("webtoons", "settings", "watched_authors", "watched_tags"):
             conn.execute(f"DELETE FROM {table}")
 
-        for row in data.get("webtoons", []):
-            columns = list(row.keys())
-            placeholders = ", ".join("?" for _ in columns)
-            conn.execute(
-                f"INSERT INTO webtoons ({', '.join(columns)}) VALUES ({placeholders})",
-                [row[c] for c in columns],
-            )
-        for row in data.get("settings", []):
-            conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (row["key"], row["value"]))
-        for row in data.get("watched_authors", []):
-            columns = list(row.keys())
-            placeholders = ", ".join("?" for _ in columns)
-            conn.execute(
-                f"INSERT INTO watched_authors ({', '.join(columns)}) VALUES ({placeholders})",
-                [row[c] for c in columns],
-            )
-        for row in data.get("watched_tags", []):
-            columns = list(row.keys())
-            placeholders = ", ".join("?" for _ in columns)
-            conn.execute(
-                f"INSERT INTO watched_tags ({', '.join(columns)}) VALUES ({placeholders})",
-                [row[c] for c in columns],
-            )
+        _insert_validated_rows(conn, "webtoons", _WEBTOON_COLUMNS, data.get("webtoons") or [])
+        for row in data.get("settings") or []:
+            if isinstance(row, dict) and "key" in row and "value" in row:
+                conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (row["key"], row["value"]))
+        _insert_validated_rows(conn, "watched_authors", _WATCHED_AUTHOR_COLUMNS, data.get("watched_authors") or [])
+        _insert_validated_rows(conn, "watched_tags", _WATCHED_TAG_COLUMNS, data.get("watched_tags") or [])

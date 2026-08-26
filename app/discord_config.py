@@ -28,7 +28,10 @@ def get_notify_channel_id() -> str:
 
 
 def set_webhook_url(value: str) -> None:
-    repository.set_setting(_KEY_WEBHOOK_URL, encrypt(value) if value else None)
+    """빈 문자열이면 기존 값을 그대로 둔다 (봇 토큰과 동일한 규칙 — 마스킹된 채로
+    그대로 제출해도 실수로 지워지지 않도록)."""
+    if value:
+        repository.set_setting(_KEY_WEBHOOK_URL, encrypt(value))
 
 
 def set_bot_token(value: str) -> None:

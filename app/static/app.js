@@ -862,11 +862,16 @@ document.getElementById("btn-save-settings").addEventListener("click", async () 
 // ── 설정: 디스코드 ───────────────────────────────────────
 
 const BOT_TOKEN_MASK = "••••••••••••••••";
+const WEBHOOK_URL_MASK = "••••••••••••••••••••••••••••";
 
 async function loadDiscordSettings() {
   try {
     const s = await apiCall("/api/settings/discord");
-    document.getElementById("discord-webhook-url").value = s.webhook_url;
+
+    const webhookInput = document.getElementById("discord-webhook-url");
+    webhookInput.value = s.webhook_url_set ? WEBHOOK_URL_MASK : "";
+    webhookInput.dataset.masked = s.webhook_url_set ? "true" : "false";
+
     document.getElementById("discord-channel-id").value = s.notify_channel_id;
 
     const tokenInput = document.getElementById("discord-bot-token");
@@ -878,6 +883,13 @@ async function loadDiscordSettings() {
     document.getElementById("discord-save-result").textContent = e.message;
   }
 }
+
+document.getElementById("discord-webhook-url").addEventListener("focus", (e) => {
+  if (e.target.dataset.masked === "true") {
+    e.target.value = "";
+    e.target.dataset.masked = "false";
+  }
+});
 
 document.getElementById("discord-bot-token").addEventListener("focus", (e) => {
   if (e.target.dataset.masked === "true") {
@@ -894,10 +906,14 @@ document.getElementById("btn-save-discord").addEventListener("click", async () =
     const rawToken = tokenInput.value.trim();
     const tokenToSend = rawToken === BOT_TOKEN_MASK ? "" : rawToken;
 
+    const webhookInput = document.getElementById("discord-webhook-url");
+    const rawWebhook = webhookInput.value.trim();
+    const webhookToSend = rawWebhook === WEBHOOK_URL_MASK ? "" : rawWebhook;
+
     await apiCall("/api/settings/discord", {
       method: "POST",
       body: JSON.stringify({
-        webhook_url: document.getElementById("discord-webhook-url").value.trim(),
+        webhook_url: webhookToSend,
         bot_token: tokenToSend,
         notify_channel_id: document.getElementById("discord-channel-id").value.trim(),
       }),

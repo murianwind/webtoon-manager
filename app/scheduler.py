@@ -39,6 +39,10 @@ DEFAULT_SCHEDULES: dict[str, JobSchedule] = {
     "download_job": JobSchedule(mode="interval", interval_minutes=60),
 }
 
+# 정기 스케줄 실행과 "수동 실행" 버튼이 겹치는 걸 막는 잡별 락 (동시성 문제 방지).
+_download_job_lock = asyncio.Lock()
+_discovery_job_lock = asyncio.Lock()
+
 
 async def _download_new_episodes_for_one(session: aiohttp.ClientSession, settings: Settings, title_id: str) -> None:
     webtoon = repository.get(title_id)
@@ -124,6 +128,17 @@ async def _download_new_episodes_for_one(session: aiohttp.ClientSession, setting
 
 
 async def run_download_job() -> None:
+    """정기 스케줄과 '수동 실행' 버튼이 동시에 이 잡을 실행하면, 같은 웹툰을 두 실행이
+    동시에 다운로드하려고 시도할 수 있다(회차 저장/압축이 원자적이지 않음) — 잡별
+    락으로 겹치는 실행은 조용히 건너뛴다(에러 아님, 그냥 "이미 실행 중"으로 로그만 남김)."""
+    if _download_job_lock.locked():
+        job_status.log_line("download", "이미 실행 중이라 건너뜁니다 (중복 실행 방지)")
+        return
+    async with _download_job_lock:
+        await _run_download_job_impl()
+
+
+async def _run_download_job_impl() -> None:
     settings = get_settings()
     active_webtoons = repository.list_by_status(repository.STATUS_ACTIVE)
 
@@ -167,6 +182,15 @@ async def _notify_newly_finished() -> None:
 
 
 async def run_discovery_job() -> None:
+    """download_job과 동일한 이유로 잡별 락을 건다 — 겹치는 실행은 건너뛴다."""
+    if _discovery_job_lock.locked():
+        job_status.log_line("discovery", "이미 실행 중이라 건너뜁니다 (중복 실행 방지)")
+        return
+    async with _discovery_job_lock:
+        await _run_discovery_job_impl()
+
+
+async def _run_discovery_job_impl() -> None:
     settings = get_settings()
     job_status.start("discovery")
     had_error = False

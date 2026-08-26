@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     folder_zero_fill: int = 4
     image_zero_fill: int = 4
     max_concurrent_downloads: int = 10
+    artist_scan_concurrency: int = 5  # 작가/태그 스캔 시 네이버 API 동시 요청 수 제한
     delay_seconds: float = 1.0
     request_timeout_seconds: int = 10
 
