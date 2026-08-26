@@ -43,7 +43,3 @@ def set_notify_channel_id(value: str) -> None:
 
 def is_bot_configured() -> bool:
     return bool(get_bot_token() and get_notify_channel_id())
-
-
-def is_webhook_configured() -> bool:
-    return bool(get_webhook_url())

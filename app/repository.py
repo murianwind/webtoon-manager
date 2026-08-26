@@ -175,22 +175,6 @@ def list_all_writer_id_name_pairs() -> dict[str, str]:
     return result
 
 
-def list_interested_authors() -> list[tuple[str, str]]:
-    """구독중(active)인 모든 웹툰의 저자를 (author_id, author_name)로 모아 중복 제거해서 반환한다.
-    별도 등록 절차 없이, 지금 구독중인 웹툰에 실제로 저장된 저자 정보를 그대로 쓴다."""
-    rows = get_connection().execute(
-        "SELECT writer_ids, writer_names FROM webtoons WHERE status = ?", (STATUS_ACTIVE,)
-    ).fetchall()
-    seen: dict[str, str] = {}
-    for row in rows:
-        ids = json.loads(row["writer_ids"] or "[]")
-        names = json.loads(row["writer_names"] or "[]")
-        for i, author_id in enumerate(ids):
-            if author_id not in seen:
-                seen[author_id] = names[i] if i < len(names) else author_id
-    return sorted(seen.items(), key=lambda pair: pair[1])
-
-
 def update_genres_and_tags(title_id: str, genres: list[str], tags: list[str]) -> None:
     with write_transaction() as conn:
         conn.execute(
@@ -255,11 +239,6 @@ def set_setting(key: str, value: str | None) -> None:
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (key, value),
             )
-
-
-def list_all_settings() -> dict[str, str]:
-    rows = get_connection().execute("SELECT key, value FROM settings").fetchall()
-    return {r["key"]: r["value"] for r in rows}
 
 
 # ── watched_authors (작가 자동추가 레지스트리) ─────────────────────

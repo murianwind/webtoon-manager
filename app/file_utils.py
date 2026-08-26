@@ -6,8 +6,6 @@
 치환 테이블과 순서를 원본과 동일하게 유지한다 (요구사항: 네이밍 규칙 유지).
 """
 
-import re
-
 from app.constants import FORBIDDEN_CHAR_TABLE_FROM, FORBIDDEN_CHAR_TABLE_TO
 
 _WINDOWS_WEIRD_SPACES = [
@@ -33,11 +31,6 @@ def remove_forbidden_str(name: str) -> str:
     processed = processed.translate(_WHITESPACE_TABLE)
     processed = _soft_strip_edges(processed)
     return processed.strip().rstrip(".")
-
-
-def remove_html_tags(text: str) -> str:
-    cleaner = re.compile(r"<.*?>|&([a-z0-9]+|#[0-9]{1,6}|#x[0-9a-f]{1,6});")
-    return re.sub(cleaner, "", text)
 
 
 def episode_folder_name(episode_no: int, subtitle: str, folder_zero_fill: int) -> str:

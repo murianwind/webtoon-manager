@@ -239,7 +239,7 @@ async def browse_naver_list():
                 "is_finished": wt.is_finished,
                 "is_paused": wt.is_paused,
                 "is_adult": wt.is_adult,
-                "author_summary": "",
+                "author_summary": ", ".join(wt.writer_names),
                 "status": wt.status,
                 "genres": wt.genres,
                 "tags": wt.tags,

@@ -39,12 +39,21 @@ class CompletionBotClient(discord.Client):
             return
         custom_id = (interaction.data or {}).get("custom_id", "")
 
-        if custom_id.startswith(_CUSTOM_ID_UNSUBSCRIBE_PREFIX):
-            title_id = custom_id[len(_CUSTOM_ID_UNSUBSCRIBE_PREFIX):]
-            await self._handle_unsubscribe(interaction, title_id)
-        elif custom_id.startswith(_CUSTOM_ID_ACKNOWLEDGE_PREFIX):
-            title_id = custom_id[len(_CUSTOM_ID_ACKNOWLEDGE_PREFIX):]
-            await self._handle_acknowledge(interaction, title_id)
+        try:
+            if custom_id.startswith(_CUSTOM_ID_UNSUBSCRIBE_PREFIX):
+                title_id = custom_id[len(_CUSTOM_ID_UNSUBSCRIBE_PREFIX):]
+                await self._handle_unsubscribe(interaction, title_id)
+            elif custom_id.startswith(_CUSTOM_ID_ACKNOWLEDGE_PREFIX):
+                title_id = custom_id[len(_CUSTOM_ID_ACKNOWLEDGE_PREFIX):]
+                await self._handle_acknowledge(interaction, title_id)
+        except Exception as e:
+            # 여기서 안 잡으면 사용자는 "상호작용 실패"만 보고 원인을 알 방법이 없다.
+            log.error("완결 확인 버튼 처리 중 예외 (custom_id=%s): %s", custom_id, e)
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("처리 중 오류가 발생했습니다.", ephemeral=True)
+            except Exception:
+                pass  # 알림 시도 자체가 실패해도 봇이 죽으면 안 됨
 
     async def _handle_unsubscribe(self, interaction: discord.Interaction, title_id: str) -> None:
         webtoon = await asyncio.to_thread(repository.get, title_id)
@@ -114,7 +123,18 @@ async def start_bot() -> None:
 
     _client = CompletionBotClient(notify_channel_id=channel_id)
     _run_task = asyncio.create_task(_client.start(discord_config.get_bot_token()))
+    _run_task.add_done_callback(_log_bot_task_failure)
     log.info("완결 확인 디스코드 봇 시작 중...")
+
+
+def _log_bot_task_failure(task: asyncio.Task) -> None:
+    """봇 연결은 백그라운드 태스크라 실패해도 아무도 안 기다리므로, 조용히 사라지지
+    않게 예외를 명시적으로 로그에 남긴다 (토큰이 틀렸을 때 등)."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        log.error("완결 확인 봇 연결 실패: %s", exc)
 
 
 async def stop_bot() -> None:
