@@ -584,38 +584,66 @@ document.getElementById("btn-search-author").addEventListener("click", async () 
 let interestedAuthorsCache = [];
 
 async function loadAuthorList() {
-  const container = document.getElementById("author-interested-list");
+  const registeredEl = document.getElementById("author-registered-list");
   try {
     interestedAuthorsCache = await apiCall("/api/authors/interested");
   } catch (e) {
-    container.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+    registeredEl.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
     return;
   }
-  renderInterestedAuthors();
+  renderRegisteredAuthors();
+  renderAllAuthors();
 }
 
-function renderInterestedAuthors() {
-  const container = document.getElementById("author-interested-list");
+function buildAuthorRow(a, actionLabel, action) {
+  const row = document.createElement("div");
+  row.className = "registry-row";
+  row.innerHTML = `<span>${escapeHtml(a.author_name || a.author_id)}</span>`;
+  const actionsWrap = document.createElement("span");
+  actionsWrap.appendChild(
+    makeButton(actionLabel, async () => {
+      await apiCall(`/api/watched-authors/${a.author_id}/${action}`, {
+        method: "POST",
+        body: JSON.stringify({ author_name: a.author_name }),
+      });
+      loadAuthorList();
+    })
+  );
+  actionsWrap.appendChild(
+    makeButton("삭제", async () => {
+      if (!confirm(`"${a.author_name || a.author_id}"를 목록에서 완전히 지울까요?`)) return;
+      await apiCall(`/api/watched-authors/${a.author_id}`, { method: "DELETE" });
+      loadAuthorList();
+    })
+  );
+  row.appendChild(actionsWrap);
+  return row;
+}
+
+function renderRegisteredAuthors() {
+  const container = document.getElementById("author-registered-list");
+  const registered = interestedAuthorsCache.filter((a) => a.enabled);
   container.innerHTML = "";
-  if (interestedAuthorsCache.length === 0) {
-    container.innerHTML = "<p>구독중인 웹툰이 없거나, 아직 저자 정보를 확인하지 못했습니다. 설정 탭의 \"지금 전체 재동기화\"를 눌러보세요.</p>";
+  if (registered.length === 0) {
+    container.innerHTML =
+      '구독중인 웹툰이 없거나, 아직 저자 정보를 확인하지 못했습니다. 설정 탭의 "지금 전체 재동기화"를 눌러보세요.';
     return;
   }
-  for (const a of interestedAuthorsCache) {
-    const row = document.createElement("div");
-    row.className = `registry-row${a.enabled ? "" : " disabled"}`;
-    row.innerHTML = `<span>${escapeHtml(a.author_name || a.author_id)}</span>`;
-    row.appendChild(
-      makeButton(a.enabled ? "제외" : "등록", async () => {
-        const action = a.enabled ? "disable" : "enable";
-        await apiCall(`/api/watched-authors/${a.author_id}/${action}`, {
-          method: "POST",
-          body: JSON.stringify({ author_name: a.author_name }),
-        });
-        loadAuthorList();
-      })
-    );
-    container.appendChild(row);
+  for (const a of registered) {
+    container.appendChild(buildAuthorRow(a, "제외", "disable"));
+  }
+}
+
+function renderAllAuthors() {
+  const container = document.getElementById("author-all-list");
+  const disabled = interestedAuthorsCache.filter((a) => !a.enabled);
+  container.innerHTML = "";
+  if (disabled.length === 0) {
+    container.innerHTML = "<p>제외된 작가가 없습니다.</p>";
+    return;
+  }
+  for (const a of disabled) {
+    container.appendChild(buildAuthorRow(a, "등록", "enable"));
   }
 }
 

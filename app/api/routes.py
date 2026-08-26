@@ -381,6 +381,13 @@ async def disable_watched_author(author_id: str, payload: AuthorEnableIn | None 
     return WatchedAuthorOut(author_id=match.author_id, author_name=match.author_name, enabled=match.enabled)
 
 
+@router.delete("/watched-authors/{author_id}")
+async def remove_watched_author(author_id: str):
+    """레지스트리에서 완전히 지운다 (이름 없이 남은 예전 데이터 등을 정리할 때 사용)."""
+    await asyncio.to_thread(repository.delete_watched_author, author_id)
+    return {"status": "deleted"}
+
+
 @router.get("/watched-tags", response_model=list[WatchedTagOut])
 async def list_watched_tags():
     rows = await asyncio.to_thread(repository.list_watched_tags)

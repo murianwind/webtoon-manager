@@ -305,6 +305,12 @@ def get_enabled_author_ids() -> set[str]:
     return {r["author_id"] for r in rows}
 
 
+def delete_watched_author(author_id: str) -> None:
+    """레지스트리에서 완전히 지운다 (이름 없이 남은 예전 찌꺼기 데이터 정리용)."""
+    with write_transaction() as conn:
+        conn.execute("DELETE FROM watched_authors WHERE author_id = ?", (author_id,))
+
+
 # ── watched_tags (태그 자동추가 레지스트리) ────────────────────────
 
 def _tag_row_to_record(row) -> WatchedTag:
