@@ -80,6 +80,7 @@ def _parse_title_info(raw: dict, title_id: str) -> TitleInfo:
         tags=list(gfp.get("tags") or []),
         age_description=age.get("description", ""),
         is_paused=bool(raw.get("rest", False)),
+        is_new=bool(raw.get("new", False)),
     )
 
 
@@ -234,6 +235,7 @@ async def fetch_full_webtoon_list(
                 is_finished=bool(item.get("finish")),
                 is_paused=bool(item.get("rest")),
                 has_update=bool(item.get("up")),
+                is_new=bool(item.get("new")),
                 is_adult=bool(item.get("adult")),
                 author_summary=item.get("author", ""),
             )

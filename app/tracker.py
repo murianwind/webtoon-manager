@@ -121,6 +121,7 @@ async def backfill_missing_thumbnails(session: aiohttp.ClientSession, settings: 
         repository.update_is_adult(title_id, info.is_adult)
         repository.update_genres_and_tags(title_id, info.genres, info.tags)
         repository.update_is_paused(title_id, info.is_paused)
+        repository.update_is_new(title_id, info.is_new)
         filled += 1
 
     return filled
@@ -151,6 +152,7 @@ async def enrich_one(
     repository.update_thumbnail_url(title_id, info.thumbnail_url)
     repository.update_genres_and_tags(title_id, info.genres, info.tags)
     repository.update_is_paused(title_id, info.is_paused)
+    repository.update_is_new(title_id, info.is_new)
     if info.writer_id_name_pairs:
         ids, names = zip(*info.writer_id_name_pairs)
         repository.update_writer_ids_and_names(title_id, list(ids), list(names))
@@ -268,6 +270,7 @@ async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, setting
         repository.update_thumbnail_url(title_id, info.thumbnail_url)
         repository.update_genres_and_tags(title_id, info.genres, info.tags)
         repository.update_is_paused(title_id, info.is_paused)
+        repository.update_is_new(title_id, info.is_new)
 
         if info.writer_id_name_pairs:
             ids, names = zip(*info.writer_id_name_pairs)

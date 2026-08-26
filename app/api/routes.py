@@ -55,6 +55,7 @@ class WebtoonOut(BaseModel):
     tags: list[str]
     latest_episode_no: int
     is_paused: bool
+    is_new: bool
     has_new_episode: bool
     writer_ids: list[str]
     writer_names: list[str]
@@ -75,6 +76,7 @@ def _to_out(wt) -> WebtoonOut:
         tags=wt.tags,
         latest_episode_no=wt.latest_episode_no,
         is_paused=wt.is_paused,
+        is_new=wt.is_new,
         has_new_episode=wt.latest_episode_no > wt.last_downloaded_no > 0,
         writer_ids=wt.writer_ids,
         writer_names=wt.writer_names,
@@ -215,6 +217,7 @@ async def browse_naver_list():
                 "weekdays": item.weekdays,
                 "is_finished": item.is_finished,
                 "is_paused": item.is_paused,
+                "is_new": item.is_new,
                 "is_adult": item.is_adult,
                 "author_summary": item.author_summary,
                 "status": tracked.status if tracked else None,
@@ -238,6 +241,7 @@ async def browse_naver_list():
                 "weekdays": [],
                 "is_finished": wt.is_finished,
                 "is_paused": wt.is_paused,
+                "is_new": wt.is_new,
                 "is_adult": wt.is_adult,
                 "author_summary": ", ".join(wt.writer_names),
                 "status": wt.status,

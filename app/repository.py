@@ -45,6 +45,7 @@ def _row_to_record(row) -> WebtoonRecord:
         tags=json.loads(row["tags"] or "[]"),
         latest_episode_no=row["latest_episode_no"],
         is_paused=bool(row["is_paused"]),
+        is_new=bool(row["is_new"]),
     )
 
 
@@ -191,6 +192,14 @@ def update_is_paused(title_id: str, is_paused: bool) -> None:
         conn.execute(
             "UPDATE webtoons SET is_paused = ?, updated_at = ? WHERE title_id = ?",
             (int(is_paused), _now(), title_id),
+        )
+
+
+def update_is_new(title_id: str, is_new: bool) -> None:
+    with write_transaction() as conn:
+        conn.execute(
+            "UPDATE webtoons SET is_new = ?, updated_at = ? WHERE title_id = ?",
+            (int(is_new), _now(), title_id),
         )
 
 

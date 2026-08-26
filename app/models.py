@@ -30,6 +30,7 @@ class TitleInfo:
     tags: list[str] = field(default_factory=list)
     age_description: str = ""
     is_paused: bool = False
+    is_new: bool = False
 
 
 @dataclass
@@ -43,6 +44,7 @@ class NaverListItem:
     is_finished: bool = False
     is_paused: bool = False  # 네이버 API의 'rest' 필드 (휴재)
     has_update: bool = False  # 네이버 API의 'up' 필드 (새 에피소드 업데이트 = UP 아이콘)
+    is_new: bool = False  # 네이버 API의 'new' 필드 (신작)
     is_adult: bool = False
     author_summary: str = ""
 
@@ -80,6 +82,7 @@ class WebtoonRecord:
     tags: list[str] = field(default_factory=list)
     latest_episode_no: int = 0
     is_paused: bool = False
+    is_new: bool = False
     writer_names: list[str] = field(default_factory=list)  # writer_ids와 같은 순서로 대응
 
 

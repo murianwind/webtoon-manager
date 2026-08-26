@@ -151,6 +151,7 @@ button:hover { border-color: var(--accent); }
 .badge.finished { background: #fff4e0; color: var(--warn); }
 .badge.paused { background: #eef0ff; color: #4a4ad6; }
 .badge.new-episode { background: #03c75a; color: white; font-weight: 700; }
+.badge.new-release { background: #ff5252; color: white; font-weight: 700; }
 
 .webtoon-card-title a {
   color: inherit;

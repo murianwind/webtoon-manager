@@ -54,6 +54,7 @@ function naverUrl(titleId) {
 
 function badgesHtml(w) {
   const parts = [];
+  if (w.is_new) parts.push('<span class="badge new-release">신작</span>');
   if (w.is_finished) parts.push('<span class="badge finished">완결</span>');
   if (w.is_paused) parts.push('<span class="badge paused">휴재</span>');
   if (w.has_new_episode) parts.push('<span class="badge new-episode">UP</span>');
@@ -338,11 +339,14 @@ function renderSubscriptionTab(status) {
   const query = document.getElementById(`${status}-search`).value.trim().toLowerCase();
   const authorFilter = document.getElementById(`${status}-author-filter`).value;
   const tagFilter = document.getElementById(`${status}-tag-filter`).value;
+  const badgeFilter = document.getElementById(`${status}-badge-filter`).value;
 
   let rows = subscriptionCache[status] || [];
   if (query) rows = rows.filter((w) => w.title.toLowerCase().includes(query));
   if (authorFilter) rows = rows.filter((w) => (w.writer_ids || []).includes(authorFilter));
   if (tagFilter) rows = rows.filter((w) => (w.tags || []).includes(tagFilter));
+  if (badgeFilter === "new") rows = rows.filter((w) => w.is_new);
+  if (badgeFilter === "paused") rows = rows.filter((w) => w.is_paused);
 
   rows = [...rows].sort((a, b) => a.title.localeCompare(b.title));
 
@@ -357,6 +361,7 @@ for (const status of ["unsubscribed", "excluded"]) {
   document.getElementById(`${status}-search`).addEventListener("input", () => renderSubscriptionTab(status));
   document.getElementById(`${status}-author-filter`).addEventListener("change", () => renderSubscriptionTab(status));
   document.getElementById(`${status}-tag-filter`).addEventListener("change", () => renderSubscriptionTab(status));
+  document.getElementById(`${status}-badge-filter`).addEventListener("change", () => renderSubscriptionTab(status));
 }
 
 async function subscriptionAction(titleId, action, currentTab) {
