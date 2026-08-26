@@ -190,6 +190,60 @@ async def resync_registry(session: aiohttp.ClientSession, settings: Settings) ->
     return registered_count
 
 
+async def populate_author_catalog(session: aiohttp.ClientSession, settings: Settings) -> int:
+    """
+    '전체 작가 목록'을 채우기 위해, 아직 구독 안 한 웹툰들의 실제 작가까지 알아낸다.
+    네이버 목록 API 자체는 저자 이름을 텍스트로만 주고 실제 id는 안 줘서, 웹툰마다
+    상세정보를 하나씩 조회해야 한다 — 748개 정도면 시간이 걸리므로(요청 사이 delay
+    포함) 신작 스캔에 얹지 않고 필요할 때 수동으로 실행하는 별도 작업으로 분리했다.
+    이미 저자를 아는 웹툰(DB에 writer_ids가 있는 것)은 다시 조회하지 않아서, 두 번째
+    실행부터는 새로 생긴 것만 훑는다.
+    """
+    catalog = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
+
+    # 이미 이름을 아는 작가의 작품이면 다시 조회하지 않는다 (완벽하진 않지만, 두 번째
+    # 실행부터는 대부분 걸러져서 새로 나온 작가만 훑게 된다).
+    known_names = {a.author_name for a in repository.list_watched_authors() if a.author_name}
+    targets = [
+        item for item in catalog if not any(name and name in item.author_summary for name in known_names)
+    ]
+    job_status.log_line(
+        "author_catalog", f"전체 {len(catalog)}개 중 저자 미확인 {len(targets)}개 조회 시작"
+    )
+    if not targets:
+        return 0
+
+    semaphore = asyncio.Semaphore(_ARTIST_SCAN_CONCURRENCY)
+    registered_count = 0
+
+    async def _run_one(item) -> bool:
+        nonlocal registered_count
+        async with semaphore:
+            try:
+                info = await naver_api.fetch_title_info(session, item.title_id, settings.request_timeout_seconds)
+            except Exception as e:
+                job_status.log_line("author_catalog", f"[{item.title_name}] 조회 예외: {e}")
+                return False
+            if info is None or not info.writer_id_name_pairs:
+                return False
+
+            # 구독 여부와 무관하게 "저자 레지스트리"만 채운다 — 여기서 webtoons 테이블에
+            # 행을 만들면 그 웹툰이 excluded/active 등 상태를 갖게 되어 네이버 목록 화면
+            # 필터링에 영향을 주므로, 절대 webtoons 테이블은 건드리지 않는다.
+            existing_ids = {a.author_id for a in repository.list_watched_authors()}
+            for author_id, author_name in info.writer_id_name_pairs:
+                if author_id not in existing_ids:
+                    repository.upsert_watched_author(author_id, author_name, enabled=False)
+
+            await asyncio.sleep(settings.delay_seconds)
+            return True
+
+    results = await asyncio.gather(*(_run_one(item) for item in targets))
+    registered_count = sum(1 for r in results if r)
+    job_status.log_line("author_catalog", f"{registered_count}개 웹툰의 저자 확인 완료")
+    return registered_count
+
+
 async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, settings: Settings) -> None:
     """구독 중인(status=active) 모든 웹툰의 완결/휴재/장르 갱신 + 등록된 작가 신작 자동추가."""
     active_webtoons = repository.list_by_status(repository.STATUS_ACTIVE)
@@ -241,6 +295,7 @@ async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, setting
                 title=other_title_name,
                 added_source=repository.SOURCE_ARTIST,
             )
+            await enrich_one(session, other_title_id, settings)  # writer_ids/tags 없이 들어가는 것 방지
             new_entry_lines.append(f"- {other_title_name} (`{other_title_id}`)")
 
     if new_entry_lines:
@@ -280,6 +335,7 @@ async def scan_curation_tags(session: aiohttp.ClientSession, settings: Settings)
                 title=other_title_name,
                 added_source=repository.SOURCE_TAG,
             )
+            await enrich_one(session, other_title_id, settings)  # writer_ids/tags 없이 들어가는 것 방지
             new_entry_lines.append(f"- {other_title_name} (`{other_title_id}`) [태그: {tag_name}]")
             log.info("태그 '%s'(id=%s)에서 신작 발견: %s (%s)", tag_name, tag_id, other_title_name, other_title_id)
 

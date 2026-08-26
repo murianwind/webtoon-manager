@@ -160,6 +160,21 @@ def update_writer_ids_and_names(title_id: str, writer_ids: list[str], writer_nam
         )
 
 
+def list_all_writer_id_name_pairs() -> dict[str, str]:
+    """상태와 무관하게 DB에 있는 모든 웹툰에서 (author_id -> author_name)을 모은다.
+    watched_authors에 이름 없이 등록된 경우 이걸로 보정한다."""
+    rows = get_connection().execute("SELECT writer_ids, writer_names FROM webtoons").fetchall()
+    result: dict[str, str] = {}
+    for row in rows:
+        ids = json.loads(row["writer_ids"] or "[]")
+        names = json.loads(row["writer_names"] or "[]")
+        for i, author_id in enumerate(ids):
+            name = names[i] if i < len(names) else ""
+            if name and not result.get(author_id):
+                result[author_id] = name
+    return result
+
+
 def list_interested_authors() -> list[tuple[str, str]]:
     """구독중(active)인 모든 웹툰의 저자를 (author_id, author_name)로 모아 중복 제거해서 반환한다.
     별도 등록 절차 없이, 지금 구독중인 웹툰에 실제로 저장된 저자 정보를 그대로 쓴다."""

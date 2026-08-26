@@ -512,7 +512,7 @@ async function loadRegistryPage() {
   document.getElementById("author-search-results").innerHTML = "";
   await loadAuthorList();
   await loadTagList();
-  await refreshRegistryResyncStatus();
+  await refreshRegistryJobStatuses();
 }
 
 document.getElementById("btn-resync-registry").addEventListener("click", async () => {
@@ -520,35 +520,43 @@ document.getElementById("btn-resync-registry").addEventListener("click", async (
   startRegistryPolling();
 });
 
-async function refreshRegistryResyncStatus() {
+document.getElementById("btn-populate-authors").addEventListener("click", async () => {
+  await apiCall("/api/registry/populate-author-catalog", { method: "POST" });
+  startRegistryPolling();
+});
+
+async function refreshRegistryJobStatuses() {
   let statuses;
   try {
     statuses = await apiCall("/api/jobs/status");
   } catch (e) {
     return;
   }
-  const st = statuses.registry;
-  const statusEl = document.getElementById("registry-resync-status");
-  if (!st) return;
-  if (st.status === "running") {
-    statusEl.textContent = "재동기화 중...";
-  } else if (st.status === "success") {
-    statusEl.textContent = "완료됨";
+  applyJobStatusToLabel(statuses.registry, "registry-resync-status", "재동기화 중...");
+  applyJobStatusToLabel(statuses.author_catalog, "author-catalog-status", "작가 목록 채우는 중...");
+
+  const stillRunning =
+    statuses.registry?.status === "running" || statuses.author_catalog?.status === "running";
+  if (!stillRunning) {
     loadAuthorList();
     loadTagList();
     stopRegistryPolling();
-  } else if (st.status === "error") {
-    statusEl.textContent = "오류 발생 (설정 탭 실행 이력 참고)";
-    stopRegistryPolling();
-  } else {
-    statusEl.textContent = "";
   }
+}
+
+function applyJobStatusToLabel(st, elementId, runningText) {
+  const el = document.getElementById(elementId);
+  if (!st || !el) return;
+  if (st.status === "running") el.textContent = runningText;
+  else if (st.status === "success") el.textContent = "완료됨";
+  else if (st.status === "error") el.textContent = "오류 발생 (설정 탭 실행 이력 참고)";
+  else el.textContent = "";
 }
 
 function startRegistryPolling() {
   stopRegistryPolling();
-  refreshRegistryResyncStatus();
-  registryPollTimer = setInterval(refreshRegistryResyncStatus, 2000);
+  refreshRegistryJobStatuses();
+  registryPollTimer = setInterval(refreshRegistryJobStatuses, 2000);
 }
 function stopRegistryPolling() {
   if (registryPollTimer) {
@@ -943,7 +951,7 @@ async function loadSettingsPage() {
   startJobPolling();
 }
 
-const JOB_NAME_LABEL = { discovery: "신작 스캔", download: "다운로드", manual: "수동 다운로드", registry: "작가/태그 재동기화" };
+const JOB_NAME_LABEL = { discovery: "신작 스캔", download: "다운로드", manual: "수동 다운로드", registry: "작가/태그 재동기화", author_catalog: "전체 작가 목록 채우기" };
 
 async function loadJobHistory() {
   const container = document.getElementById("job-history-list");

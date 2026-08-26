@@ -324,25 +324,23 @@ class InterestedAuthorOut(BaseModel):
 @router.get("/authors/interested", response_model=list[InterestedAuthorOut])
 async def list_interested_authors():
     """
-    "관심있는 작가" = watched_authors(영구 레지스트리) 전체 + 지금 구독중인 웹툰들의 저자
-    (레지스트리에 아직 못 들어갔을 수 있는 최신 정보) 를 합친 것.
-
-    한 번 등록되면(watched_authors에 들어가면) 구독을 해지해도 그대로 유지된다 —
-    이 목록은 "지금 구독중인 것"이 아니라 "한 번이라도 등록된 것"을 보여줘야 하기 때문에,
-    구독 상태만 보고 즉석에서 계산하면 안 되고 반드시 영구 레지스트리를 기준으로 삼는다.
+    "등록된 작가" = watched_authors에서 enabled=1 / "전체 작가 목록" = enabled=0.
+    이름은 watched_authors에 있으면 그걸 쓰고, 비어있으면 DB의 웹툰 어딘가에
+    저장된 실제 이름으로 보정한다 (예전에 이름 없이 등록됐던 것도 여기서 채워짐).
     """
     watched = await asyncio.to_thread(repository.list_watched_authors)
-    result_map = {
-        a.author_id: InterestedAuthorOut(author_id=a.author_id, author_name=a.author_name, enabled=a.enabled)
-        for a in watched
-    }
+    all_pairs = await asyncio.to_thread(repository.list_all_writer_id_name_pairs)
 
-    # 지금 구독중인 웹툰의 저자인데 아직 레지스트리에 안 들어간 경우(예: 방금 구독했는데
-    # 백그라운드 등록이 아직 안 끝난 경우)에도 놓치지 않도록 보강한다.
-    pairs = await asyncio.to_thread(repository.list_interested_authors)
-    for author_id, author_name in pairs:
+    result_map: dict[str, InterestedAuthorOut] = {}
+    for a in watched:
+        name = a.author_name or all_pairs.get(a.author_id, "")
+        result_map[a.author_id] = InterestedAuthorOut(author_id=a.author_id, author_name=name, enabled=a.enabled)
+
+    # watched_authors에 아직 한 번도 안 들어간 저자(웹툰 데이터에만 있는 경우)는
+    # "전체 작가 목록"(미등록) 쪽에 기본으로 채운다.
+    for author_id, author_name in all_pairs.items():
         if author_id not in result_map:
-            result_map[author_id] = InterestedAuthorOut(author_id=author_id, author_name=author_name, enabled=True)
+            result_map[author_id] = InterestedAuthorOut(author_id=author_id, author_name=author_name, enabled=False)
 
     return sorted(result_map.values(), key=lambda a: a.author_name)
 
@@ -473,6 +471,26 @@ async def resync_registry():
         except Exception as e:
             job_status.log_line("registry", f"오류: {e}")
             job_status.finish("registry", success=False)
+
+    asyncio.create_task(_run())
+    return {"status": "started"}
+
+
+@router.post("/registry/populate-author-catalog")
+async def populate_author_catalog():
+    """구독 안 한 웹툰까지 포함해서 '전체 작가 목록'을 채운다. 웹툰 개수만큼 네이버
+    API를 호출하므로(첫 실행 기준 최대 수백 건) 시간이 걸릴 수 있다 — 진행상황은
+    실행 이력에서 확인 가능."""
+    async def _run():
+        settings = get_settings()
+        job_status.start("author_catalog")
+        try:
+            async with aiohttp.ClientSession() as session:
+                count = await tracker.populate_author_catalog(session, settings)
+            job_status.finish("author_catalog", success=True)
+        except Exception as e:
+            job_status.log_line("author_catalog", f"오류: {e}")
+            job_status.finish("author_catalog", success=False)
 
     asyncio.create_task(_run())
     return {"status": "started"}
