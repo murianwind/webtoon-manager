@@ -88,11 +88,18 @@ def _get_or_404(title_id: str):
     return wt
 
 
-def _trigger_enrich(title_id: str) -> None:
-    """구독 직후 백그라운드에서 정보/작가등록을 바로 채운다 (다음 정기 스캔까지 기다리지 않음)."""
+def _trigger_enrich(title_id: str, register_authors_enabled: bool = True) -> None:
+    """
+    백그라운드에서 정보/작가등록을 바로 채운다 (다음 정기 스캔까지 기다리지 않음).
+    register_authors_enabled=False로 부르면(목록제외/구독해제 시) 이 웹툰의 정보는
+    채우되, 그 저자를 "등록된 작가"(자동 신작추가 대상)로 올리지는 않는다 —
+    제외한 웹툰의 저자가 엉뚱하게 관심작가로 등록되면 안 되기 때문이다.
+    """
     async def _run():
         async with aiohttp.ClientSession() as session:
-            await tracker.enrich_one(session, title_id, get_settings())
+            await tracker.enrich_one(
+                session, title_id, get_settings(), register_authors_enabled=register_authors_enabled
+            )
 
     asyncio.create_task(_run())
 
@@ -154,7 +161,7 @@ async def remove_from_unsubscribed(title_id: str):
     않는다"가 보장된다."""
     await asyncio.to_thread(_get_or_404, title_id)
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_EXCLUDED)
-    _trigger_enrich(title_id)
+    _trigger_enrich(title_id, register_authors_enabled=False)
     return _to_out(await asyncio.to_thread(repository.get, title_id))
 
 
@@ -273,7 +280,7 @@ async def naver_list_exclude(title_id: str, payload: NaverListEntryIn):
             payload.thumbnail_url,
         )
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_EXCLUDED)
-    _trigger_enrich(title_id)  # 제외해도 저자/태그 정보는 채워야 필터 드롭다운에 뜬다
+    _trigger_enrich(title_id, register_authors_enabled=False)  # 제외해도 정보는 채우되, 저자를 관심작가로 올리진 않음
     return _to_out(await asyncio.to_thread(repository.get, title_id))
 
 
