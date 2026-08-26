@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # 경로
     download_root: str = "/data/Webtoon_Download"
     database_path: str = "/data/webtoons.db"
-    cookie_file_path: str = "/data/cookies/chokobo_murian.json"
+    cookie_file_path: str = "/cookies/chokobo_murian.json"
 
     # 다운로드 동작
     folder_zero_fill: int = 4
