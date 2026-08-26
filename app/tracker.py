@@ -198,6 +198,12 @@ async def resync_registry(session: aiohttp.ClientSession, settings: Settings) ->
 
     results = await asyncio.gather(*(_run_one(wt) for wt in targets))
     registered_count = sum(1 for r in results if r)
+
+    # 예전 버전(제외된 웹툰의 저자까지 등록해버리던 버그)으로 잘못 등록됐던 작가를 정리한다.
+    cleaned_up = repository.reconcile_enabled_authors()
+    if cleaned_up:
+        job_status.log_line("registry", f"잘못 등록됐던 작가 {cleaned_up}명을 '전체 작가 목록'으로 되돌림")
+
     return registered_count
 
 

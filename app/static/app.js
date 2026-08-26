@@ -758,6 +758,184 @@ async function renderAllTags() {
 
 document.getElementById("tag-catalog-search").addEventListener("input", renderAllTags);
 
+// ── 설정: 스케줄 ─────────────────────────────────────────
+
+function buildScheduleControls(jobId, schedule) {
+  const wrap = document.createElement("div");
+
+  const modeSelect = document.createElement("select");
+  modeSelect.className = "schedule-mode";
+  modeSelect.innerHTML = `
+    <option value="off">끄기</option>
+    <option value="interval">주기(분)마다</option>
+    <option value="cron">특정 시각</option>
+  `;
+  modeSelect.value = schedule.mode;
+
+  const intervalRow = document.createElement("div");
+  intervalRow.className = "schedule-row schedule-interval-row";
+  intervalRow.innerHTML = `<input type="number" min="1" class="schedule-interval" value="${schedule.interval_minutes}" /> 분마다`;
+
+  const cronRow = document.createElement("div");
+  cronRow.className = "schedule-row schedule-cron-row";
+  const hourOptions = Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, "0")}</option>`).join("");
+  const minuteOptions = Array.from({ length: 60 }, (_, m) => `<option value="${m}">${String(m).padStart(2, "0")}</option>`).join("");
+  const dayCheckboxes = Object.entries(DAY_LABEL)
+    .map(
+      ([day, label]) => `
+      <label class="day-checkbox">
+        <input type="checkbox" class="schedule-day" value="${day}" ${schedule.cron_days.includes(day) ? "checked" : ""} />
+        ${label}
+      </label>`
+    )
+    .join("");
+  cronRow.innerHTML = `
+    <select class="schedule-hour">${hourOptions}</select> 시
+    <select class="schedule-minute">${minuteOptions}</select> 분
+    <span class="day-checkbox-group">${dayCheckboxes}<span class="schedule-day-hint">(아무 요일도 안 고르면 매일)</span></span>
+  `;
+  cronRow.querySelector(".schedule-hour").value = schedule.cron_hour;
+  cronRow.querySelector(".schedule-minute").value = schedule.cron_minute;
+
+  function updateVisibility() {
+    intervalRow.classList.toggle("hidden", modeSelect.value !== "interval");
+    cronRow.classList.toggle("hidden", modeSelect.value !== "cron");
+  }
+  modeSelect.addEventListener("change", updateVisibility);
+  updateVisibility();
+
+  wrap.appendChild(modeSelect);
+  wrap.appendChild(intervalRow);
+  wrap.appendChild(cronRow);
+  return wrap;
+}
+
+function readScheduleControls(wrap) {
+  return {
+    mode: wrap.querySelector(".schedule-mode").value,
+    interval_minutes: Number(wrap.querySelector(".schedule-interval").value) || 60,
+    cron_hour: Number(wrap.querySelector(".schedule-hour").value) || 0,
+    cron_minute: Number(wrap.querySelector(".schedule-minute").value) || 0,
+    cron_days: Array.from(wrap.querySelectorAll(".schedule-day:checked")).map((el) => el.value),
+  };
+}
+
+document.getElementById("btn-save-settings").addEventListener("click", async () => {
+  const resultEl = document.getElementById("settings-save-result");
+  resultEl.textContent = "";
+  try {
+    const payload = {};
+    for (const jobId of SCHEDULE_JOB_IDS) {
+      const wrap = document.querySelector(`.schedule-block[data-job="${jobId}"] .schedule-controls`);
+      payload[jobId] = readScheduleControls(wrap);
+    }
+    await apiCall("/api/settings", { method: "POST", body: JSON.stringify(payload) });
+    resultEl.style.color = "";
+    resultEl.textContent = "저장했습니다.";
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+});
+
+// ── 설정: 디스코드 ───────────────────────────────────────
+
+const BOT_TOKEN_MASK = "••••••••••••••••";
+
+async function loadDiscordSettings() {
+  try {
+    const s = await apiCall("/api/settings/discord");
+    document.getElementById("discord-webhook-url").value = s.webhook_url;
+    document.getElementById("discord-channel-id").value = s.notify_channel_id;
+
+    const tokenInput = document.getElementById("discord-bot-token");
+    tokenInput.value = s.bot_token_set ? BOT_TOKEN_MASK : "";
+    tokenInput.dataset.masked = s.bot_token_set ? "true" : "false";
+
+    document.getElementById("discord-bot-status").textContent = s.bot_ready ? "🟢 봇 연결됨" : "⚪ 봇 연결 안 됨";
+  } catch (e) {
+    document.getElementById("discord-save-result").textContent = e.message;
+  }
+}
+
+document.getElementById("discord-bot-token").addEventListener("focus", (e) => {
+  if (e.target.dataset.masked === "true") {
+    e.target.value = "";
+    e.target.dataset.masked = "false";
+  }
+});
+
+document.getElementById("btn-save-discord").addEventListener("click", async () => {
+  const resultEl = document.getElementById("discord-save-result");
+  resultEl.textContent = "";
+  try {
+    const tokenInput = document.getElementById("discord-bot-token");
+    const rawToken = tokenInput.value.trim();
+    const tokenToSend = rawToken === BOT_TOKEN_MASK ? "" : rawToken;
+
+    await apiCall("/api/settings/discord", {
+      method: "POST",
+      body: JSON.stringify({
+        webhook_url: document.getElementById("discord-webhook-url").value.trim(),
+        bot_token: tokenToSend,
+        notify_channel_id: document.getElementById("discord-channel-id").value.trim(),
+      }),
+    });
+    resultEl.style.color = "";
+    resultEl.textContent = "저장했습니다. 봇을 재연결하는 중입니다 (몇 초 걸릴 수 있음).";
+    setTimeout(loadDiscordSettings, 3000);
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+});
+
+document.getElementById("btn-test-webhook").addEventListener("click", async () => {
+  const result = await apiCall("/api/settings/discord/test-webhook", { method: "POST" });
+  alert(result.message);
+});
+
+document.getElementById("btn-test-bot").addEventListener("click", async () => {
+  const result = await apiCall("/api/settings/discord/test-bot", { method: "POST" });
+  alert(result.message);
+});
+
+// ── 설정: 백업/복원 ──────────────────────────────────────
+
+document.getElementById("btn-backup-download").addEventListener("click", async () => {
+  try {
+    const backup = await apiCall("/api/backup");
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `webtoon-manager-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    document.getElementById("backup-result").textContent = e.message;
+  }
+});
+
+document.getElementById("restore-file-input").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  const resultEl = document.getElementById("backup-result");
+  resultEl.textContent = "";
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if (!confirm("현재 데이터를 모두 지우고 이 백업으로 복원합니다. 계속할까요?")) {
+      event.target.value = "";
+      return;
+    }
+    await apiCall("/api/restore", { method: "POST", body: JSON.stringify(data) });
+    resultEl.style.color = "";
+    resultEl.textContent = "복원 완료. 페이지를 새로고침해주세요.";
+  } catch (e) {
+    resultEl.textContent = `복원 실패: ${e.message}`;
+  }
+  event.target.value = "";
+});
+
 // ── 설정: 수동 실행 + 진행상황 ────────────────────────────
 
 let jobPollTimer = null;
