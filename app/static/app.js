@@ -657,20 +657,42 @@ function renderRegisteredAuthors() {
 function renderAllAuthors() {
   const container = document.getElementById("author-all-chips");
   const query = document.getElementById("author-candidate-filter").value.trim().toLowerCase();
-  const registeredNames = new Set(watchedAuthorsCache.filter((a) => a.enabled).map((a) => a.author_name));
 
-  const candidates = authorCandidatesCache.filter(
-    (name) => !registeredNames.has(name) && (!query || name.toLowerCase().includes(query))
-  );
+  // "사용 가능" = 선택된(enabled) 저자를 뺀 전부. 두 종류를 합친다:
+  //  1) 이미 id를 아는데 비활성 상태인 작가(watchedAuthorsCache, enabled=false) — 클릭하면 바로 등록(검색 불필요)
+  //  2) 아직 등록 자체가 안 된 이름 후보(authorCandidatesCache, 텍스트에서 추출) — 클릭하면 검색해서 등록
+  const disabledKnown = watchedAuthorsCache.filter((a) => !a.enabled);
+  const knownNames = new Set(watchedAuthorsCache.map((a) => a.author_name).filter(Boolean));
+  const enabledNames = new Set(watchedAuthorsCache.filter((a) => a.enabled).map((a) => a.author_name));
+
+  const items = [];
+  for (const a of disabledKnown) {
+    const label = a.author_name || a.author_id;
+    if (query && !label.toLowerCase().includes(query)) continue;
+    items.push({ label, onClick: () => enableKnownAuthor(a) });
+  }
+  for (const name of authorCandidatesCache) {
+    if (enabledNames.has(name) || knownNames.has(name)) continue; // 이미 위에서 다뤄졌거나 이미 선택된 이름은 중복 표시 안 함
+    if (query && !name.toLowerCase().includes(query)) continue;
+    items.push({ label: name, onClick: () => searchAndRegisterAuthor(name) });
+  }
 
   container.innerHTML = "";
-  if (candidates.length === 0) {
+  if (items.length === 0) {
     container.innerHTML = '<p class="chip-empty-message">표시할 후보가 없습니다.</p>';
     return;
   }
-  for (const name of candidates) {
-    container.appendChild(buildChip(name, false, () => searchAndRegisterAuthor(name)));
+  for (const item of items) {
+    container.appendChild(buildChip(item.label, false, item.onClick));
   }
+}
+
+async function enableKnownAuthor(author) {
+  await apiCall(`/api/watched-authors/${author.author_id}/enable`, {
+    method: "POST",
+    body: JSON.stringify({ author_name: author.author_name }),
+  });
+  loadAuthorList();
 }
 
 document.getElementById("author-candidate-filter").addEventListener("input", renderAllAuthors);
