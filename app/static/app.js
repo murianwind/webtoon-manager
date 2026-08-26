@@ -81,7 +81,8 @@ function buildWebtoonCard(w, context) {
 
   const metaParts = [];
   if (context !== "naver-list" && w.last_downloaded_no > 0) metaParts.push(`${w.last_downloaded_no}화까지 다운로드`);
-  if (w.author_summary) metaParts.push(w.author_summary);
+  const authorText = context === "naver-list" ? w.author_summary : (w.writer_names || []).join(", ");
+  if (authorText) metaParts.push(authorText);
   if (w.is_adult) metaParts.push("🔞");
   const statusBadge =
     context === "naver-list" && w.status ? `<span class="badge ${w.status}">${STATUS_LABEL[w.status] || w.status}</span>` : "";
