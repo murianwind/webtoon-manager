@@ -236,16 +236,6 @@ document.getElementById("naver-list-sort").addEventListener("change", () => {
 // ── 구독해제 / 제외됨 ────────────────────────────────────
 
 let subscriptionCache = { unsubscribed: [], excluded: [] };
-let authorNameMap = {}; // author_id -> author_name (작가 필터 드롭다운용)
-
-async function loadAuthorNameMap() {
-  try {
-    const authors = await apiCall("/api/watched-authors");
-    authorNameMap = Object.fromEntries(authors.map((a) => [a.author_id, a.author_name || a.author_id]));
-  } catch (e) {
-    authorNameMap = {};
-  }
-}
 
 async function loadSubscriptionTab(status) {
   const listEl = document.getElementById(`${status}-list`);
@@ -254,7 +244,6 @@ async function loadSubscriptionTab(status) {
     listEl.innerHTML = "<p>불러오는 중...</p>";
   }
   try {
-    await loadAuthorNameMap();
     subscriptionCache[status] = await apiCall(`/api/webtoons?status=${status}`);
     populateFilterOptions(status);
     renderSubscriptionTab(status);
@@ -269,20 +258,26 @@ async function loadSubscriptionTab(status) {
 function populateFilterOptions(status) {
   const rows = subscriptionCache[status] || [];
 
-  const authorIds = new Set();
+  // 작가 이름은 각 웹툰 자체에 저장된 writer_ids/writer_names에서 직접 뽑는다
+  // (별도 레지스트리 조회 없이, 지금 보이는 웹툰들의 실제 데이터만으로 채운다).
+  const authorNames = new Map(); // id -> name
   const tagNames = new Set();
   for (const w of rows) {
-    (w.writer_ids || []).forEach((id) => authorIds.add(id));
+    const ids = w.writer_ids || [];
+    const names = w.writer_names || [];
+    ids.forEach((id, i) => {
+      if (!authorNames.has(id)) authorNames.set(id, names[i] || id);
+    });
     (w.tags || []).forEach((t) => tagNames.add(t));
   }
 
   const authorSelect = document.getElementById(`${status}-author-filter`);
   const currentAuthor = authorSelect.value;
   authorSelect.innerHTML = '<option value="">작가 전체</option>';
-  for (const id of authorIds) {
+  for (const [id, name] of [...authorNames.entries()].sort((a, b) => a[1].localeCompare(b[1]))) {
     const opt = document.createElement("option");
     opt.value = id;
-    opt.textContent = authorNameMap[id] || id;
+    opt.textContent = name;
     authorSelect.appendChild(opt);
   }
   authorSelect.value = currentAuthor;
@@ -563,96 +558,44 @@ document.getElementById("btn-search-author").addEventListener("click", async () 
 });
 
 // 관심있는 작가(enabled) / 전체 작가 목록(등록됐지만 꺼둔 것 + 아직 등록 자체가 안 된 후보 이름)
-let watchedAuthorsCache = [];
-let authorCandidateNamesCache = [];
+// 관심있는 작가 = 구독중인 웹툰들에 저장된 저자를 그대로 모은 것 (별도 등록 절차 없음)
+let interestedAuthorsCache = [];
 
 async function loadAuthorList() {
+  const container = document.getElementById("author-interested-list");
   try {
-    watchedAuthorsCache = await apiCall("/api/watched-authors");
+    interestedAuthorsCache = await apiCall("/api/authors/interested");
   } catch (e) {
-    document.getElementById("author-interested-list").innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+    container.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
     return;
   }
-  let candidateError = "";
-  if (authorCandidateNamesCache.length === 0) {
-    try {
-      authorCandidateNamesCache = await apiCall("/api/authors/candidates");
-    } catch (e) {
-      candidateError = e.message; // 조용히 삼키지 않고 전체 목록 영역에 실제 이유를 보여준다
-    }
-  }
   renderInterestedAuthors();
-  renderAllAuthors(candidateError);
 }
 
 function renderInterestedAuthors() {
   const container = document.getElementById("author-interested-list");
-  const interested = watchedAuthorsCache.filter((a) => a.enabled);
   container.innerHTML = "";
-  if (interested.length === 0) {
-    container.innerHTML = "<p>관심있는 작가가 없습니다. 오른쪽 전체 목록에서 추가해주세요.</p>";
+  if (interestedAuthorsCache.length === 0) {
+    container.innerHTML = "<p>구독중인 웹툰이 없거나, 아직 저자 정보를 확인하지 못했습니다. 설정 탭의 \"지금 전체 재동기화\"를 눌러보세요.</p>";
     return;
   }
-  for (const a of interested) {
+  for (const a of interestedAuthorsCache) {
     const row = document.createElement("div");
-    row.className = "registry-row";
+    row.className = `registry-row${a.enabled ? "" : " disabled"}`;
     row.innerHTML = `<span>${escapeHtml(a.author_name || a.author_id)}</span>`;
     row.appendChild(
-      makeButton("제외", async () => {
-        await apiCall(`/api/watched-authors/${a.author_id}/disable`, { method: "POST" });
+      makeButton(a.enabled ? "제외" : "등록", async () => {
+        const action = a.enabled ? "disable" : "enable";
+        await apiCall(`/api/watched-authors/${a.author_id}/${action}`, {
+          method: "POST",
+          body: JSON.stringify({ author_name: a.author_name }),
+        });
         loadAuthorList();
       })
     );
     container.appendChild(row);
   }
 }
-
-function renderAllAuthors(candidateError) {
-  const container = document.getElementById("author-all-list");
-  const query = document.getElementById("author-candidate-filter").value.trim().toLowerCase();
-  container.innerHTML = "";
-
-  if (candidateError) {
-    container.innerHTML = `<p class="error">작가 후보 목록을 못 가져왔습니다: ${escapeHtml(candidateError)}</p>`;
-  }
-
-  // 1) 이미 등록됐지만 꺼둔 작가 (author_id 확정됨 — 바로 추가 가능)
-  const disabled = watchedAuthorsCache.filter((a) => !a.enabled);
-  const knownNames = new Set(watchedAuthorsCache.map((a) => (a.author_name || "").trim()).filter(Boolean));
-
-  for (const a of disabled) {
-    const label = a.author_name || a.author_id;
-    if (query && !label.toLowerCase().includes(query)) continue;
-    const row = document.createElement("div");
-    row.className = "registry-row";
-    row.innerHTML = `<span>${escapeHtml(label)}</span>`;
-    row.appendChild(
-      makeButton("추가", async () => {
-        await apiCall(`/api/watched-authors/${a.author_id}/enable`, { method: "POST" });
-        loadAuthorList();
-      })
-    );
-    container.appendChild(row);
-  }
-
-  // 2) 아직 등록 자체가 안 된 후보 이름 (네이버 연재중 작품 저자 텍스트에서 추출) — 클릭하면 정확한 검색으로 넘어감
-  for (const name of authorCandidateNamesCache) {
-    if (knownNames.has(name)) continue; // 이미 위에서 다뤄진 이름은 중복 표시 안 함
-    if (query && !name.toLowerCase().includes(query)) continue;
-    const row = document.createElement("div");
-    row.className = "registry-row";
-    row.innerHTML = `<span>${escapeHtml(name)}</span>`;
-    row.appendChild(
-      makeButton("검색·등록", () => {
-        document.getElementById("author-search-input").value = name;
-        document.getElementById("btn-search-author").click();
-      })
-    );
-    container.appendChild(row);
-  }
-}
-
-document.getElementById("author-candidate-filter").addEventListener("input", () => renderAllAuthors());
 
 document.getElementById("btn-add-author").addEventListener("click", async () => {
   const authorId = document.getElementById("add-author-id").value.trim();

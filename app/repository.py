@@ -34,6 +34,7 @@ def _row_to_record(row) -> WebtoonRecord:
         status=row["status"],
         is_adult=bool(row["is_adult"]),
         writer_ids=json.loads(row["writer_ids"] or "[]"),
+        writer_names=json.loads(row["writer_names"] or "[]"),
         added_source=row["added_source"],
         last_downloaded_no=row["last_downloaded_no"],
         is_finished=bool(row["is_finished"]),
@@ -150,12 +151,29 @@ def update_is_adult(title_id: str, is_adult: bool) -> None:
         )
 
 
-def update_writer_ids(title_id: str, writer_ids: list[str]) -> None:
+def update_writer_ids_and_names(title_id: str, writer_ids: list[str], writer_names: list[str]) -> None:
+    """writer_ids[i]와 writer_names[i]가 같은 작가를 가리키도록 순서를 맞춰서 저장한다."""
     with write_transaction() as conn:
         conn.execute(
-            "UPDATE webtoons SET writer_ids = ?, updated_at = ? WHERE title_id = ?",
-            (json.dumps(writer_ids), _now(), title_id),
+            "UPDATE webtoons SET writer_ids = ?, writer_names = ?, updated_at = ? WHERE title_id = ?",
+            (json.dumps(writer_ids), json.dumps(writer_names), _now(), title_id),
         )
+
+
+def list_interested_authors() -> list[tuple[str, str]]:
+    """구독중(active)인 모든 웹툰의 저자를 (author_id, author_name)로 모아 중복 제거해서 반환한다.
+    별도 등록 절차 없이, 지금 구독중인 웹툰에 실제로 저장된 저자 정보를 그대로 쓴다."""
+    rows = get_connection().execute(
+        "SELECT writer_ids, writer_names FROM webtoons WHERE status = ?", (STATUS_ACTIVE,)
+    ).fetchall()
+    seen: dict[str, str] = {}
+    for row in rows:
+        ids = json.loads(row["writer_ids"] or "[]")
+        names = json.loads(row["writer_names"] or "[]")
+        for i, author_id in enumerate(ids):
+            if author_id not in seen:
+                seen[author_id] = names[i] if i < len(names) else author_id
+    return sorted(seen.items(), key=lambda pair: pair[1])
 
 
 def update_genres_and_tags(title_id: str, genres: list[str], tags: list[str]) -> None:
@@ -261,12 +279,23 @@ def upsert_watched_author(author_id: str, author_name: str, enabled: bool) -> No
             )
 
 
-def set_watched_author_enabled(author_id: str, enabled: bool) -> None:
+def set_watched_author_enabled(author_id: str, enabled: bool, author_name: str = "") -> None:
+    """행이 아직 없으면(구독으로 처음 발견되어 watched_authors에 등록된 적 없는 경우)
+    만들어서 저장한다 — UPDATE만 하면 없는 행은 조용히 아무 일도 안 일어나기 때문."""
+    now = _now()
     with write_transaction() as conn:
-        conn.execute(
-            "UPDATE watched_authors SET enabled = ?, updated_at = ? WHERE author_id = ?",
-            (int(enabled), _now(), author_id),
-        )
+        existing = conn.execute("SELECT 1 FROM watched_authors WHERE author_id = ?", (author_id,)).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE watched_authors SET enabled = ?, updated_at = ? WHERE author_id = ?",
+                (int(enabled), now, author_id),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO watched_authors (author_id, author_name, enabled, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (author_id, author_name, int(enabled), now, now),
+            )
 
 
 def get_enabled_author_ids() -> set[str]:

@@ -80,6 +80,7 @@ class WebtoonRecord:
     tags: list[str] = field(default_factory=list)
     latest_episode_no: int = 0
     is_paused: bool = False
+    writer_names: list[str] = field(default_factory=list)  # writer_ids와 같은 순서로 대응
 
 
 @dataclass

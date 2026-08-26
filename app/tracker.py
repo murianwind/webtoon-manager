@@ -145,8 +145,9 @@ async def enrich_one(session: aiohttp.ClientSession, title_id: str, settings: Se
     repository.update_thumbnail_url(title_id, info.thumbnail_url)
     repository.update_genres_and_tags(title_id, info.genres, info.tags)
     repository.update_is_paused(title_id, info.is_paused)
-    if info.writer_ids:
-        repository.update_writer_ids(title_id, sorted(info.writer_ids))
+    if info.writer_id_name_pairs:
+        ids, names = zip(*info.writer_id_name_pairs)
+        repository.update_writer_ids_and_names(title_id, list(ids), list(names))
 
     registered_names = []
     for writer_id, writer_name in info.writer_id_name_pairs:
@@ -215,8 +216,9 @@ async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, setting
         repository.update_genres_and_tags(title_id, info.genres, info.tags)
         repository.update_is_paused(title_id, info.is_paused)
 
-        if info.writer_ids:
-            repository.update_writer_ids(title_id, sorted(info.writer_ids))
+        if info.writer_id_name_pairs:
+            ids, names = zip(*info.writer_id_name_pairs)
+            repository.update_writer_ids_and_names(title_id, list(ids), list(names))
 
         # 구독중인 작품의 작가는 자동으로 레지스트리에 등록된다 (이미 있으면 enabled는 안 건드림).
         for writer_id, writer_name in info.writer_id_name_pairs:

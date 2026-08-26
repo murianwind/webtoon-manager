@@ -104,23 +104,15 @@
 
     <div class="settings-card">
       <h2>작가</h2>
+      <p class="hint">구독중인 웹툰들의 저자가 자동으로 여기 뜹니다. 등록 절차가 따로 필요 없습니다.</p>
+      <div id="author-interested-list" class="registry-list registry-list-scroll"></div>
+
+      <h3 class="registry-subheading">구독하지 않은 작가를 관심작가로 추가하고 싶다면</h3>
       <div class="registry-add-row">
         <input id="author-search-input" type="text" placeholder="작가 이름으로 정확히 검색해서 등록" />
         <button id="btn-search-author">검색</button>
       </div>
       <div id="author-search-results" class="registry-list"></div>
-
-      <div class="registry-columns">
-        <div class="registry-column">
-          <h3>관심있는 작가</h3>
-          <div id="author-interested-list" class="registry-list registry-list-scroll"></div>
-        </div>
-        <div class="registry-column">
-          <h3>전체 작가 목록</h3>
-          <input id="author-candidate-filter" type="text" placeholder="이름으로 좁혀보기" />
-          <div id="author-all-list" class="registry-list registry-list-scroll"></div>
-        </div>
-      </div>
 
       <div class="registry-add-row">
         <input id="add-author-id" type="text" placeholder="author_id (직접 등록)" />

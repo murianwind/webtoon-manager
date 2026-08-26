@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS webtoons (
     status TEXT NOT NULL DEFAULT 'active',       -- active | unsubscribed | excluded
     is_adult INTEGER NOT NULL DEFAULT 0,
     writer_ids TEXT NOT NULL DEFAULT '[]',        -- JSON 배열
+    writer_names TEXT NOT NULL DEFAULT '[]',      -- JSON 배열 (writer_ids와 같은 순서로 대응)
     added_source TEXT NOT NULL DEFAULT 'manual',  -- manual | artist | tag
     last_downloaded_no INTEGER NOT NULL DEFAULT 0,
     is_finished INTEGER NOT NULL DEFAULT 0,
@@ -76,6 +77,7 @@ _MIGRATIONS = [
     ("webtoons", "tags", "ALTER TABLE webtoons ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'"),
     ("webtoons", "latest_episode_no", "ALTER TABLE webtoons ADD COLUMN latest_episode_no INTEGER NOT NULL DEFAULT 0"),
     ("webtoons", "is_paused", "ALTER TABLE webtoons ADD COLUMN is_paused INTEGER NOT NULL DEFAULT 0"),
+    ("webtoons", "writer_names", "ALTER TABLE webtoons ADD COLUMN writer_names TEXT NOT NULL DEFAULT '[]'"),
 ]
 
 

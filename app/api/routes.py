@@ -57,6 +57,7 @@ class WebtoonOut(BaseModel):
     is_paused: bool
     has_new_episode: bool
     writer_ids: list[str]
+    writer_names: list[str]
 
 
 def _to_out(wt) -> WebtoonOut:
@@ -76,6 +77,7 @@ def _to_out(wt) -> WebtoonOut:
         is_paused=wt.is_paused,
         has_new_episode=wt.latest_episode_no > wt.last_downloaded_no > 0,
         writer_ids=wt.writer_ids,
+        writer_names=wt.writer_names,
     )
 
 
@@ -289,6 +291,33 @@ class WatchedTagIn(BaseModel):
         return v.strip()
 
 
+class InterestedAuthorOut(BaseModel):
+    author_id: str
+    author_name: str
+    enabled: bool
+
+
+@router.get("/authors/interested", response_model=list[InterestedAuthorOut])
+async def list_interested_authors():
+    """
+    별도 등록 절차 없이, 지금 구독중(active)인 웹툰들에 실제로 저장된 저자 정보를
+    그대로 모아서 보여준다 — "구독중인 웹툰의 저자 = 관심있는 작가"를 그대로 반영한다.
+    enabled는 신작 자동추가 스캔에 이 작가를 쓸지 여부(끄면 구독은 유지하되 신작만 안 잡힘).
+    """
+    pairs = await asyncio.to_thread(repository.list_interested_authors)
+    enabled_ids = await asyncio.to_thread(repository.get_enabled_author_ids)
+    watched = await asyncio.to_thread(repository.list_watched_authors)
+    watched_ids = {a.author_id for a in watched}
+
+    result = []
+    for author_id, author_name in pairs:
+        # watched_authors에 아직 없는 저자는 기본적으로 활성(enabled)으로 취급한다
+        # (구독중인 웹툰의 저자는 원래 자동으로 신작 스캔 대상이 되므로).
+        enabled = (author_id in enabled_ids) if author_id in watched_ids else True
+        result.append(InterestedAuthorOut(author_id=author_id, author_name=author_name, enabled=enabled))
+    return result
+
+
 @router.get("/watched-authors", response_model=list[WatchedAuthorOut])
 async def list_watched_authors():
     rows = await asyncio.to_thread(repository.list_watched_authors)
@@ -303,23 +332,25 @@ async def add_watched_author(payload: WatchedAuthorIn):
     return WatchedAuthorOut(author_id=match.author_id, author_name=match.author_name, enabled=match.enabled)
 
 
+class AuthorEnableIn(BaseModel):
+    author_name: str = ""  # 아직 watched_authors에 없는 작가를 처음 등록할 때 이름을 같이 넘긴다
+
+
 @router.post("/watched-authors/{author_id}/enable", response_model=WatchedAuthorOut)
-async def enable_watched_author(author_id: str):
-    await asyncio.to_thread(repository.set_watched_author_enabled, author_id, True)
+async def enable_watched_author(author_id: str, payload: AuthorEnableIn | None = None):
+    author_name = payload.author_name if payload else ""
+    await asyncio.to_thread(repository.set_watched_author_enabled, author_id, True, author_name)
     rows = await asyncio.to_thread(repository.list_watched_authors)
-    match = next((r for r in rows if r.author_id == author_id), None)
-    if match is None:
-        raise HTTPException(status_code=404, detail="등록되지 않은 작가입니다.")
+    match = next(r for r in rows if r.author_id == author_id)
     return WatchedAuthorOut(author_id=match.author_id, author_name=match.author_name, enabled=match.enabled)
 
 
 @router.post("/watched-authors/{author_id}/disable", response_model=WatchedAuthorOut)
-async def disable_watched_author(author_id: str):
-    await asyncio.to_thread(repository.set_watched_author_enabled, author_id, False)
+async def disable_watched_author(author_id: str, payload: AuthorEnableIn | None = None):
+    author_name = payload.author_name if payload else ""
+    await asyncio.to_thread(repository.set_watched_author_enabled, author_id, False, author_name)
     rows = await asyncio.to_thread(repository.list_watched_authors)
-    match = next((r for r in rows if r.author_id == author_id), None)
-    if match is None:
-        raise HTTPException(status_code=404, detail="등록되지 않은 작가입니다.")
+    match = next(r for r in rows if r.author_id == author_id)
     return WatchedAuthorOut(author_id=match.author_id, author_name=match.author_name, enabled=match.enabled)
 
 
