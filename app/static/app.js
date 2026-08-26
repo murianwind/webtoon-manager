@@ -106,6 +106,14 @@ function buildWebtoonCard(w, context) {
     }
   } else {
     actions.appendChild(makeButton("구독", () => subscriptionAction(w.title_id, "subscribe", context)));
+    if (context === "unsubscribed") {
+      // 완전 삭제는 아니고 excluded로 옮긴다 — 이후 작가/태그 자동추가로 다시 안 들어오게 확정.
+      actions.appendChild(makeButton("목록에서 제거", () => subscriptionAction(w.title_id, "remove", "unsubscribed")));
+    }
+    if (context === "excluded" && w.is_finished) {
+      // 완결작만 완전 삭제 허용 — 완결작은 자동추가 로직이 원래 다시 안 건드리므로 안전하다.
+      actions.appendChild(makeButton("완전 삭제", () => deleteWebtoonPermanently(w.title_id)));
+    }
   }
 
   return card;
@@ -329,6 +337,20 @@ async function subscriptionAction(titleId, action, currentTab) {
     card?.remove();
     document.getElementById(`${currentTab}-empty`).classList.toggle("hidden", listEl.children.length > 0);
     subscriptionCache[currentTab] = (subscriptionCache[currentTab] || []).filter((w) => w.title_id !== titleId);
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function deleteWebtoonPermanently(titleId) {
+  if (!confirm("완전히 삭제합니다 (되돌릴 수 없음). 계속할까요?")) return;
+  try {
+    await apiCall(`/api/webtoons/${titleId}`, { method: "DELETE" });
+    const listEl = document.getElementById("excluded-list");
+    const card = listEl.querySelector(`.webtoon-card[data-title-id="${titleId}"]`);
+    card?.remove();
+    document.getElementById("excluded-empty").classList.toggle("hidden", listEl.children.length > 0);
+    subscriptionCache.excluded = (subscriptionCache.excluded || []).filter((w) => w.title_id !== titleId);
   } catch (e) {
     alert(e.message);
   }

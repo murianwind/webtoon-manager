@@ -146,6 +146,28 @@ async def list_pending_completion():
     return [_to_out(r) for r in pending]
 
 
+@router.post("/webtoons/{title_id}/remove", response_model=WebtoonOut)
+async def remove_from_unsubscribed(title_id: str):
+    """구독해제 탭의 '목록에서 제거' — 완전 삭제가 아니라 excluded로 전환한다.
+    hard delete를 해버리면 title_id가 DB에서 사라져서 나중에 작가/태그 자동추가가
+    다시 이 작품을 추가해버릴 수 있다 — excluded 상태로 남겨야 "이후엔 등록되지
+    않는다"가 보장된다."""
+    await asyncio.to_thread(_get_or_404, title_id)
+    await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_EXCLUDED)
+    return _to_out(await asyncio.to_thread(repository.get, title_id))
+
+
+@router.delete("/webtoons/{title_id}")
+async def delete_webtoon_permanently(title_id: str):
+    """제외됨 탭에서 완결작을 완전히 지운다 — 완결작은 자동추가 로직이 애초에 다시
+    안 건드리므로(항상 finished 체크로 건너뜀), 이 경우만 안전하게 완전 삭제할 수 있다."""
+    webtoon = await asyncio.to_thread(_get_or_404, title_id)
+    if webtoon.status != repository.STATUS_EXCLUDED:
+        raise HTTPException(status_code=400, detail="제외됨 상태의 웹툰만 완전 삭제할 수 있습니다.")
+    await asyncio.to_thread(repository.hard_delete, title_id)
+    return {"status": "deleted"}
+
+
 # ── 네이버 전체 웹툰 목록 (여기서 바로 구독/목록제외) ──────────────────
 
 class NaverListEntryIn(BaseModel):
@@ -300,22 +322,27 @@ class InterestedAuthorOut(BaseModel):
 @router.get("/authors/interested", response_model=list[InterestedAuthorOut])
 async def list_interested_authors():
     """
-    별도 등록 절차 없이, 지금 구독중(active)인 웹툰들에 실제로 저장된 저자 정보를
-    그대로 모아서 보여준다 — "구독중인 웹툰의 저자 = 관심있는 작가"를 그대로 반영한다.
-    enabled는 신작 자동추가 스캔에 이 작가를 쓸지 여부(끄면 구독은 유지하되 신작만 안 잡힘).
-    """
-    pairs = await asyncio.to_thread(repository.list_interested_authors)
-    enabled_ids = await asyncio.to_thread(repository.get_enabled_author_ids)
-    watched = await asyncio.to_thread(repository.list_watched_authors)
-    watched_ids = {a.author_id for a in watched}
+    "관심있는 작가" = watched_authors(영구 레지스트리) 전체 + 지금 구독중인 웹툰들의 저자
+    (레지스트리에 아직 못 들어갔을 수 있는 최신 정보) 를 합친 것.
 
-    result = []
+    한 번 등록되면(watched_authors에 들어가면) 구독을 해지해도 그대로 유지된다 —
+    이 목록은 "지금 구독중인 것"이 아니라 "한 번이라도 등록된 것"을 보여줘야 하기 때문에,
+    구독 상태만 보고 즉석에서 계산하면 안 되고 반드시 영구 레지스트리를 기준으로 삼는다.
+    """
+    watched = await asyncio.to_thread(repository.list_watched_authors)
+    result_map = {
+        a.author_id: InterestedAuthorOut(author_id=a.author_id, author_name=a.author_name, enabled=a.enabled)
+        for a in watched
+    }
+
+    # 지금 구독중인 웹툰의 저자인데 아직 레지스트리에 안 들어간 경우(예: 방금 구독했는데
+    # 백그라운드 등록이 아직 안 끝난 경우)에도 놓치지 않도록 보강한다.
+    pairs = await asyncio.to_thread(repository.list_interested_authors)
     for author_id, author_name in pairs:
-        # watched_authors에 아직 없는 저자는 기본적으로 활성(enabled)으로 취급한다
-        # (구독중인 웹툰의 저자는 원래 자동으로 신작 스캔 대상이 되므로).
-        enabled = (author_id in enabled_ids) if author_id in watched_ids else True
-        result.append(InterestedAuthorOut(author_id=author_id, author_name=author_name, enabled=enabled))
-    return result
+        if author_id not in result_map:
+            result_map[author_id] = InterestedAuthorOut(author_id=author_id, author_name=author_name, enabled=True)
+
+    return sorted(result_map.values(), key=lambda a: a.author_name)
 
 
 @router.get("/watched-authors", response_model=list[WatchedAuthorOut])
@@ -410,19 +437,6 @@ async def get_tag_catalog():
             return await naver_api.fetch_tag_catalog(session, settings.request_timeout_seconds)
     except naver_api.NaverApiError as e:
         raise HTTPException(status_code=502, detail=f"태그 카탈로그를 불러오지 못했습니다: {e}")
-
-
-@router.get("/authors/candidates")
-async def list_author_candidates():
-    """네이버엔 전체 작가 목록 API가 없어서, 요일별 전체목록의 저자 텍스트에서
-    후보 이름들을 뽑아 보여준다 (둘러보기용 — 실제 등록은 이름 검색으로 id를 확정)."""
-    settings = get_settings()
-    try:
-        async with aiohttp.ClientSession() as session:
-            items = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
-    except naver_api.NaverApiError as e:
-        raise HTTPException(status_code=502, detail=f"작가 후보 목록을 불러오지 못했습니다: {e}")
-    return naver_api.extract_candidate_author_names(items)
 
 
 @router.get("/authors/search")
