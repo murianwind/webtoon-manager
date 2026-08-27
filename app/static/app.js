@@ -48,6 +48,18 @@ function makeButton(label, onClick) {
   return btn;
 }
 
+function makeIconButton(svgMarkup, title, onClick) {
+  const btn = document.createElement("button");
+  btn.className = "icon-btn";
+  btn.title = title;
+  btn.setAttribute("aria-label", title);
+  btn.innerHTML = svgMarkup;
+  btn.addEventListener("click", onClick);
+  return btn;
+}
+
+const READER_ICON_SVG = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`;
+
 function naverUrl(titleId) {
   return `https://comic.naver.com/webtoon/list?titleId=${titleId}`;
 }
@@ -143,7 +155,7 @@ function buildWebtoonCard(w, context) {
     if (w.status === "active") {
       actions.appendChild(makeButton("구독해제", () => naverListUnsubscribe(w)));
       if (webtoonServerConfigured) {
-        actions.appendChild(makeButton("📖 뷰어에서 보기", () => openInWebtoonServer(w.title)));
+        actions.appendChild(makeIconButton(READER_ICON_SVG, "뷰어에서 보기", () => openInWebtoonServer(w.title)));
       }
     } else {
       actions.appendChild(makeButton("구독", () => naverListAction(w, "subscribe")));
