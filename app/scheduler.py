@@ -16,14 +16,16 @@ discord_bot.py의 실시간 Gateway 봇으로 대체되어 더 이상 필요 없
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import aiohttp
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app import comicinfo, cookie_health, discord_bot, discord_notify, job_status, naver_api, repository, schedule_config, tracker
+from app import comicinfo, cookie_health, discord_bot, discord_notify, job_status, naver_api, repository, schedule_config, tracker, webtoon_server_client
 from app.config import Settings, get_settings
 from app.cookie_loader import get_adult_cookies
 from app.downloader import download_single_episode
@@ -37,11 +39,13 @@ log = logging.getLogger(__name__)
 DEFAULT_SCHEDULES: dict[str, JobSchedule] = {
     "discovery_job": JobSchedule(mode="interval", interval_minutes=360),
     "download_job": JobSchedule(mode="interval", interval_minutes=60),
+    "report_job": JobSchedule(mode="off"),  # 사용자가 원하는 시각으로 직접 설정해야 켜짐
 }
 
 # 정기 스케줄 실행과 "수동 실행" 버튼이 겹치는 걸 막는 잡별 락 (동시성 문제 방지).
 _download_job_lock = asyncio.Lock()
 _discovery_job_lock = asyncio.Lock()
+_report_job_lock = asyncio.Lock()
 
 
 async def _download_new_episodes_for_one(
@@ -245,6 +249,101 @@ async def _notify_download_failures(
     await discord_notify.send_webhook_notification(session, settings, "\n".join(lines))
 
 
+_SETTING_KEY_REPORT_LAST_SENT_AT = "report_last_sent_at"
+_SETTING_KEY_WEBTOON_SERVER_URL = "webtoon_server_url"
+_REPORT_LIST_LIMIT = 40  # 디스코드 메시지 길이 제한 대비, 항목이 너무 많으면 일부만 나열
+
+
+def _build_report_message(success_rows: list[dict], failed_rows: list[dict], reader_urls: dict[str, str]) -> str:
+    """예전 hermes webtoon_checker.py의 메시지 구조(다운로드됨/실패)를 그대로 따른다."""
+    today_label = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
+
+    success_titles = sorted({r["title_name"] for r in success_rows})
+    success_lines = []
+    for title in success_titles:
+        url = reader_urls.get(title)
+        success_lines.append(f"• {title} [바로가기]({url})" if url else f"• {title}")
+
+    failed_titles = sorted({r["title_name"] for r in failed_rows})
+
+    parts = [
+        f"📅 웹툰 다운로드 리포트 ({today_label})",
+        "",
+        f"📁 받은 작품 ({len(success_titles)}):",
+        "\n".join(success_lines[:_REPORT_LIST_LIMIT]) if success_lines else "없음",
+    ]
+    if len(success_lines) > _REPORT_LIST_LIMIT:
+        parts.append(f"_외 {len(success_lines) - _REPORT_LIST_LIMIT}개 생략_")
+
+    if failed_titles:
+        parts.extend([
+            "",
+            f"❌ 실패한 작품 ({len(failed_titles)}):",
+            "\n".join(failed_titles[:_REPORT_LIST_LIMIT]),
+        ])
+        if len(failed_titles) > _REPORT_LIST_LIMIT:
+            parts.append(f"_외 {len(failed_titles) - _REPORT_LIST_LIMIT}개 생략_")
+
+    return "\n".join(parts)
+
+
+async def run_report_job() -> None:
+    if _report_job_lock.locked():
+        job_status.log_line("report", "이미 실행 중이라 건너뜁니다 (중복 실행 방지)")
+        return
+    async with _report_job_lock:
+        await _run_report_job_impl()
+
+
+async def _run_report_job_impl() -> None:
+    settings = get_settings()
+    job_status.start("report")
+
+    since = repository.get_setting(_SETTING_KEY_REPORT_LAST_SENT_AT)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if not since:
+        # 최초 실행이면 지금까지 쌓인 이력을 전부 몰아 보내는 대신, 지금 시점부터
+        # 집계를 시작한다 — 첫 리포트에 예전 이력이 전부 딸려오는 걸 방지.
+        repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, now_iso)
+        job_status.log_line("report", "최초 실행 — 이번 시점부터 집계 시작 (발송 없음)")
+        job_status.finish("report", success=True)
+        return
+
+    rows = repository.list_episode_history_since(since)
+    success_rows = [r for r in rows if r["status"] == "success"]
+    failed_rows = [r for r in rows if r["status"] == "failed"]
+
+    if not rows:
+        job_status.log_line("report", "발송할 내용 없음 (지난 리포트 이후 다운로드 기록 없음)")
+        repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, now_iso)
+        job_status.finish("report", success=True)
+        return
+
+    webtoon_server_url = repository.get_setting(_SETTING_KEY_WEBTOON_SERVER_URL) or ""
+    reader_urls: dict[str, str] = {}
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            if webtoon_server_url:
+                for title in sorted({r["title_name"] for r in success_rows}):
+                    url = await webtoon_server_client.fetch_reader_url(
+                        session, webtoon_server_url, title, settings.request_timeout_seconds
+                    )
+                    if url:
+                        reader_urls[title] = url
+
+            message = _build_report_message(success_rows, failed_rows, reader_urls)
+            await discord_notify.send_webhook_notification(session, settings, message)
+
+        repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, now_iso)
+        job_status.log_line("report", f"리포트 발송 완료 (성공 {len(success_rows)}건, 실패 {len(failed_rows)}건)")
+        job_status.finish("report", success=True)
+    except Exception as e:
+        log.error("리포트 발송 중 예외: %s", e)
+        job_status.log_line("report", f"오류: {e}")
+        job_status.finish("report", success=False)
+
+
 async def _notify_newly_finished() -> None:
     """완결 감지됐는데 아직 디스코드로 알리지 않은 웹툰에 실시간 봇으로 확인 메시지를 보낸다."""
     to_notify = [
@@ -330,6 +429,7 @@ async def _run_discovery_job_impl() -> None:
 _JOB_FUNCS = {
     "discovery_job": run_discovery_job,
     "download_job": run_download_job,
+    "report_job": run_report_job,
 }
 
 

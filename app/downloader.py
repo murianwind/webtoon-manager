@@ -25,6 +25,7 @@ from bs4 import BeautifulSoup
 from app.constants import (
     DEFAULT_HEADERS,
     IMAGE_DOWNLOAD_MAX_RETRIES,
+    MIN_VALID_IMAGE_BYTES,
     NAVER_DETAIL_URL_TEMPLATES,
     RETRY_BACKOFF_BASE_SECONDS,
 )
@@ -109,7 +110,20 @@ async def _download_single_image(
                     async with aiofiles.open(file_path, "wb") as f:
                         async for chunk in response.content.iter_chunked(8192):
                             await f.write(chunk)
-                    return True
+
+                    # 상태코드가 200이어도, 네이버가 에러 페이지나 빈 응답을 200으로
+                    # 줄 수 있다 — 실제로 예전 webtoon_checker.py가 "10KB 이하 파일"을
+                    # 별도로 사후 탐지하던 이유가 이것이다. 크기가 너무 작으면 여기서
+                    # 바로 실패로 처리해서 재시도 루프를 타게 한다(사후 탐지보다 안전).
+                    actual_size = file_path.stat().st_size
+                    if actual_size < MIN_VALID_IMAGE_BYTES:
+                        log.warning(
+                            "이미지 크기 이상(%d bytes < %d) — 재시도: %s",
+                            actual_size, MIN_VALID_IMAGE_BYTES, img_url,
+                        )
+                        file_path.unlink(missing_ok=True)
+                    else:
+                        return True
         except Exception as e:
             if attempt >= IMAGE_DOWNLOAD_MAX_RETRIES:
                 log.error("이미지 다운로드 최종 실패: %s (%s)", img_url, e)

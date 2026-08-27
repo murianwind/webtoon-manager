@@ -477,6 +477,29 @@ def clear_episode_history() -> None:
         conn.execute("DELETE FROM episode_history")
 
 
+def list_episode_history_since(since_iso: str) -> list[dict]:
+    """지정 시각 이후에 기록된 모든 회차 이력을 반환한다 (성공/실패 전부, 페이지네이션 없음) —
+    리포트 발송용으로, 지난 발송 이후 구간을 통째로 훑을 때 쓴다."""
+    rows = get_connection().execute(
+        "SELECT * FROM episode_history WHERE downloaded_at > ? ORDER BY downloaded_at ASC",
+        (since_iso,),
+    ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "title_id": r["title_id"],
+            "title_name": r["title_name"],
+            "episode_no": r["episode_no"],
+            "subtitle": r["subtitle"],
+            "status": r["status"],
+            "error_msg": r["error_msg"],
+            "downloaded_at": r["downloaded_at"],
+        }
+        for r in rows
+    ]
+
+
+
 def delete_episode_history_older_than(days: int) -> int:
     """다운로드된 지 N일 넘은 이력을 지운다 (파일은 그대로 유지됨). 지운 개수를 반환."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()

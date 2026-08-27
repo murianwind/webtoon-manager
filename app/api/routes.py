@@ -507,6 +507,36 @@ async def sync_metadata():
     return {"status": "started"}
 
 
+class WebtoonServerUrlOut(BaseModel):
+    webtoon_server_url: str
+
+
+class WebtoonServerUrlIn(BaseModel):
+    webtoon_server_url: str
+
+
+@router.get("/settings/webtoon-server", response_model=WebtoonServerUrlOut)
+async def get_webtoon_server_url():
+    """리포트에 '바로가기' 링크를 붙일 때 조회할 별도 웹툰 뷰어 서버 주소.
+    비워두면 링크 없이 제목만 나열한다."""
+    value = await asyncio.to_thread(repository.get_setting, "webtoon_server_url")
+    return WebtoonServerUrlOut(webtoon_server_url=value or "")
+
+
+@router.post("/settings/webtoon-server", response_model=WebtoonServerUrlOut)
+async def set_webtoon_server_url(payload: WebtoonServerUrlIn):
+    await asyncio.to_thread(
+        repository.set_setting, "webtoon_server_url", payload.webtoon_server_url.strip() or None
+    )
+    return await get_webtoon_server_url()
+
+
+@router.post("/jobs/report/run")
+async def run_report_job_now():
+    asyncio.create_task(scheduler_mod.run_report_job())
+    return {"status": "started"}
+
+
 @router.get("/authors/candidates")
 async def list_author_candidates():
     """
@@ -640,6 +670,7 @@ class JobScheduleIn(BaseModel):
 class SchedulesIn(BaseModel):
     discovery_job: JobScheduleIn
     download_job: JobScheduleIn
+    report_job: JobScheduleIn
 
 
 def _schedule_to_dict(job_id: str) -> dict:

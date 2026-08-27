@@ -5,7 +5,7 @@ const STATUS_LABEL = {
 };
 
 const DAY_LABEL = { mon: "월", tue: "화", wed: "수", thu: "목", fri: "금", sat: "토", sun: "일" };
-const SCHEDULE_JOB_IDS = ["discovery_job", "download_job"];
+const SCHEDULE_JOB_IDS = ["discovery_job", "download_job", "report_job"];
 
 async function apiCall(path, options = {}) {
   const res = await fetch(path, {
@@ -996,12 +996,13 @@ async function loadSettingsPage() {
     document.getElementById("settings-save-result").textContent = e.message;
   }
   loadDiscordSettings();
+  loadWebtoonServerUrl();
   loadJobHistory();
   await refreshJobStatus();
   startJobPolling();
 }
 
-const JOB_NAME_LABEL = { discovery: "신작 스캔", download: "다운로드", manual: "수동 다운로드", registry: "작가/태그 재동기화", metadata_sync: "메타 동기화" };
+const JOB_NAME_LABEL = { discovery: "신작 스캔", download: "다운로드", manual: "수동 다운로드", registry: "작가/태그 재동기화", metadata_sync: "메타 동기화", report: "다운로드 리포트" };
 
 async function loadJobHistory() {
   const container = document.getElementById("job-history-list");
@@ -1072,6 +1073,36 @@ document.getElementById("btn-run-metadata-sync").addEventListener("click", async
   await refreshJobStatus();
 });
 
+document.getElementById("btn-run-report").addEventListener("click", async () => {
+  await apiCall("/api/jobs/report/run", { method: "POST" });
+  await refreshJobStatus();
+});
+
+async function loadWebtoonServerUrl() {
+  try {
+    const data = await apiCall("/api/settings/webtoon-server");
+    document.getElementById("webtoon-server-url").value = data.webtoon_server_url;
+  } catch (e) {
+    // 조용히 무시 — 이 필드 하나 때문에 설정 탭 전체 로드가 막히면 안 됨
+  }
+}
+
+document.getElementById("btn-save-webtoon-server-url").addEventListener("click", async () => {
+  const resultEl = document.getElementById("webtoon-server-save-result");
+  resultEl.textContent = "";
+  try {
+    const url = document.getElementById("webtoon-server-url").value.trim();
+    await apiCall("/api/settings/webtoon-server", {
+      method: "POST",
+      body: JSON.stringify({ webtoon_server_url: url }),
+    });
+    resultEl.style.color = "";
+    resultEl.textContent = "저장했습니다.";
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+});
+
 function renderJobLog(jobName, lines) {
   const container = document.getElementById(`${jobName}-log`);
   container.innerHTML = lines
@@ -1095,7 +1126,7 @@ async function refreshJobStatus() {
     return;
   }
 
-  for (const jobName of ["discovery", "download", "metadata_sync"]) {
+  for (const jobName of ["discovery", "download", "metadata_sync", "report"]) {
     const st = statuses[jobName];
     if (!st) continue;
     const badge = document.getElementById(`${jobName}-status-badge`);
