@@ -35,6 +35,7 @@ from app import (
     tracker,
 )
 from app import scheduler as scheduler_mod
+from app import webtoon_server_client
 from app.config import get_settings
 
 log = logging.getLogger(__name__)
@@ -529,6 +530,19 @@ async def set_webtoon_server_url(payload: WebtoonServerUrlIn):
         repository.set_setting, "webtoon_server_url", payload.webtoon_server_url.strip() or None
     )
     return await get_webtoon_server_url()
+
+
+@router.get("/webtoon-server/lookup")
+async def lookup_webtoon_server_reader_url(title: str):
+    """구독중인 웹툰 카드의 '뷰어에서 보기' 아이콘이 누르는 순간 호출한다 — 매번 최신
+    상태를 물어보는 게 목적이라, 캐시하지 않고 그때그때 webtoon-server에 직접 조회한다."""
+    server_url = await asyncio.to_thread(repository.get_setting, "webtoon_server_url")
+    if not server_url:
+        return {"url": None}
+    settings = get_settings()
+    async with aiohttp.ClientSession() as session:
+        url = await webtoon_server_client.fetch_reader_url(session, server_url, title, settings.request_timeout_seconds)
+    return {"url": url}
 
 
 @router.post("/jobs/report/run")

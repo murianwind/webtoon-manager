@@ -52,6 +52,27 @@ function naverUrl(titleId) {
   return `https://comic.naver.com/webtoon/list?titleId=${titleId}`;
 }
 
+// 웹툰 뷰어 서버 주소가 설정되어 있는지 — 있으면 구독중 카드에 "뷰어에서 보기" 아이콘을 띄운다.
+// 페이지 열릴 때 한 번만 확인하고(설정 탭에서 바꾸면 새로고침해야 반영됨), 카드마다
+// 매번 물어보진 않는다.
+let webtoonServerConfigured = false;
+apiCall("/api/settings/webtoon-server")
+  .then((data) => { webtoonServerConfigured = Boolean(data.webtoon_server_url); })
+  .catch(() => {});
+
+async function openInWebtoonServer(title) {
+  try {
+    const data = await apiCall(`/api/webtoon-server/lookup?title=${encodeURIComponent(title)}`);
+    if (data.url) {
+      window.open(data.url, "_blank", "noopener");
+    } else {
+      alert("뷰어 서버에서 이 작품을 찾지 못했습니다.");
+    }
+  } catch (e) {
+    alert(`뷰어 서버 조회 실패: ${e.message}`);
+  }
+}
+
 function badgesHtml(w) {
   const parts = [];
   if (w.is_new) parts.push('<span class="badge new-release">신작</span>');
@@ -121,6 +142,9 @@ function buildWebtoonCard(w, context) {
   if (context === "naver-list") {
     if (w.status === "active") {
       actions.appendChild(makeButton("구독해제", () => naverListUnsubscribe(w)));
+      if (webtoonServerConfigured) {
+        actions.appendChild(makeButton("📖 뷰어에서 보기", () => openInWebtoonServer(w.title)));
+      }
     } else {
       actions.appendChild(makeButton("구독", () => naverListAction(w, "subscribe")));
       actions.appendChild(makeButton("목록제외", () => naverListAction(w, "exclude")));

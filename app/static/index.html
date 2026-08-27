@@ -208,13 +208,16 @@
     <div class="settings-card">
       <h2>다운로드 리포트</h2>
       <p class="hint">지정한 시각마다, 지난 리포트 이후 받은/실패한 작품을 모아 디스코드로 보냅니다 (위 웹훅 설정 그대로 사용).</p>
-      <label for="webtoon-server-url">웹툰 뷰어 서버 주소 (선택)</label>
-      <div class="registry-add-row">
-        <input id="webtoon-server-url" type="text" placeholder="http://192.168.0.49:25600" />
-        <button id="btn-save-webtoon-server-url">저장</button>
+
+      <div class="field-group">
+        <label for="webtoon-server-url">웹툰 뷰어 서버 주소 <span class="hint-inline">(선택)</span></label>
+        <div class="registry-add-row">
+          <input id="webtoon-server-url" type="text" placeholder="http://192.168.0.49:25600" />
+          <button id="btn-save-webtoon-server-url">저장</button>
+        </div>
+        <p class="field-hint">입력해두면 리포트에 각 작품의 "바로가기" 링크가 붙고, 구독중인 웹툰 카드에서 바로 뷰어로 이동하는 아이콘이 생깁니다.</p>
+        <span id="webtoon-server-save-result" class="hint-inline"></span>
       </div>
-      <p class="hint">입력해두면 리포트에 각 작품의 "바로가기" 링크가 함께 붙습니다. 비워두면 제목만 나열됩니다.</p>
-      <span id="webtoon-server-save-result" class="hint-inline"></span>
     </div>
 
     <div class="settings-card">
