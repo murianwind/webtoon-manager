@@ -50,6 +50,14 @@ CREATE TABLE IF NOT EXISTS watched_authors (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS kakao_seen_titles (
+    author_name TEXT NOT NULL,
+    title_id INTEGER NOT NULL,
+    title_name TEXT NOT NULL DEFAULT '',
+    seen_at TEXT NOT NULL,
+    PRIMARY KEY (author_name, title_id)
+);
+
 CREATE TABLE IF NOT EXISTS watched_tags (
     tag_id TEXT PRIMARY KEY,
     tag_name TEXT NOT NULL DEFAULT '',
@@ -93,6 +101,7 @@ _MIGRATIONS = [
     ("webtoons", "is_paused", "ALTER TABLE webtoons ADD COLUMN is_paused INTEGER NOT NULL DEFAULT 0"),
     ("webtoons", "is_new", "ALTER TABLE webtoons ADD COLUMN is_new INTEGER NOT NULL DEFAULT 0"),
     ("webtoons", "writer_names", "ALTER TABLE webtoons ADD COLUMN writer_names TEXT NOT NULL DEFAULT '[]'"),
+    ("watched_authors", "platform", "ALTER TABLE watched_authors ADD COLUMN platform TEXT NOT NULL DEFAULT 'naver'"),
 ]
 
 

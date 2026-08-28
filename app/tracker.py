@@ -18,7 +18,7 @@ from pathlib import Path
 
 import aiohttp
 
-from app import comicinfo, job_status, naver_api, repository
+from app import comicinfo, discord_notify, job_status, kakao_api, naver_api, repository
 from app.file_utils import remove_forbidden_str
 from app.config import Settings
 from app.discord_notify import send_webhook_notification
@@ -165,6 +165,57 @@ async def enrich_one(
     if registered_names:
         return True, f"작가 등록: {', '.join(registered_names)}"
     return True, "작가 정보 없음 (API 응답에 작가 필드가 비어있음)"
+
+
+async def scan_kakao_authors_for_new_titles(session: aiohttp.ClientSession, settings) -> int:
+    """
+    등록된 카카오웹툰 작가(이름 기준) 각각을 검색해서, 그 작가의 작품 중 이번에 처음
+    보는 것(kakao_seen_titles에 없는 title_id)이 있으면 디스코드로 알린다.
+
+    최초로 어떤 작가를 등록한 직후 첫 스캔에서는, 그 작가의 기존 작품 전체가
+    "새로 발견됨"으로 잡혀서 전부 알림이 가버린다 — 그래서 그 작가를 이번에 처음
+    스캔하는 거라면(seen 목록이 비어있으면) 지금 있는 작품 전체를 기준선으로만
+    저장하고 알림은 보내지 않는다(다운로드 리포트 기능과 동일한 패턴).
+    """
+    authors = [a for a in repository.list_watched_authors(platform="kakao") if a.enabled]
+    if not authors:
+        return 0
+
+    new_titles_found = 0
+    for author in authors:
+        try:
+            results = await kakao_api.search_by_author(session, author.author_name, settings.request_timeout_seconds)
+        except Exception as e:
+            log.error("카카오 작가 검색 중 예외 (author=%s): %s", author.author_name, e)
+            job_status.log_line("discovery", f"[카카오/{author.author_name}] 검색 오류: {e}")
+            continue
+
+        already_seen = repository.get_seen_kakao_title_ids(author.author_name)
+        is_first_scan = len(already_seen) == 0
+
+        for item in results:
+            if item["title_id"] in already_seen:
+                continue
+            repository.add_seen_kakao_title(author.author_name, item["title_id"], item["title_name"])
+            if is_first_scan:
+                continue  # 기준선 저장만, 알림 없음
+
+            new_titles_found += 1
+            message = (
+                f"🆕 **카카오웹툰 신작 발견**\n"
+                f"작가: {author.author_name}\n"
+                f"제목: {item['title_name']}\n"
+                f"ID: {item['title_id']}"
+            )
+            try:
+                await discord_notify.send_webhook_notification(session, settings, message)
+            except Exception as e:
+                log.error("카카오 신작 알림 전송 실패: %s", e)
+            job_status.log_line("discovery", f"[카카오/{author.author_name}] 신작 발견: {item['title_name']} (id={item['title_id']})")
+
+        await asyncio.sleep(settings.delay_seconds)
+
+    return new_titles_found
 
 
 async def sync_metadata_for_all(settings) -> int:

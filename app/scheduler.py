@@ -417,6 +417,15 @@ async def _run_discovery_job_impl() -> None:
             log.error("구독해제/제외됨 정보 갱신 중 예외: %s", e)
             job_status.log_line("discovery", f"구독해제/제외됨 정보 갱신 오류: {e}")
 
+        try:
+            job_status.log_line("discovery", "카카오웹툰 작가 신작 스캔 시작")
+            kakao_new_count = await tracker.scan_kakao_authors_for_new_titles(session, settings)
+            job_status.log_line("discovery", f"카카오웹툰 신작 {kakao_new_count}건 발견")
+        except Exception as e:
+            had_error = True
+            log.error("카카오웹툰 신작 스캔 중 예외: %s", e)
+            job_status.log_line("discovery", f"카카오웹툰 신작 스캔 오류: {e}")
+
     try:
         await _notify_newly_finished()
     except Exception as e:
