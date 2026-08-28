@@ -35,6 +35,7 @@ from app import (
     tracker,
 )
 from app import scheduler as scheduler_mod
+from app import kakao_api
 from app import webtoon_server_client
 from app.config import get_settings
 
@@ -398,6 +399,75 @@ async def remove_watched_author(author_id: str):
     """레지스트리에서 완전히 지운다 (이름 없이 남은 예전 데이터 등을 정리할 때 사용)."""
     await asyncio.to_thread(repository.delete_watched_author, author_id)
     return {"status": "deleted"}
+
+
+# ── 카카오웹툰 작가 (네이버와 인터페이스는 같지만, 작가에 고유 ID가 없어서
+#    이름 문자열 자체를 author_id로 쓴다 — 실제 API 응답 3곳에서 확인된 제약) ──
+
+class KakaoWatchedAuthorIn(BaseModel):
+    author_name: str
+
+    @field_validator("author_name")
+    @classmethod
+    def name_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("작가 이름이 비어있습니다.")
+        return v.strip()
+
+
+@router.get("/kakao/watched-authors", response_model=list[WatchedAuthorOut])
+async def list_kakao_watched_authors():
+    rows = await asyncio.to_thread(repository.list_watched_authors, "kakao")
+    return [WatchedAuthorOut(author_id=r.author_id, author_name=r.author_name, enabled=r.enabled) for r in rows]
+
+
+@router.post("/kakao/watched-authors", response_model=WatchedAuthorOut)
+async def add_kakao_watched_author(payload: KakaoWatchedAuthorIn):
+    """등록 즉시 실제로 그 이름의 작품이 있는지 카카오에 확인한다 — 오타로 존재하지
+    않는 이름을 등록해버리는 걸 막기 위해서다(네이버처럼 검색 결과에서 골라 등록하는
+    방식이 아니라 이름을 직접 입력받으므로, 여기서 확인 안 하면 오타를 못 잡는다)."""
+    settings = get_settings()
+    async with aiohttp.ClientSession() as session:
+        results = await kakao_api.search_by_author(session, payload.author_name, settings.request_timeout_seconds)
+    if not results:
+        raise HTTPException(status_code=404, detail=f"'{payload.author_name}' 이름으로 카카오웹툰에서 작품을 찾지 못했습니다.")
+
+    await asyncio.to_thread(repository.upsert_watched_author, payload.author_name, payload.author_name, True, "kakao")
+    rows = await asyncio.to_thread(repository.list_watched_authors, "kakao")
+    match = next(r for r in rows if r.author_id == payload.author_name)
+    return WatchedAuthorOut(author_id=match.author_id, author_name=match.author_name, enabled=match.enabled)
+
+
+@router.post("/kakao/watched-authors/{author_name}/enable", response_model=WatchedAuthorOut)
+async def enable_kakao_watched_author(author_name: str):
+    await asyncio.to_thread(repository.set_watched_author_enabled, author_name, True, author_name, "kakao")
+    rows = await asyncio.to_thread(repository.list_watched_authors, "kakao")
+    match = next(r for r in rows if r.author_id == author_name)
+    return WatchedAuthorOut(author_id=match.author_id, author_name=match.author_name, enabled=match.enabled)
+
+
+@router.post("/kakao/watched-authors/{author_name}/disable", response_model=WatchedAuthorOut)
+async def disable_kakao_watched_author(author_name: str):
+    await asyncio.to_thread(repository.set_watched_author_enabled, author_name, False, author_name, "kakao")
+    rows = await asyncio.to_thread(repository.list_watched_authors, "kakao")
+    match = next(r for r in rows if r.author_id == author_name)
+    return WatchedAuthorOut(author_id=match.author_id, author_name=match.author_name, enabled=match.enabled)
+
+
+@router.delete("/kakao/watched-authors/{author_name}")
+async def remove_kakao_watched_author(author_name: str):
+    await asyncio.to_thread(repository.delete_watched_author, author_name, "kakao")
+    return {"status": "deleted"}
+
+
+@router.get("/kakao/authors/candidates")
+async def list_kakao_author_candidates():
+    """네이버의 /authors/candidates와 동일한 역할 — 요일 7개+신작+완결을 통째로 훑어서
+    이름 후보를 즉시 뽑는다. 카탈로그가 커서(2000개 이상) 몇 초 걸릴 수 있다."""
+    settings = get_settings()
+    async with aiohttp.ClientSession() as session:
+        items = await kakao_api.fetch_full_catalog(session, settings.request_timeout_seconds)
+    return kakao_api.extract_candidate_author_names(items)
 
 
 

@@ -154,6 +154,24 @@
         </div>
       </div>
     </div>
+
+    <div class="settings-card">
+      <h2>카카오웹툰 작가</h2>
+      <p class="hint">카카오웹툰은 작가에 고유 ID가 없어서 이름 자체로 다룹니다. "선택됨"은 구독중인
+      웹툰들의 저자가 자동으로 뜨는 네이버와 달리 전부 직접 등록해야 합니다. "사용 가능"은 요일별+신작+완결
+      전체 카탈로그에서 뽑은 이름 후보입니다(완결작 포함, 조회에 몇 초 걸릴 수 있음).</p>
+      <div class="chip-section">
+        <div class="chip-column">
+          <h4>선택됨</h4>
+          <div id="kakao-author-registered-chips" class="chip-container"></div>
+        </div>
+        <div class="chip-column">
+          <h4>사용 가능</h4>
+          <input id="kakao-author-candidate-filter" type="text" class="chip-filter" placeholder="이름으로 좁혀보기" />
+          <div id="kakao-author-all-chips" class="chip-container"><p class="chip-empty-message">불러오는 중...</p></div>
+        </div>
+      </div>
+    </div>
   </section>
 
   <!-- 다운로드 이력 (회차 단위) -->

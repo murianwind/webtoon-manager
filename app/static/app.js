@@ -572,6 +572,7 @@ let registryPollTimer = null;
 async function loadRegistryPage() {
   await loadAuthorList();
   await loadTagList();
+  await loadKakaoAuthorList();
   await refreshRegistryJobStatuses();
 }
 
@@ -821,6 +822,80 @@ async function renderAllTags() {
 }
 
 document.getElementById("tag-catalog-search").addEventListener("input", renderAllTags);
+
+// ── 카카오웹툰 작가 (이름 자체가 식별자 — 네이버와 동일하게 선택됨/사용가능 2단) ──
+
+let kakaoWatchedAuthorsCache = [];
+let kakaoAuthorCandidatesCache = [];
+
+async function loadKakaoAuthorList() {
+  const registeredEl = document.getElementById("kakao-author-registered-chips");
+  try {
+    kakaoWatchedAuthorsCache = await apiCall("/api/kakao/watched-authors");
+  } catch (e) {
+    registeredEl.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+    return;
+  }
+  renderKakaoRegisteredAuthors();
+
+  if (kakaoAuthorCandidatesCache.length === 0) {
+    try {
+      kakaoAuthorCandidatesCache = await apiCall("/api/kakao/authors/candidates");
+    } catch (e) {
+      document.getElementById("kakao-author-all-chips").innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+      return;
+    }
+  }
+  renderKakaoAllAuthors();
+}
+
+function renderKakaoRegisteredAuthors() {
+  const container = document.getElementById("kakao-author-registered-chips");
+  const registered = kakaoWatchedAuthorsCache.filter((a) => a.enabled);
+  container.innerHTML = "";
+  if (registered.length === 0) {
+    container.innerHTML = '<p class="chip-empty-message">등록된 카카오웹툰 작가가 없습니다. 오른쪽 후보에서 골라 등록하세요.</p>';
+    return;
+  }
+  for (const a of registered) {
+    container.appendChild(
+      buildChip(a.author_name, true, async () => {
+        await apiCall(`/api/kakao/watched-authors/${encodeURIComponent(a.author_id)}/disable`, { method: "POST" });
+        loadKakaoAuthorList();
+      })
+    );
+  }
+}
+
+function renderKakaoAllAuthors() {
+  const container = document.getElementById("kakao-author-all-chips");
+  const query = document.getElementById("kakao-author-candidate-filter").value.trim().toLowerCase();
+  const registeredNames = new Set(kakaoWatchedAuthorsCache.filter((a) => a.enabled).map((a) => a.author_name));
+
+  const candidates = kakaoAuthorCandidatesCache.filter(
+    (name) => !registeredNames.has(name) && (!query || name.toLowerCase().includes(query))
+  );
+
+  container.innerHTML = "";
+  if (candidates.length === 0) {
+    container.innerHTML = '<p class="chip-empty-message">표시할 후보가 없습니다.</p>';
+    return;
+  }
+  for (const name of candidates) {
+    container.appendChild(
+      buildChip(name, false, async () => {
+        try {
+          await apiCall("/api/kakao/watched-authors", { method: "POST", body: JSON.stringify({ author_name: name }) });
+          loadKakaoAuthorList();
+        } catch (e) {
+          alert(e.message);
+        }
+      })
+    );
+  }
+}
+
+document.getElementById("kakao-author-candidate-filter").addEventListener("input", renderKakaoAllAuthors);
 
 // ── 설정: 스케줄 ─────────────────────────────────────────
 
