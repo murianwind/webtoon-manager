@@ -542,7 +542,6 @@ button:hover { border-color: var(--accent); }
   overflow-y: auto;
 }
 .scroll-table-wrapper {
-  max-height: calc(100vh - 320px);
   overflow-y: auto;
   border-radius: 8px;
 }
@@ -566,6 +565,7 @@ button:hover { border-color: var(--accent); }
   padding: 8px 12px;
   cursor: pointer;
   font-size: 13px;
+  border-radius: 6px;
 }
 .job-history-summary .job-history-name {
   font-weight: 600;
@@ -582,8 +582,10 @@ button:hover { border-color: var(--accent); }
 }
 .job-history-entry .job-log {
   display: none;
+  max-height: 320px;
+  overflow-y: auto;
   border-top: 1px solid var(--border);
-  border-radius: 0;
+  border-radius: 0 0 6px 6px;
 }
 .job-history-entry.expanded .job-log {
   display: block;
