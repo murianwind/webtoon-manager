@@ -297,9 +297,11 @@ async def search_webtoons(
     results: list[SearchResultItem] = []
     seen_ids: set[str] = set()
 
-    for category in data.values():
-        if not isinstance(category, dict):
-            continue
+    # 응답엔 searchBestChallengeResult/searchChallengeResult 등도 titleId를 갖고 있어서
+    # 전체를 다 돌면 베스트도전/도전만화가 섞여 들어온다(실제로 확인된 문제) —
+    # 정식 연재 웹툰만 원하므로 searchWebtoonResult 하나만 쓴다.
+    category = data.get("searchWebtoonResult")
+    if isinstance(category, dict):
         for item in category.get("searchViewList") or []:
             title_id = item.get("titleId")
             if title_id is None:  # contentId만 있는(titleId 없는) 카테고리는 건너뜀

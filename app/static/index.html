@@ -18,6 +18,8 @@
     <button class="main-tab" data-page="manual-download">수동 다운로드</button>
     <button class="main-tab" data-page="registry">작가/태그 관리</button>
     <button class="main-tab" data-page="episode-history">다운로드 이력</button>
+    <button class="main-tab" data-page="manual-run">수동 실행</button>
+    <button class="main-tab" data-page="job-history">실행 이력</button>
     <button class="main-tab" data-page="settings">설정</button>
   </nav>
 
@@ -90,10 +92,12 @@
         <button id="btn-manual-select-none">선택해제</button>
         <button id="btn-manual-download">선택 다운로드</button>
       </div>
-      <table id="manual-table">
-        <thead><tr><th></th><th>#</th><th>부제</th><th>상태</th></tr></thead>
-        <tbody id="manual-tbody"></tbody>
-      </table>
+      <div class="scroll-table-wrapper">
+        <table id="manual-table">
+          <thead><tr><th></th><th>#</th><th>부제</th><th>상태</th></tr></thead>
+          <tbody id="manual-tbody"></tbody>
+        </table>
+      </div>
     </div>
 
     <div class="job-status-block">
@@ -195,10 +199,12 @@
     </div>
     <p class="hint">설정한 일수보다 오래된 이력은 다운로드 실행 때마다 자동으로 정리됩니다 (파일은 유지됨). 0이면 끔.</p>
 
-    <table id="episode-history-table">
-      <thead><tr><th>작품</th><th>회차</th><th>상태</th><th>시각</th><th></th></tr></thead>
-      <tbody id="episode-history-tbody"></tbody>
-    </table>
+    <div class="scroll-table-wrapper">
+      <table id="episode-history-table">
+        <thead><tr><th>작품</th><th>회차</th><th>상태</th><th>시각</th><th></th></tr></thead>
+        <tbody id="episode-history-tbody"></tbody>
+      </table>
+    </div>
     <p id="episode-history-empty" class="hidden empty-message">기록이 없습니다.</p>
     <div id="episode-history-pagination" class="pagination"></div>
   </section>
@@ -269,9 +275,11 @@
       </label>
       <span id="backup-result" class="error"></span>
     </div>
+  </section>
 
+  <!-- 수동 실행 -->
+  <section id="page-manual-run" class="page hidden">
     <div class="settings-card">
-      <h2>수동 실행</h2>
       <div class="manual-run-buttons">
         <button id="btn-run-discovery">신작 스캔 실행</button>
         <button id="btn-run-download">다운로드 실행</button>
@@ -297,11 +305,22 @@
         <div id="report-log" class="job-log"></div>
       </div>
     </div>
+  </section>
 
+  <!-- 실행 이력 -->
+  <section id="page-job-history" class="page hidden">
     <div class="settings-card">
-      <h2>실행 이력</h2>
-      <p class="hint">스케줄에 따라 자동으로 실행된 작업이 실제로 돌았는지/성공했는지 확인할 수 있습니다.</p>
-      <button id="btn-refresh-history">새로고침</button>
+      <p class="hint">스케줄에 따라 자동으로(또는 수동으로) 실행된 작업이 실제로 돌았는지/성공했는지 확인할 수 있습니다.</p>
+      <div class="retention-row">
+        <label for="job-history-retention-days">보관 기간(일)</label>
+        <input id="job-history-retention-days" type="number" min="0" placeholder="0 = 자동삭제 끔" />
+        <button id="btn-save-job-history-retention">저장</button>
+        <span id="job-history-retention-result" class="hint-inline"></span>
+      </div>
+      <div class="toolbar">
+        <button id="btn-refresh-history">새로고침</button>
+        <button id="btn-clear-job-history">전체 삭제</button>
+      </div>
       <div id="job-history-list" class="job-history-list"></div>
     </div>
   </section>

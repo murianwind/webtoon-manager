@@ -103,6 +103,8 @@ const pageLoaders = {
   "manual-download": () => {},
   registry: loadRegistryPage,
   "episode-history": () => loadEpisodeHistory(1),
+  "manual-run": loadManualRunPage,
+  "job-history": loadJobHistoryPage,
   settings: loadSettingsPage,
 };
 
@@ -120,7 +122,7 @@ function switchToTab(page) {
 document.querySelectorAll(".main-tab").forEach((tab) => {
   tab.addEventListener("click", () => {
     const page = tab.dataset.page;
-    localStorage.setItem(ACTIVE_TAB_KEY, page);
+    sessionStorage.setItem(ACTIVE_TAB_KEY, page);
     switchToTab(page);
   });
 });
@@ -432,6 +434,13 @@ async function deleteWebtoonPermanently(titleId) {
 let manualAnalyzeResult = null;
 let manualPollTimer = null;
 
+document.getElementById("manual-query").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    document.getElementById("btn-manual-analyze").click();
+  }
+});
+
 document.getElementById("btn-manual-analyze").addEventListener("click", async () => {
   const query = document.getElementById("manual-query").value.trim();
   if (!query) return;
@@ -534,9 +543,35 @@ document.getElementById("btn-manual-download").addEventListener("click", async (
 });
 
 document.getElementById("btn-copy-manual-log").addEventListener("click", () => {
-  const text = document.getElementById("manual-log").innerText;
-  navigator.clipboard?.writeText(text);
+  copyTextToClipboard(document.getElementById("manual-log").innerText);
 });
+
+// navigator.clipboard는 HTTPS/localhost가 아니면(예: http://192.168.x.x:8001로 접속하는
+// LAN 환경) 브라우저에서 자체적으로 비활성화되어 있어서 조용히 아무 일도 안 일어난다
+// (실제로 이것 때문에 "로그 복사가 안 된다"는 문제가 있었다) — 안 되면 구식 방식으로 대체한다.
+function copyTextToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+  } else {
+    fallbackCopy(text);
+  }
+}
+
+function fallbackCopy(text) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  try {
+    document.execCommand("copy");
+  } catch (e) {
+    alert("클립보드 복사에 실패했습니다.");
+  }
+  document.body.removeChild(textarea);
+}
 
 function startManualPolling() {
   stopManualPolling();
@@ -1108,9 +1143,16 @@ async function loadSettingsPage() {
   }
   loadDiscordSettings();
   loadWebtoonServerUrl();
-  loadJobHistory();
+}
+
+async function loadManualRunPage() {
   await refreshJobStatus();
   startJobPolling();
+}
+
+async function loadJobHistoryPage() {
+  await loadJobHistoryRetentionDays();
+  await loadJobHistory();
 }
 
 const JOB_NAME_LABEL = { discovery: "신작 스캔", download: "다운로드", manual: "수동 다운로드", registry: "작가/태그 재동기화", metadata_sync: "메타 동기화", report: "다운로드 리포트" };
@@ -1137,6 +1179,13 @@ async function loadJobHistory() {
         <span class="job-history-time">${escapeHtml(startedLabel || "")}</span>
         <span class="badge job-${entry.status}">${entry.status}</span>
       `;
+      const deleteBtn = makeButton("삭제", async (ev) => {
+        ev.stopPropagation();
+        await apiCall(`/api/jobs/history/${entry.id}`, { method: "DELETE" });
+        loadJobHistory();
+      });
+      deleteBtn.className = "job-history-delete-btn";
+      summary.appendChild(deleteBtn);
 
       const logEl = document.createElement("div");
       logEl.className = "job-log";
@@ -1168,6 +1217,34 @@ async function loadJobHistory() {
 }
 
 document.getElementById("btn-refresh-history").addEventListener("click", loadJobHistory);
+
+document.getElementById("btn-clear-job-history").addEventListener("click", async () => {
+  if (!confirm("실행 이력을 전부 지웁니다. 계속할까요?")) return;
+  await apiCall("/api/jobs/history", { method: "DELETE" });
+  loadJobHistory();
+});
+
+async function loadJobHistoryRetentionDays() {
+  try {
+    const data = await apiCall("/api/jobs/history/retention-days");
+    document.getElementById("job-history-retention-days").value = data.retention_days || "";
+  } catch (e) {
+    // 조용히 무시
+  }
+}
+
+document.getElementById("btn-save-job-history-retention").addEventListener("click", async () => {
+  const resultEl = document.getElementById("job-history-retention-result");
+  resultEl.textContent = "";
+  const days = Number(document.getElementById("job-history-retention-days").value) || 0;
+  try {
+    await apiCall("/api/jobs/history/retention-days", { method: "POST", body: JSON.stringify({ retention_days: days }) });
+    resultEl.style.color = "";
+    resultEl.textContent = days > 0 ? "저장했습니다." : "자동삭제 껐습니다.";
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+});
 
 document.getElementById("btn-run-discovery").addEventListener("click", async () => {
   await apiCall("/api/jobs/discovery/run", { method: "POST" });
@@ -1354,7 +1431,7 @@ document.getElementById("btn-save-retention-days").addEventListener("click", asy
 
 restoreNaverListPrefs();
 
-const savedTab = localStorage.getItem(ACTIVE_TAB_KEY);
+const savedTab = sessionStorage.getItem(ACTIVE_TAB_KEY);
 if (savedTab && document.getElementById(`page-${savedTab}`)) {
   switchToTab(savedTab);
 } else {

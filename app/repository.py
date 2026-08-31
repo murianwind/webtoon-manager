@@ -425,6 +425,7 @@ def list_job_history(limit_per_job: int = 10) -> list[dict]:
         for r in rows:
             results.append(
                 {
+                    "id": r["id"],
                     "job_name": r["job_name"],
                     "started_at": r["started_at"],
                     "finished_at": r["finished_at"],
@@ -434,6 +435,23 @@ def list_job_history(limit_per_job: int = 10) -> list[dict]:
             )
     results.sort(key=lambda r: r["started_at"], reverse=True)
     return results
+
+
+def delete_job_history_entry(entry_id: int) -> None:
+    with write_transaction() as conn:
+        conn.execute("DELETE FROM job_history WHERE id = ?", (entry_id,))
+
+
+def clear_job_history() -> None:
+    with write_transaction() as conn:
+        conn.execute("DELETE FROM job_history")
+
+
+def delete_job_history_older_than(days: int) -> int:
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    with write_transaction() as conn:
+        cursor = conn.execute("DELETE FROM job_history WHERE started_at < ?", (cutoff,))
+        return cursor.rowcount
 
 
 # ── episode_history (회차 단위 다운로드 이력) ──────────────────────

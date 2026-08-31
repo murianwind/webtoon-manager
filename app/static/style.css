@@ -538,6 +538,21 @@ button:hover { border-color: var(--accent); }
   display: flex;
   flex-direction: column;
   gap: 6px;
+  max-height: calc(100vh - 260px);
+  overflow-y: auto;
+}
+.scroll-table-wrapper {
+  max-height: calc(100vh - 320px);
+  overflow-y: auto;
+  border-radius: 8px;
+}
+.scroll-table-wrapper table {
+  margin-bottom: 0;
+}
+.scroll-table-wrapper thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 .job-history-entry {
   border: 1px solid var(--border);
@@ -560,6 +575,10 @@ button:hover { border-color: var(--accent); }
   color: var(--muted);
   font-size: 12px;
   flex: 1;
+}
+.job-history-delete-btn {
+  font-size: 11px;
+  padding: 3px 8px;
 }
 .job-history-entry .job-log {
   display: none;
