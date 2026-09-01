@@ -541,11 +541,12 @@ def list_episode_history_since(since_iso: str) -> list[dict]:
     ]
 
 
-def list_recent_episode_history(limit: int) -> list[dict]:
-    """가장 최근 N건을 시각 무관하게 반환한다 — 리포트 수동 테스트용으로, "지난 발송
-    이후"에 아무 것도 없어도 예전 기록으로라도 실제 발송 형태를 확인할 수 있게 한다."""
+def list_episode_history_between(start_iso: str, end_iso: str) -> list[dict]:
+    """[start_iso, end_iso) 구간의 이력을 반환한다 — 리포트 테스트 발송에서 "오늘"
+    또는 "어제" 하루치만 정확히 뽑아낼 때 쓴다."""
     rows = get_connection().execute(
-        "SELECT * FROM episode_history ORDER BY downloaded_at DESC LIMIT ?", (limit,)
+        "SELECT * FROM episode_history WHERE downloaded_at >= ? AND downloaded_at < ? ORDER BY downloaded_at ASC",
+        (start_iso, end_iso),
     ).fetchall()
     return [
         {

@@ -16,7 +16,7 @@ discord_bot.py의 실시간 Gateway 봇으로 대체되어 더 이상 필요 없
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -338,13 +338,29 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
         job_status.finish("report", success=True)
         return
 
-    rows = repository.list_episode_history_since(since) if since else []
-    used_fallback = False
-    if not rows and force_test:
-        # 지난 발송 이후 아무 것도 없어도, 테스트 목적이면 최근 기록으로라도 실제
-        # 발송 양식을 보여준다 — 그래야 "정상적으로 오는지" 확인이 가능하다.
-        rows = repository.list_recent_episode_history(20)
-        used_fallback = True
+    if force_test:
+        # 테스트 발송은 "지난 발송 이후" 누적 로직을 아예 안 쓴다 — 오늘(한국시간)
+        # 다운로드한 것만 보내고, 오늘 게 없으면 어제 것만 보낸다. 단순하고 예측
+        # 가능하게: 전체 이력이 몰려서 나오는 걸 막기 위한 것이라 날짜 하루 단위로
+        # 딱 끊는다.
+        kst = ZoneInfo("Asia/Seoul")
+        today_kst = datetime.now(kst).date()
+        used_fallback = False
+
+        def _kst_day_range_utc(day):
+            start_kst = datetime.combine(day, datetime.min.time(), tzinfo=kst)
+            end_kst = start_kst + timedelta(days=1)
+            return start_kst.astimezone(timezone.utc).isoformat(), end_kst.astimezone(timezone.utc).isoformat()
+
+        start_iso, end_iso = _kst_day_range_utc(today_kst)
+        rows = repository.list_episode_history_between(start_iso, end_iso)
+        if not rows:
+            start_iso, end_iso = _kst_day_range_utc(today_kst - timedelta(days=1))
+            rows = repository.list_episode_history_between(start_iso, end_iso)
+            used_fallback = bool(rows)
+    else:
+        rows = repository.list_episode_history_since(since) if since else []
+        used_fallback = False
 
     success_rows = [r for r in rows if r["status"] == "success"]
     failed_rows = [r for r in rows if r["status"] == "failed"]
@@ -377,7 +393,7 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
 
             message = _build_report_message(success_rows, failed_rows, reader_urls)
             if used_fallback:
-                message = "🧪 **[테스트 발송 — 최근 기록으로 대체됨]**\n" + message
+                message = "🧪 **[테스트 발송 — 오늘 기록 없어 어제 기록으로 대체됨]**\n" + message
             await discord_notify.send_webhook_notification(session, settings, message)
 
         if not force_test:
