@@ -30,6 +30,7 @@ _statuses: dict[str, _JobStatus] = {
     "registry": _JobStatus(),
     "metadata_sync": _JobStatus(),
     "report": _JobStatus(),
+    "archive": _JobStatus(),
 }
 
 

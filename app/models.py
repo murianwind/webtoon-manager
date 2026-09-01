@@ -108,3 +108,10 @@ class KakaoTitle:
     title_name: str
     is_adult: bool = False
     author_names: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ArchiveTarget:
+    title_id: str
+    dest_base_path: str
+    enabled: bool

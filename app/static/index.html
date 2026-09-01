@@ -20,6 +20,7 @@
     <button class="main-tab" data-page="episode-history">다운로드 이력</button>
     <button class="main-tab" data-page="manual-run">수동 실행</button>
     <button class="main-tab" data-page="job-history">실행 이력</button>
+    <button class="main-tab" data-page="archive">아카이빙</button>
     <button class="main-tab" data-page="settings">설정</button>
   </nav>
 
@@ -322,6 +323,82 @@
         <button id="btn-clear-job-history">전체 삭제</button>
       </div>
       <div id="job-history-list" class="job-history-list"></div>
+    </div>
+  </section>
+
+  <!-- 아카이빙 -->
+  <section id="page-archive" class="page hidden">
+    <div class="settings-card">
+      <h2>아카이빙 대상 웹툰</h2>
+      <p class="hint">지정한 웹툰은 정해진 주기마다(마지막 회차는 남기고) 아래 그릇 폴더로 옮겨집니다.
+      여러 웹툰이 같은 그릇 폴더를 고르면 자동으로 웹툰별 폴더로 나뉘고, 하나만 쓰면 그릇 폴더 바로 밑에 쌓입니다.</p>
+      <div class="registry-add-row">
+        <select id="archive-target-webtoon-select"></select>
+      </div>
+      <div id="archive-target-folder-picker"></div>
+      <button id="btn-add-archive-target" style="margin-top: 8px;">등록</button>
+      <span id="archive-target-add-result" class="hint-inline"></span>
+      <div id="archive-target-list" class="job-history-list" style="margin-top: 14px;"></div>
+    </div>
+
+    <div class="settings-card">
+      <h2>완결 자동이동 설정</h2>
+      <label><input type="checkbox" id="archive-on-finish-toggle" /> 완결된 웹툰을 구독해제하면 자동으로 전체 이동</label>
+      <p class="hint">지정 안 된 웹툰이 이 조건으로 트리거되면 아래 "기본 그릇 폴더"를 씁니다 (지정된 웹툰은 자기 폴더로).</p>
+      <div id="archive-default-folder-picker"></div>
+      <div class="field-group">
+        <label for="archive-conflict-policy">같은 이름 파일이 이미 있으면</label>
+        <select id="archive-conflict-policy">
+          <option value="skip">건너뛰기</option>
+          <option value="overwrite">덮어쓰기</option>
+          <option value="rename">이름 바꿔서 저장</option>
+        </select>
+      </div>
+      <button id="btn-save-archive-settings">저장</button>
+      <span id="archive-settings-save-result" class="hint-inline"></span>
+    </div>
+
+    <div class="settings-card">
+      <h2>실행 스케줄</h2>
+      <div class="schedule-block" data-job="archive_job">
+        <h3>아카이빙</h3>
+        <div class="schedule-controls"></div>
+      </div>
+      <p class="hint">다운로드와 둘 다 "특정 시각" 모드면, 아카이빙은 다운로드보다 최소 10분 뒤로만 설정할 수 있습니다.</p>
+      <button id="btn-save-archive-schedule">저장</button>
+      <span id="archive-schedule-save-result" class="error"></span>
+    </div>
+
+    <div class="settings-card">
+      <h2>수동 실행</h2>
+      <div id="archive-manual-select-list" class="chip-container"></div>
+      <button id="btn-run-archive-now" style="margin-top: 10px;">지금 이동</button>
+      <div class="job-status-block">
+        <h3>아카이빙 상태 <span id="archive-status-badge" class="badge">idle</span></h3>
+        <div id="archive-log" class="job-log"></div>
+      </div>
+    </div>
+
+    <div class="settings-card">
+      <h2>폴더 일괄 이동 (1회성)</h2>
+      <p class="hint">웹툰 지정과 무관하게, 아카이브 폴더 안에서 특정 폴더의 내용을 통째로 다른 폴더로 옮깁니다.</p>
+      <label>원본 폴더</label>
+      <div id="bulk-move-source-picker"></div>
+      <label>목적지 폴더</label>
+      <div id="bulk-move-dest-picker"></div>
+      <button id="btn-run-bulk-move" style="margin-top: 8px;">지금 이동</button>
+      <span id="bulk-move-result" class="hint-inline"></span>
+    </div>
+
+    <div class="settings-card">
+      <h2>아카이빙 이력</h2>
+      <div class="scroll-table-wrapper" id="archive-history-table-wrapper">
+        <table id="archive-history-table">
+          <thead><tr><th>작품</th><th>파일</th><th>구분</th><th>시각</th></tr></thead>
+          <tbody id="archive-history-tbody"></tbody>
+        </table>
+      </div>
+      <div id="archive-history-pagination" class="pagination"></div>
     </div>
   </section>
 

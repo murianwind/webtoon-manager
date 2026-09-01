@@ -18,6 +18,7 @@ LAN 전용, 인증 없음. 입력값 검증 실패 시 크래시 대신 명확�
 
 import asyncio
 import logging
+from pathlib import Path
 
 import aiohttp
 from fastapi import APIRouter, HTTPException, Request
@@ -37,6 +38,7 @@ from app import (
 from app import scheduler as scheduler_mod
 from app import kakao_api
 from app import webtoon_server_client
+from app import archiver
 from app.config import get_settings
 
 log = logging.getLogger(__name__)
@@ -136,8 +138,24 @@ async def subscribe(title_id: str):
 
 @router.post("/webtoons/{title_id}/unsubscribe", response_model=WebtoonOut)
 async def unsubscribe(title_id: str):
-    await asyncio.to_thread(_get_or_404, title_id)
+    wt = await asyncio.to_thread(_get_or_404, title_id)
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_UNSUBSCRIBED)
+
+    if wt.is_finished:
+        settings = get_settings()
+
+        async def _archive_after_unsubscribe():
+            try:
+                moved = await asyncio.to_thread(
+                    archiver.archive_all_for_finished_unsubscribe, settings.archive_root, settings.download_root, title_id
+                )
+                if moved:
+                    log.info("완결 구독해제 자동 아카이빙: %s, %d개 파일", title_id, moved)
+            except Exception as e:
+                log.error("완결 구독해제 자동 아카이빙 중 예외 (title_id=%s): %s", title_id, e)
+
+        asyncio.create_task(_archive_after_unsubscribe())
+
     return _to_out(await asyncio.to_thread(repository.get, title_id))
 
 
@@ -757,6 +775,7 @@ class SchedulesIn(BaseModel):
     discovery_job: JobScheduleIn
     download_job: JobScheduleIn
     report_job: JobScheduleIn
+    archive_job: JobScheduleIn
 
 
 def _schedule_to_dict(job_id: str) -> dict:
@@ -770,6 +789,24 @@ def _schedule_to_dict(job_id: str) -> dict:
     }
 
 
+def _validate_archive_schedule_gap(payload: "SchedulesIn") -> None:
+    """아카이빙이 다운로드 도중 파일을 옮기다 겹치는 걸 막기 위해, 둘 다 '특정 시각'
+    모드일 때는 아카이빙이 다운로드보다 최소 10분 뒤여야 한다. 다운로드가 '몇 분마다'
+    모드면(계속 도니 안전한 간격을 이 방식으로 보장할 수 없어서) 이 검증은 건너뛴다."""
+    archive_in = payload.archive_job
+    download_in = payload.download_job
+    if archive_in.mode != "cron" or download_in.mode != "cron":
+        return
+    download_minutes = download_in.cron_hour * 60 + download_in.cron_minute
+    archive_minutes = archive_in.cron_hour * 60 + archive_in.cron_minute
+    gap = (archive_minutes - download_minutes) % (24 * 60)
+    if gap < 10:
+        raise HTTPException(
+            status_code=422,
+            detail="아카이빙 시각은 다운로드 시각보다 최소 10분 뒤여야 합니다 (다운로드 도중 파일이 옮겨지는 걸 방지).",
+        )
+
+
 @router.get("/settings")
 async def get_schedules():
     return await asyncio.to_thread(
@@ -779,6 +816,7 @@ async def get_schedules():
 
 @router.post("/settings")
 async def update_schedules(payload: SchedulesIn, request: Request):
+    _validate_archive_schedule_gap(payload)
     for job_id, job_in in payload.model_dump().items():
         job_schedule = schedule_config.JobSchedule(**job_in)
         await asyncio.to_thread(schedule_config.set_schedule, job_id, job_schedule)
@@ -987,3 +1025,204 @@ async def trigger_discovery_job():
 async def trigger_download_job():
     asyncio.create_task(scheduler_mod.run_download_job())
     return {"status": "started"}
+
+
+# ── 아카이빙 ──────────────────────────────────────────────────
+
+class ArchiveTargetOut(BaseModel):
+    title_id: str
+    title_name: str
+    dest_base_path: str
+    enabled: bool
+
+
+class ArchiveTargetIn(BaseModel):
+    title_id: str
+    dest_base_path: str
+
+
+def _archive_target_to_out(target) -> ArchiveTargetOut:
+    wt = repository.get(target.title_id)
+    return ArchiveTargetOut(
+        title_id=target.title_id,
+        title_name=wt.title if wt else target.title_id,
+        dest_base_path=target.dest_base_path,
+        enabled=target.enabled,
+    )
+
+
+@router.get("/archive/targets", response_model=list[ArchiveTargetOut])
+async def list_archive_targets():
+    targets = await asyncio.to_thread(repository.list_archive_targets)
+    return [_archive_target_to_out(t) for t in targets]
+
+
+@router.post("/archive/targets", response_model=ArchiveTargetOut)
+async def add_archive_target(payload: ArchiveTargetIn):
+    settings = get_settings()
+    selectable = await asyncio.to_thread(
+        archiver.is_folder_selectable_as_dest, settings.archive_root, payload.dest_base_path
+    )
+    existing = await asyncio.to_thread(repository.get_archive_target, payload.title_id)
+    # 이미 이 웹툰이 그 경로를 쓰고 있었다면(경로 변경 없이 재저장) 통과시킨다 —
+    # "이미 파일 있어서 선택 불가" 규칙은 새로 그 폴더를 쓰기 시작하는 경우만 막는 것.
+    if not selectable and not (existing and existing.dest_base_path == payload.dest_base_path):
+        raise HTTPException(status_code=409, detail="이미 파일이 있는 폴더는 새 목적지로 지정할 수 없습니다.")
+
+    await asyncio.to_thread(repository.upsert_archive_target, payload.title_id, payload.dest_base_path, True)
+    target = await asyncio.to_thread(repository.get_archive_target, payload.title_id)
+    return _archive_target_to_out(target)
+
+
+@router.post("/archive/targets/{title_id}/enable", response_model=ArchiveTargetOut)
+async def enable_archive_target(title_id: str):
+    await asyncio.to_thread(repository.set_archive_target_enabled, title_id, True)
+    target = await asyncio.to_thread(repository.get_archive_target, title_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="등록된 아카이빙 대상이 아닙니다.")
+    return _archive_target_to_out(target)
+
+
+@router.post("/archive/targets/{title_id}/disable", response_model=ArchiveTargetOut)
+async def disable_archive_target(title_id: str):
+    await asyncio.to_thread(repository.set_archive_target_enabled, title_id, False)
+    target = await asyncio.to_thread(repository.get_archive_target, title_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="등록된 아카이빙 대상이 아닙니다.")
+    return _archive_target_to_out(target)
+
+
+@router.delete("/archive/targets/{title_id}")
+async def remove_archive_target(title_id: str):
+    await asyncio.to_thread(repository.delete_archive_target, title_id)
+    return {"status": "deleted"}
+
+
+class ArchiveSettingsOut(BaseModel):
+    default_base_path: str
+    conflict_policy: str
+    on_finish_unsubscribe: bool
+
+
+class ArchiveSettingsIn(BaseModel):
+    default_base_path: str
+    conflict_policy: str
+    on_finish_unsubscribe: bool
+
+    @field_validator("conflict_policy")
+    @classmethod
+    def valid_policy(cls, v: str) -> str:
+        if v not in ("overwrite", "skip", "rename"):
+            raise ValueError("conflict_policy는 overwrite/skip/rename 중 하나여야 합니다.")
+        return v
+
+
+@router.get("/archive/settings", response_model=ArchiveSettingsOut)
+async def get_archive_settings():
+    default_base_path = await asyncio.to_thread(archiver.get_default_base_path)
+    conflict_policy = await asyncio.to_thread(archiver.get_conflict_policy)
+    on_finish = await asyncio.to_thread(archiver.is_finish_unsubscribe_archiving_enabled)
+    return ArchiveSettingsOut(
+        default_base_path=default_base_path or "", conflict_policy=conflict_policy, on_finish_unsubscribe=on_finish
+    )
+
+
+@router.post("/archive/settings", response_model=ArchiveSettingsOut)
+async def set_archive_settings(payload: ArchiveSettingsIn):
+    await asyncio.to_thread(repository.set_setting, "archive_default_base_path", payload.default_base_path.strip() or None)
+    await asyncio.to_thread(repository.set_setting, "archive_conflict_policy", payload.conflict_policy)
+    await asyncio.to_thread(
+        repository.set_setting, "archive_on_finish_unsubscribe", "1" if payload.on_finish_unsubscribe else None
+    )
+    return await get_archive_settings()
+
+
+@router.get("/archive/folders")
+async def list_archive_folders(path: str = ""):
+    """ARCHIVE_ROOT 기준 하위 폴더 목록을 보여준다 — 폴더 찾아보기 UI용.
+    각 폴더가 이미 파일을 갖고 있어서 선택 불가능한지도 같이 알려준다."""
+    settings = get_settings()
+    root = Path(settings.archive_root).resolve()
+    target = (root / path).resolve()
+    if root != target and root not in target.parents:
+        raise HTTPException(status_code=400, detail="잘못된 경로입니다.")
+    if not target.exists():
+        return {"path": path, "folders": []}
+    folders = []
+    for entry in sorted(target.iterdir()):
+        if entry.is_dir():
+            rel = str(entry.relative_to(root))
+            selectable = await asyncio.to_thread(archiver.is_folder_selectable_as_dest, settings.archive_root, rel)
+            folders.append({"name": entry.name, "path": rel, "selectable": selectable})
+    return {"path": path, "folders": folders}
+
+
+class CreateFolderIn(BaseModel):
+    path: str
+
+
+@router.post("/archive/folders")
+async def create_archive_folder(payload: CreateFolderIn):
+    settings = get_settings()
+    root = Path(settings.archive_root).resolve()
+    target = (root / payload.path).resolve()
+    if root != target and root not in target.parents:
+        raise HTTPException(status_code=400, detail="잘못된 경로입니다.")
+    await asyncio.to_thread(target.mkdir, parents=True, exist_ok=True)
+    return {"path": payload.path}
+
+
+class ArchiveRunIn(BaseModel):
+    title_ids: list[str] = []
+
+
+@router.post("/archive/run")
+async def run_archive_now(payload: ArchiveRunIn):
+    settings = get_settings()
+    job_status.start("archive")
+
+    async def _run():
+        try:
+            if payload.title_ids:
+                moved = await asyncio.to_thread(
+                    archiver.manual_archive_now, settings.archive_root, settings.download_root, payload.title_ids
+                )
+            else:
+                all_ids = [t.title_id for t in repository.list_archive_targets() if t.enabled]
+                moved = await asyncio.to_thread(
+                    archiver.manual_archive_now, settings.archive_root, settings.download_root, all_ids
+                )
+            job_status.log_line("archive", f"{moved}개 파일 이동 완료")
+            job_status.finish("archive", success=True)
+        except Exception as e:
+            job_status.log_line("archive", f"오류: {e}")
+            job_status.finish("archive", success=False)
+
+    asyncio.create_task(_run())
+    return {"status": "started"}
+
+
+@router.get("/archive/history")
+async def get_archive_history(page: int = 1):
+    items, total = await asyncio.to_thread(repository.list_archive_history, page)
+    return {"items": items, "total": total, "page": page, "page_size": 30}
+
+
+class BulkMoveIn(BaseModel):
+    source_path: str
+    dest_path: str
+
+
+@router.post("/archive/bulk-move")
+async def bulk_move(payload: BulkMoveIn):
+    settings = get_settings()
+    try:
+        moved = await asyncio.to_thread(
+            archiver.bulk_move_folder, settings.archive_root, payload.source_path, payload.dest_path
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await asyncio.to_thread(
+        repository.add_archive_history, "-", f"{payload.source_path} → {payload.dest_path}", f"{moved}개 항목", "bulk_move"
+    )
+    return {"moved": moved}

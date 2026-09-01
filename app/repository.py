@@ -10,7 +10,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from app.db import get_connection, write_transaction
-from app.models import WatchedAuthor, WatchedTag, WebtoonRecord
+from app.models import ArchiveTarget, WatchedAuthor, WatchedTag, WebtoonRecord
 
 STATUS_ACTIVE = "active"
 STATUS_UNSUBSCRIBED = "unsubscribed"
@@ -340,6 +340,92 @@ def add_seen_kakao_title(author_name: str, title_id: int, title_name: str) -> No
             "INSERT OR IGNORE INTO kakao_seen_titles (author_name, title_id, title_name, seen_at) VALUES (?, ?, ?, ?)",
             (author_name, title_id, title_name, _now()),
         )
+
+
+# ── archive_targets (아카이빙 대상 웹툰 + 목적지 그릇 폴더) ──────────────
+
+def list_archive_targets() -> list[ArchiveTarget]:
+    rows = get_connection().execute("SELECT * FROM archive_targets ORDER BY title_id").fetchall()
+    return [
+        ArchiveTarget(title_id=r["title_id"], dest_base_path=r["dest_base_path"], enabled=bool(r["enabled"]))
+        for r in rows
+    ]
+
+
+def get_archive_target(title_id: str) -> ArchiveTarget | None:
+    row = get_connection().execute("SELECT * FROM archive_targets WHERE title_id = ?", (title_id,)).fetchone()
+    if row is None:
+        return None
+    return ArchiveTarget(title_id=row["title_id"], dest_base_path=row["dest_base_path"], enabled=bool(row["enabled"]))
+
+
+def upsert_archive_target(title_id: str, dest_base_path: str, enabled: bool = True) -> None:
+    now = _now()
+    with write_transaction() as conn:
+        existing = conn.execute("SELECT 1 FROM archive_targets WHERE title_id = ?", (title_id,)).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE archive_targets SET dest_base_path = ?, enabled = ?, updated_at = ? WHERE title_id = ?",
+                (dest_base_path, int(enabled), now, title_id),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO archive_targets (title_id, dest_base_path, enabled, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (title_id, dest_base_path, int(enabled), now, now),
+            )
+
+
+def set_archive_target_enabled(title_id: str, enabled: bool) -> None:
+    with write_transaction() as conn:
+        conn.execute(
+            "UPDATE archive_targets SET enabled = ?, updated_at = ? WHERE title_id = ?",
+            (int(enabled), _now(), title_id),
+        )
+
+
+def delete_archive_target(title_id: str) -> None:
+    with write_transaction() as conn:
+        conn.execute("DELETE FROM archive_targets WHERE title_id = ?", (title_id,))
+
+
+def count_archive_targets_with_base_path(dest_base_path: str) -> int:
+    row = get_connection().execute(
+        "SELECT COUNT(*) AS c FROM archive_targets WHERE dest_base_path = ? AND enabled = 1", (dest_base_path,)
+    ).fetchone()
+    return row["c"]
+
+
+# ── archive_history (아카이빙 실행 이력) ─────────────────────────────
+
+def add_archive_history(title_id: str, title_name: str, file_name: str, trigger_type: str) -> None:
+    with write_transaction() as conn:
+        conn.execute(
+            "INSERT INTO archive_history (title_id, title_name, file_name, archived_at, trigger_type) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (title_id, title_name, file_name, _now(), trigger_type),
+        )
+
+
+def list_archive_history(page: int = 1, page_size: int = 30) -> tuple[list[dict], int]:
+    conn = get_connection()
+    total = conn.execute("SELECT COUNT(*) AS c FROM archive_history").fetchone()["c"]
+    rows = conn.execute(
+        "SELECT * FROM archive_history ORDER BY archived_at DESC LIMIT ? OFFSET ?",
+        (page_size, (page - 1) * page_size),
+    ).fetchall()
+    items = [
+        {
+            "id": r["id"],
+            "title_id": r["title_id"],
+            "title_name": r["title_name"],
+            "file_name": r["file_name"],
+            "archived_at": r["archived_at"],
+            "trigger_type": r["trigger_type"],
+        }
+        for r in rows
+    ]
+    return items, total
 
 
 # ── watched_tags (태그 자동추가 레지스트리) ────────────────────────

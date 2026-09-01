@@ -25,7 +25,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app import comicinfo, cookie_health, discord_bot, discord_notify, job_status, naver_api, repository, schedule_config, tracker, webtoon_server_client
+from app import archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, naver_api, repository, schedule_config, tracker, webtoon_server_client
 from app.config import Settings, get_settings
 from app.cookie_loader import get_adult_cookies
 from app.downloader import download_single_episode
@@ -40,12 +40,14 @@ DEFAULT_SCHEDULES: dict[str, JobSchedule] = {
     "discovery_job": JobSchedule(mode="interval", interval_minutes=360),
     "download_job": JobSchedule(mode="interval", interval_minutes=60),
     "report_job": JobSchedule(mode="off"),  # 사용자가 원하는 시각으로 직접 설정해야 켜짐
+    "archive_job": JobSchedule(mode="off"),
 }
 
 # 정기 스케줄 실행과 "수동 실행" 버튼이 겹치는 걸 막는 잡별 락 (동시성 문제 방지).
 _download_job_lock = asyncio.Lock()
 _discovery_job_lock = asyncio.Lock()
 _report_job_lock = asyncio.Lock()
+_archive_job_lock = asyncio.Lock()
 
 
 async def _download_new_episodes_for_one(
@@ -322,6 +324,23 @@ async def run_report_job(force_test: bool = False) -> None:
         await _run_report_job_impl(force_test=force_test)
 
 
+async def run_archive_job() -> None:
+    if _archive_job_lock.locked():
+        job_status.log_line("archive", "이미 실행 중이라 건너뜁니다 (중복 실행 방지)")
+        return
+    async with _archive_job_lock:
+        settings = get_settings()
+        job_status.start("archive")
+        try:
+            moved = await asyncio.to_thread(archiver.run_periodic_archive, settings.archive_root, settings.download_root)
+            job_status.log_line("archive", f"{moved}개 파일 이동 완료")
+            job_status.finish("archive", success=True)
+        except Exception as e:
+            log.error("아카이빙 잡 중 예외: %s", e)
+            job_status.log_line("archive", f"오류: {e}")
+            job_status.finish("archive", success=False)
+
+
 async def _run_report_job_impl(force_test: bool = False) -> None:
     settings = get_settings()
     job_status.start("report")
@@ -501,6 +520,7 @@ _JOB_FUNCS = {
     "discovery_job": run_discovery_job,
     "download_job": run_download_job,
     "report_job": run_report_job,
+    "archive_job": run_archive_job,
 }
 
 

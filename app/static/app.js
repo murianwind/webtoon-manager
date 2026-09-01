@@ -5,7 +5,7 @@ const STATUS_LABEL = {
 };
 
 const DAY_LABEL = { mon: "월", tue: "화", wed: "수", thu: "목", fri: "금", sat: "토", sun: "일" };
-const SCHEDULE_JOB_IDS = ["discovery_job", "download_job", "report_job"];
+const SCHEDULE_JOB_IDS = ["discovery_job", "download_job", "report_job", "archive_job"];
 
 async function apiCall(path, options = {}) {
   const res = await fetch(path, {
@@ -125,6 +125,7 @@ const pageLoaders = {
   "episode-history": () => loadEpisodeHistory(1),
   "manual-run": loadManualRunPage,
   "job-history": loadJobHistoryPage,
+  archive: loadArchivePage,
   settings: loadSettingsPage,
 };
 
@@ -1477,8 +1478,339 @@ document.getElementById("btn-save-retention-days").addEventListener("click", asy
 restoreNaverListPrefs();
 
 const savedTab = sessionStorage.getItem(ACTIVE_TAB_KEY);
+// ── 아카이빙 ─────────────────────────────────────────────
+
+let archiveFolderPickerState = {}; // pickerId -> 현재 탐색 중인 경로
+
+function renderFolderPicker(containerId, onSelect, initialPath) {
+  const container = document.getElementById(containerId);
+  archiveFolderPickerState[containerId] = initialPath || "";
+  renderFolderPickerContents(containerId, onSelect);
+}
+
+async function renderFolderPickerContents(containerId, onSelect) {
+  const container = document.getElementById(containerId);
+  const currentPath = archiveFolderPickerState[containerId] || "";
+  container.innerHTML = '<p class="hint-inline">불러오는 중...</p>';
+  try {
+    const data = await apiCall(`/api/archive/folders?path=${encodeURIComponent(currentPath)}`);
+    container.innerHTML = "";
+
+    const pathRow = document.createElement("div");
+    pathRow.className = "folder-picker-path";
+    pathRow.textContent = `현재 위치: /${currentPath}`;
+    container.appendChild(pathRow);
+
+    const listBox = document.createElement("div");
+    listBox.className = "folder-picker-list";
+
+    if (currentPath) {
+      const upBtn = makeButton("⬆ 상위 폴더", () => {
+        archiveFolderPickerState[containerId] = currentPath.split("/").slice(0, -1).join("/");
+        renderFolderPickerContents(containerId, onSelect);
+      });
+      listBox.appendChild(upBtn);
+    }
+
+    for (const folder of data.folders) {
+      const row = document.createElement("div");
+      row.className = "folder-picker-row";
+      const nameBtn = makeButton(`📁 ${folder.name}`, () => {
+        archiveFolderPickerState[containerId] = folder.path;
+        renderFolderPickerContents(containerId, onSelect);
+      });
+      row.appendChild(nameBtn);
+      const selectBtn = makeButton(folder.selectable ? "이 폴더 선택" : "이미 파일 있음", () => onSelect(folder.path));
+      selectBtn.disabled = !folder.selectable;
+      row.appendChild(selectBtn);
+      listBox.appendChild(row);
+    }
+    container.appendChild(listBox);
+
+    const selectHereBtn = makeButton(`"/${currentPath || "(최상위)"}" 여기로 선택`, () => onSelect(currentPath));
+    container.appendChild(selectHereBtn);
+
+    const newFolderRow = document.createElement("div");
+    newFolderRow.className = "registry-add-row";
+    const newFolderInput = document.createElement("input");
+    newFolderInput.type = "text";
+    newFolderInput.placeholder = "새 폴더 이름";
+    const newFolderBtn = makeButton("새 폴더 만들기", async () => {
+      const name = newFolderInput.value.trim();
+      if (!name) return;
+      const newPath = currentPath ? `${currentPath}/${name}` : name;
+      await apiCall("/api/archive/folders", { method: "POST", body: JSON.stringify({ path: newPath }) });
+      archiveFolderPickerState[containerId] = newPath;
+      renderFolderPickerContents(containerId, onSelect);
+    });
+    newFolderRow.appendChild(newFolderInput);
+    newFolderRow.appendChild(newFolderBtn);
+    container.appendChild(newFolderRow);
+  } catch (e) {
+    container.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+  }
+}
+
+let archiveSelectedTargetPath = "";
+let archiveSelectedDefaultPath = "";
+let archiveSelectedBulkSourcePath = "";
+let archiveSelectedBulkDestPath = "";
+
+async function loadArchivePage() {
+  await loadArchiveTargetWebtoonOptions();
+  renderFolderPicker("archive-target-folder-picker", (path) => {
+    archiveSelectedTargetPath = path;
+    document.getElementById("archive-target-folder-picker").previousElementSibling;
+  });
+  renderFolderPicker("archive-default-folder-picker", (path) => {
+    archiveSelectedDefaultPath = path;
+  });
+  renderFolderPicker("bulk-move-source-picker", (path) => {
+    archiveSelectedBulkSourcePath = path;
+  });
+  renderFolderPicker("bulk-move-dest-picker", (path) => {
+    archiveSelectedBulkDestPath = path;
+  });
+  await loadArchiveTargetList();
+  await loadArchiveSettings();
+  await loadArchiveManualSelectList();
+  await refreshArchiveJobStatus();
+  await loadArchiveHistory(1);
+
+  try {
+    const schedules = await apiCall("/api/settings");
+    const block = document.querySelector('.schedule-block[data-job="archive_job"] .schedule-controls');
+    block.innerHTML = "";
+    block.appendChild(buildScheduleControls("archive_job", schedules["archive_job"]));
+  } catch (e) {
+    // 조용히 무시
+  }
+}
+
+async function loadArchiveTargetWebtoonOptions() {
+  const select = document.getElementById("archive-target-webtoon-select");
+  try {
+    const webtoons = await apiCall("/api/webtoons?status=active");
+    select.innerHTML = "";
+    for (const w of webtoons) {
+      const opt = document.createElement("option");
+      opt.value = w.title_id;
+      opt.textContent = w.title;
+      select.appendChild(opt);
+    }
+  } catch (e) {
+    select.innerHTML = `<option>${escapeHtml(e.message)}</option>`;
+  }
+}
+
+async function loadArchiveTargetList() {
+  const container = document.getElementById("archive-target-list");
+  try {
+    const targets = await apiCall("/api/archive/targets");
+    container.innerHTML = "";
+    if (targets.length === 0) {
+      container.innerHTML = '<p class="chip-empty-message">지정된 아카이빙 대상이 없습니다.</p>';
+      return;
+    }
+    for (const t of targets) {
+      const entry = document.createElement("div");
+      entry.className = "job-history-entry";
+      const summary = document.createElement("div");
+      summary.className = "job-history-summary";
+      summary.innerHTML = `
+        <span class="job-history-name">${escapeHtml(t.title_name)}</span>
+        <span class="job-history-time">/${escapeHtml(t.dest_base_path)}</span>
+        <span class="badge">${t.enabled ? "사용중" : "꺼짐"}</span>
+      `;
+      const toggleBtn = makeButton(t.enabled ? "끄기" : "켜기", async (ev) => {
+        ev.stopPropagation();
+        await apiCall(`/api/archive/targets/${encodeURIComponent(t.title_id)}/${t.enabled ? "disable" : "enable"}`, { method: "POST" });
+        loadArchiveTargetList();
+        loadArchiveManualSelectList();
+      });
+      const deleteBtn = makeButton("삭제", async (ev) => {
+        ev.stopPropagation();
+        await apiCall(`/api/archive/targets/${encodeURIComponent(t.title_id)}`, { method: "DELETE" });
+        loadArchiveTargetList();
+        loadArchiveManualSelectList();
+      });
+      summary.appendChild(toggleBtn);
+      summary.appendChild(deleteBtn);
+      entry.appendChild(summary);
+      container.appendChild(entry);
+    }
+  } catch (e) {
+    container.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+  }
+}
+
+document.getElementById("btn-add-archive-target").addEventListener("click", async () => {
+  const resultEl = document.getElementById("archive-target-add-result");
+  const titleId = document.getElementById("archive-target-webtoon-select").value;
+  if (!titleId) return;
+  if (!archiveSelectedTargetPath) {
+    resultEl.textContent = "폴더를 먼저 선택하세요.";
+    return;
+  }
+  resultEl.textContent = "";
+  try {
+    await apiCall("/api/archive/targets", {
+      method: "POST",
+      body: JSON.stringify({ title_id: titleId, dest_base_path: archiveSelectedTargetPath }),
+    });
+    resultEl.style.color = "";
+    resultEl.textContent = "등록했습니다.";
+    loadArchiveTargetList();
+    loadArchiveManualSelectList();
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+});
+
+async function loadArchiveSettings() {
+  try {
+    const data = await apiCall("/api/archive/settings");
+    document.getElementById("archive-on-finish-toggle").checked = data.on_finish_unsubscribe;
+    document.getElementById("archive-conflict-policy").value = data.conflict_policy;
+    archiveSelectedDefaultPath = data.default_base_path;
+  } catch (e) {
+    // 조용히 무시
+  }
+}
+
+document.getElementById("btn-save-archive-settings").addEventListener("click", async () => {
+  const resultEl = document.getElementById("archive-settings-save-result");
+  resultEl.textContent = "";
+  try {
+    await apiCall("/api/archive/settings", {
+      method: "POST",
+      body: JSON.stringify({
+        default_base_path: archiveSelectedDefaultPath || "",
+        conflict_policy: document.getElementById("archive-conflict-policy").value,
+        on_finish_unsubscribe: document.getElementById("archive-on-finish-toggle").checked,
+      }),
+    });
+    resultEl.style.color = "";
+    resultEl.textContent = "저장했습니다.";
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+});
+
+document.getElementById("btn-save-archive-schedule").addEventListener("click", async () => {
+  const resultEl = document.getElementById("archive-schedule-save-result");
+  resultEl.textContent = "";
+  try {
+    const current = await apiCall("/api/settings");
+    const archiveControls = document.querySelector('.schedule-block[data-job="archive_job"] .schedule-controls');
+    const updated = { ...current, archive_job: readScheduleControls(archiveControls) };
+    await apiCall("/api/settings", { method: "POST", body: JSON.stringify(updated) });
+    resultEl.textContent = "저장했습니다.";
+    resultEl.style.color = "";
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+});
+
+async function loadArchiveManualSelectList() {
+  const container = document.getElementById("archive-manual-select-list");
+  try {
+    const targets = await apiCall("/api/archive/targets");
+    container.innerHTML = "";
+    const enabled = targets.filter((t) => t.enabled);
+    if (enabled.length === 0) {
+      container.innerHTML = '<p class="chip-empty-message">지정된 대상이 없습니다.</p>';
+      return;
+    }
+    for (const t of enabled) {
+      const label = document.createElement("label");
+      label.className = "chip chip-available";
+      label.innerHTML = `<input type="checkbox" value="${escapeHtml(t.title_id)}" style="margin-right:6px;" />${escapeHtml(t.title_name)}`;
+      container.appendChild(label);
+    }
+  } catch (e) {
+    container.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+  }
+}
+
+document.getElementById("btn-run-archive-now").addEventListener("click", async () => {
+  const checked = Array.from(document.querySelectorAll("#archive-manual-select-list input:checked")).map((el) => el.value);
+  await apiCall("/api/archive/run", { method: "POST", body: JSON.stringify({ title_ids: checked }) });
+  refreshArchiveJobStatus();
+});
+
+async function refreshArchiveJobStatus() {
+  try {
+    const statuses = await apiCall("/api/jobs/status");
+    const s = statuses.archive;
+    if (!s) return;
+    document.getElementById("archive-status-badge").textContent = s.status;
+    renderJobLog("archive", s.log || []);
+  } catch (e) {
+    // 조용히 무시
+  }
+}
+
+document.getElementById("btn-run-bulk-move").addEventListener("click", async () => {
+  const resultEl = document.getElementById("bulk-move-result");
+  resultEl.textContent = "";
+  if (!archiveSelectedBulkSourcePath || !archiveSelectedBulkDestPath) {
+    resultEl.textContent = "원본/목적지 폴더를 모두 선택하세요.";
+    return;
+  }
+  try {
+    const data = await apiCall("/api/archive/bulk-move", {
+      method: "POST",
+      body: JSON.stringify({ source_path: archiveSelectedBulkSourcePath, dest_path: archiveSelectedBulkDestPath }),
+    });
+    resultEl.style.color = "";
+    resultEl.textContent = `${data.moved}개 항목 이동 완료했습니다.`;
+    loadArchiveHistory(1);
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+});
+
+async function loadArchiveHistory(page) {
+  const tbody = document.getElementById("archive-history-tbody");
+  tbody.innerHTML = "";
+  try {
+    const data = await apiCall(`/api/archive/history?page=${page}`);
+    for (const item of data.items) {
+      const tr = document.createElement("tr");
+      const triggerLabel = { periodic: "주기적", manual: "수동", finish_unsubscribe: "완결자동", bulk_move: "일괄이동" }[item.trigger_type] || item.trigger_type;
+      tr.innerHTML = `
+        <td>${escapeHtml(item.title_name)}</td>
+        <td>${escapeHtml(item.file_name)}</td>
+        <td>${escapeHtml(triggerLabel)}</td>
+        <td>${escapeHtml(formatKoreanTime(item.archived_at))}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+    renderArchiveHistoryPagination(data.page, data.total, data.page_size);
+    requestAnimationFrame(() => fitScrollWrapperToViewport("archive-history-table-wrapper", 60));
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="4" class="error">${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderArchiveHistoryPagination(page, total, pageSize) {
+  const container = document.getElementById("archive-history-pagination");
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  container.innerHTML = "";
+  if (totalPages <= 1) return;
+  if (page > 1) container.appendChild(makeButton("이전", () => loadArchiveHistory(page - 1)));
+  const label = document.createElement("span");
+  label.textContent = ` ${page} / ${totalPages} `;
+  container.appendChild(label);
+  if (page < totalPages) container.appendChild(makeButton("다음", () => loadArchiveHistory(page + 1)));
+}
+
+
 if (savedTab && document.getElementById(`page-${savedTab}`)) {
   switchToTab(savedTab);
 } else {
   loadNaverList();
 }
+
+

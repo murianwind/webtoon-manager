@@ -17,6 +17,7 @@ services:
       - "${WEB_PORT:-8000}:8000"
     environment:
       DOWNLOAD_ROOT: /webtoon_download
+      ARCHIVE_ROOT: /webtoon_archive
       DATABASE_PATH: /data/webtoons.db
       COOKIE_FILE_PATH: /cookies/${COOKIE_FILE_NAME:-cookies.json}
     volumes:
@@ -26,6 +27,9 @@ services:
       # 폴더에 빈 "Webtoon_Download" 폴더가 계속 생겨나는 부작용이 있었다(쿠키 폴더에서
       # 겪었던 것과 정확히 같은 문제 — 그때 쿠키만 고치고 이건 놓쳤었다).
       - ${WEBTOON_DOWNLOAD_HOST_PATH}:/webtoon_download
+      # 아카이빙(다운로드 폴더에서 별도 보관 폴더로 이동) 대상 경로. 같은 이유로
+      # /data나 /webtoon_download 밑이 아니라 완전히 별도 최상위 경로로 마운트한다.
+      - ${WEBTOON_ARCHIVE_HOST_PATH}:/webtoon_archive
       # DB/설정 영속 볼륨
       - ${APP_DATA_HOST_PATH}:/data
       # 브라우저 쿠키 export 파일이 들어있는 폴더 (파일명은 COOKIE_FILE_NAME으로 지정)

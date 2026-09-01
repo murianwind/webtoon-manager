@@ -58,6 +58,24 @@ CREATE TABLE IF NOT EXISTS kakao_seen_titles (
     PRIMARY KEY (author_name, title_id)
 );
 
+CREATE TABLE IF NOT EXISTS archive_targets (
+    title_id TEXT PRIMARY KEY,
+    dest_base_path TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS archive_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title_id TEXT NOT NULL,
+    title_name TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    archived_at TEXT NOT NULL,
+    trigger_type TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_archive_history_archived_at ON archive_history(archived_at DESC);
+
 CREATE TABLE IF NOT EXISTS watched_tags (
     tag_id TEXT PRIMARY KEY,
     tag_name TEXT NOT NULL DEFAULT '',

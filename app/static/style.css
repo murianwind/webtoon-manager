@@ -627,3 +627,27 @@ button:hover { border-color: var(--accent); }
   margin-top: 10px;
 }
 
+/* 아카이빙 폴더 선택기 */
+.folder-picker-path {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.folder-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 8px;
+}
+.folder-picker-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.folder-picker-row button:first-child {
+  flex: 1;
+  text-align: left;
+}
+
