@@ -557,6 +557,7 @@ button:hover { border-color: var(--accent); }
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
+  flex-shrink: 0;
 }
 .job-history-summary {
   display: flex;
