@@ -141,20 +141,11 @@ async def unsubscribe(title_id: str):
     wt = await asyncio.to_thread(_get_or_404, title_id)
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_UNSUBSCRIBED)
 
-    if wt.is_finished:
-        settings = get_settings()
-
-        async def _archive_after_unsubscribe():
-            try:
-                moved = await asyncio.to_thread(
-                    archiver.archive_all_for_finished_unsubscribe, settings.archive_root, settings.download_root, title_id
-                )
-                if moved:
-                    log.info("완결 구독해제 자동 아카이빙: %s, %d개 파일", title_id, moved)
-            except Exception as e:
-                log.error("완결 구독해제 자동 아카이빙 중 예외 (title_id=%s): %s", title_id, e)
-
-        asyncio.create_task(_archive_after_unsubscribe())
+    if wt.is_finished and archiver.is_finish_unsubscribe_archiving_enabled():
+        # 즉시 옮기지 않고 대기열에만 넣는다 — 실제 이동은 다음 아카이빙 스케줄이
+        # 돌 때(run_archive_job) 같이 처리된다. 다운로드 도중과 안 겹치게 하는
+        # 기존 안전장치(10분 간격 검증 등)를 이 트리거도 그대로 타게 하기 위함.
+        await asyncio.to_thread(repository.add_pending_finish_archive, title_id)
 
     return _to_out(await asyncio.to_thread(repository.get, title_id))
 
@@ -1187,12 +1178,19 @@ async def run_archive_now(payload: ArchiveRunIn):
                 moved = await asyncio.to_thread(
                     archiver.manual_archive_now, settings.archive_root, settings.download_root, payload.title_ids
                 )
+                job_status.log_line("archive", f"{moved}개 파일 이동 완료")
             else:
                 all_ids = [t.title_id for t in repository.list_archive_targets() if t.enabled]
                 moved = await asyncio.to_thread(
                     archiver.manual_archive_now, settings.archive_root, settings.download_root, all_ids
                 )
-            job_status.log_line("archive", f"{moved}개 파일 이동 완료")
+                job_status.log_line("archive", f"지정 웹툰 {moved}개 파일 이동 완료")
+
+                pending_moved = await asyncio.to_thread(
+                    archiver.process_pending_finish_archives, settings.archive_root, settings.download_root
+                )
+                job_status.log_line("archive", f"완결 구독해제 대기열 {pending_moved}개 파일 이동 완료")
+
             job_status.finish("archive", success=True)
         except Exception as e:
             job_status.log_line("archive", f"오류: {e}")

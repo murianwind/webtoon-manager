@@ -76,6 +76,11 @@ CREATE TABLE IF NOT EXISTS archive_history (
 );
 CREATE INDEX IF NOT EXISTS idx_archive_history_archived_at ON archive_history(archived_at DESC);
 
+CREATE TABLE IF NOT EXISTS archive_pending_finish (
+    title_id TEXT PRIMARY KEY,
+    marked_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS watched_tags (
     tag_id TEXT PRIMARY KEY,
     tag_name TEXT NOT NULL DEFAULT '',

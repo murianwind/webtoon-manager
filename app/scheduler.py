@@ -333,7 +333,13 @@ async def run_archive_job() -> None:
         job_status.start("archive")
         try:
             moved = await asyncio.to_thread(archiver.run_periodic_archive, settings.archive_root, settings.download_root)
-            job_status.log_line("archive", f"{moved}개 파일 이동 완료")
+            job_status.log_line("archive", f"지정 웹툰 {moved}개 파일 이동 완료")
+
+            pending_moved = await asyncio.to_thread(
+                archiver.process_pending_finish_archives, settings.archive_root, settings.download_root
+            )
+            job_status.log_line("archive", f"완결 구독해제 대기열 {pending_moved}개 파일 이동 완료")
+
             job_status.finish("archive", success=True)
         except Exception as e:
             log.error("아카이빙 잡 중 예외: %s", e)

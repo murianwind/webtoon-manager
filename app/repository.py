@@ -407,6 +407,26 @@ def add_archive_history(title_id: str, title_name: str, file_name: str, trigger_
         )
 
 
+# ── archive_pending_finish (완결 구독해제 이동 대기열 — 다음 아카이빙 주기 때 처리) ──
+
+def add_pending_finish_archive(title_id: str) -> None:
+    with write_transaction() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO archive_pending_finish (title_id, marked_at) VALUES (?, ?)",
+            (title_id, _now()),
+        )
+
+
+def list_pending_finish_archive() -> list[str]:
+    rows = get_connection().execute("SELECT title_id FROM archive_pending_finish").fetchall()
+    return [r["title_id"] for r in rows]
+
+
+def remove_pending_finish_archive(title_id: str) -> None:
+    with write_transaction() as conn:
+        conn.execute("DELETE FROM archive_pending_finish WHERE title_id = ?", (title_id,))
+
+
 def list_archive_history(page: int = 1, page_size: int = 30) -> tuple[list[dict], int]:
     conn = get_connection()
     total = conn.execute("SELECT COUNT(*) AS c FROM archive_history").fetchone()["c"]

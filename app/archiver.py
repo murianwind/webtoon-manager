@@ -167,30 +167,35 @@ def manual_archive_now(archive_root: str, download_root: str, title_ids: list[st
     return total
 
 
-def archive_all_for_finished_unsubscribe(archive_root: str, download_root: str, title_id: str) -> int:
-    """완결 후 구독해제 시 자동 전체이동 — 지정돼 있으면 그 경로, 아니면 기본 경로.
-    마지막 파일 예외 없이 전부 옮긴다."""
+def process_pending_finish_archives(archive_root: str, download_root: str) -> int:
+    """완결 구독해제로 대기열에 쌓인 웹툰들을 처리한다 — 아카이빙 주기가 돌 때
+    run_periodic_archive와 함께 호출된다(즉시 실행 대신 같은 주기에 묶임)."""
     if not is_finish_unsubscribe_archiving_enabled():
         return 0
 
-    wt = repository.get(title_id)
-    if wt is None:
-        return 0
+    total = 0
+    for title_id in repository.list_pending_finish_archive():
+        wt = repository.get(title_id)
+        if wt is None:
+            repository.remove_pending_finish_archive(title_id)
+            continue
 
-    target = repository.get_archive_target(title_id)
-    if target is not None and target.enabled:
-        base_path = target.dest_base_path
-    else:
-        base_path = get_default_base_path()
-        if not base_path:
-            log.warning("완결 자동이동 기본 경로가 설정 안 되어 있어 건너뜀 (title_id=%s)", title_id)
-            return 0
+        target = repository.get_archive_target(title_id)
+        if target is not None and target.enabled:
+            base_path = target.dest_base_path
+        else:
+            base_path = get_default_base_path()
+            if not base_path:
+                log.warning("완결 자동이동 기본 경로가 설정 안 되어 있어 건너뜀 (title_id=%s)", title_id)
+                continue
 
-    policy = get_conflict_policy()
-    return _archive_title(
-        archive_root, download_root, title_id, wt.title,
-        base_path, policy, "finish_unsubscribe", keep_last=False,
-    )
+        policy = get_conflict_policy()
+        total += _archive_title(
+            archive_root, download_root, title_id, wt.title,
+            base_path, policy, "finish_unsubscribe", keep_last=False,
+        )
+        repository.remove_pending_finish_archive(title_id)
+    return total
 
 
 def bulk_move_folder(archive_root: str, source_path: str, dest_path: str) -> int:
