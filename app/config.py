@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # 경로
-    download_root: str = "/data/Webtoon_Download"
+    download_root: str = "/webtoon_download"
     database_path: str = "/data/webtoons.db"
     cookie_file_path: str = "/cookies/chokobo_murian.json"
 

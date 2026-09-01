@@ -41,6 +41,26 @@ function formatKoreanTimeOnly(isoString) {
   return formatKoreanTime(isoString, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 }
 
+// 페이지마다 표 위쪽에 오는 내용(검색결과, 버튼 줄 등)의 높이가 달라서, 고정된
+// px값으로는 어떤 페이지는 남고 어떤 페이지는 모자란다 — 실제 남은 화면 높이를
+// 매번 계산해서 정확히 맞춘다("한 화면에 다 보이게" 요구사항 대응).
+function fitScrollWrapperToViewport(wrapperId, reserveBelowPx = 16) {
+  const wrapper = document.getElementById(wrapperId);
+  if (!wrapper) return;
+  const top = wrapper.getBoundingClientRect().top;
+  const available = window.innerHeight - top - reserveBelowPx;
+  wrapper.style.maxHeight = `${Math.max(120, available)}px`;
+}
+
+window.addEventListener("resize", () => {
+  if (!document.getElementById("page-manual-download").classList.contains("hidden")) {
+    fitScrollWrapperToViewport("manual-table-wrapper", 240);
+  }
+  if (!document.getElementById("page-episode-history").classList.contains("hidden")) {
+    fitScrollWrapperToViewport("episode-history-table-wrapper", 60);
+  }
+});
+
 function makeButton(label, onClick) {
   const btn = document.createElement("button");
   btn.textContent = label;
@@ -509,6 +529,9 @@ function renderManualTable() {
     `;
     tbody.appendChild(tr);
   }
+  // 검색결과 영역이 숨겨지면서 레이아웃이 바뀐 다음(다음 페인트 이후) 계산해야
+  // 정확한 남은 높이가 나온다.
+  requestAnimationFrame(() => fitScrollWrapperToViewport("manual-table-wrapper", 240));
 }
 
 document.getElementById("btn-manual-select-all").addEventListener("click", () => {
@@ -905,29 +928,50 @@ function renderKakaoRegisteredAuthors() {
 function renderKakaoAllAuthors() {
   const container = document.getElementById("kakao-author-all-chips");
   const query = document.getElementById("kakao-author-candidate-filter").value.trim().toLowerCase();
-  const registeredNames = new Set(kakaoWatchedAuthorsCache.filter((a) => a.enabled).map((a) => a.author_name));
 
-  const candidates = kakaoAuthorCandidatesCache.filter(
-    (name) => !registeredNames.has(name) && (!query || name.toLowerCase().includes(query))
-  );
+  // 네이버와 동일한 패턴 — "사용 가능"은 두 종류를 합친다:
+  //  1) 이미 등록했다가 제외한 작가(kakaoWatchedAuthorsCache, enabled=false) — 클릭하면
+  //     바로 재등록(검색 불필요). 이 경로가 없으면 한 번 제외한 카카오 작가는
+  //     후보 캐시에 우연히 다시 안 걸릴 경우 영영 재등록할 방법이 없었다(실제 버그).
+  //  2) 아직 한 번도 등록 안 한 카탈로그 이름 후보 — 클릭하면 검색 확인 후 신규 등록.
+  const disabledKnown = kakaoWatchedAuthorsCache.filter((a) => !a.enabled);
+  const knownNames = new Set(kakaoWatchedAuthorsCache.map((a) => a.author_name).filter(Boolean));
+  const enabledNames = new Set(kakaoWatchedAuthorsCache.filter((a) => a.enabled).map((a) => a.author_name));
 
-  container.innerHTML = "";
-  if (candidates.length === 0) {
-    container.innerHTML = '<p class="chip-empty-message">표시할 후보가 없습니다.</p>';
-    return;
+  const items = [];
+  for (const a of disabledKnown) {
+    if (query && !a.author_name.toLowerCase().includes(query)) continue;
+    items.push({ label: a.author_name, onClick: () => enableKnownKakaoAuthor(a) });
   }
-  for (const name of candidates) {
-    container.appendChild(
-      buildChip(name, false, async () => {
+  for (const name of kakaoAuthorCandidatesCache) {
+    if (enabledNames.has(name) || knownNames.has(name)) continue;
+    if (query && !name.toLowerCase().includes(query)) continue;
+    items.push({
+      label: name,
+      onClick: async () => {
         try {
           await apiCall("/api/kakao/watched-authors", { method: "POST", body: JSON.stringify({ author_name: name }) });
           loadKakaoAuthorList();
         } catch (e) {
           alert(e.message);
         }
-      })
-    );
+      },
+    });
   }
+
+  container.innerHTML = "";
+  if (items.length === 0) {
+    container.innerHTML = '<p class="chip-empty-message">표시할 후보가 없습니다.</p>';
+    return;
+  }
+  for (const item of items) {
+    container.appendChild(buildChip(item.label, false, item.onClick));
+  }
+}
+
+async function enableKnownKakaoAuthor(author) {
+  await apiCall(`/api/kakao/watched-authors/${encodeURIComponent(author.author_id)}/enable`, { method: "POST" });
+  loadKakaoAuthorList();
 }
 
 document.getElementById("kakao-author-candidate-filter").addEventListener("input", renderKakaoAllAuthors);
@@ -1373,6 +1417,7 @@ async function loadEpisodeHistory(page) {
       tbody.appendChild(tr);
     }
     renderEpisodeHistoryPagination(data.page, data.total, data.page_size);
+    requestAnimationFrame(() => fitScrollWrapperToViewport("episode-history-table-wrapper", 60));
   } catch (e) {
     emptyEl.textContent = e.message;
     emptyEl.classList.remove("hidden");

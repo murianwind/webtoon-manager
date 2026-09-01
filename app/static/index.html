@@ -92,7 +92,7 @@
         <button id="btn-manual-select-none">선택해제</button>
         <button id="btn-manual-download">선택 다운로드</button>
       </div>
-      <div class="scroll-table-wrapper">
+      <div class="scroll-table-wrapper" id="manual-table-wrapper">
         <table id="manual-table">
           <thead><tr><th></th><th>#</th><th>부제</th><th>상태</th></tr></thead>
           <tbody id="manual-tbody"></tbody>
@@ -199,7 +199,7 @@
     </div>
     <p class="hint">설정한 일수보다 오래된 이력은 다운로드 실행 때마다 자동으로 정리됩니다 (파일은 유지됨). 0이면 끔.</p>
 
-    <div class="scroll-table-wrapper">
+    <div class="scroll-table-wrapper" id="episode-history-table-wrapper">
       <table id="episode-history-table">
         <thead><tr><th>작품</th><th>회차</th><th>상태</th><th>시각</th><th></th></tr></thead>
         <tbody id="episode-history-tbody"></tbody>
