@@ -718,11 +718,29 @@ async def manual_download_run(payload: ManualDownloadIn):
 
 # ── 설정 (잡별 스케줄: 끄기 / N분마다 / 특정 요일·시각) ────────────────
 
+class CronTimeIn(BaseModel):
+    hour: int
+    minute: int
+
+    @field_validator("hour")
+    @classmethod
+    def hour_in_range(cls, v: int) -> int:
+        if not (0 <= v <= 23):
+            raise ValueError("시(hour)는 0~23이어야 합니다.")
+        return v
+
+    @field_validator("minute")
+    @classmethod
+    def minute_in_range(cls, v: int) -> int:
+        if not (0 <= v <= 59):
+            raise ValueError("분(minute)은 0~59여야 합니다.")
+        return v
+
+
 class JobScheduleIn(BaseModel):
     mode: str  # off | interval | cron
     interval_minutes: int = 60
-    cron_hour: int = 3
-    cron_minute: int = 0
+    cron_times: list[CronTimeIn] = [CronTimeIn(hour=3, minute=0)]
     cron_days: list[str] = []
 
     @field_validator("mode")
@@ -739,18 +757,11 @@ class JobScheduleIn(BaseModel):
             raise ValueError("주기는 1분 이상이어야 합니다.")
         return v
 
-    @field_validator("cron_hour")
+    @field_validator("cron_times")
     @classmethod
-    def hour_in_range(cls, v: int) -> int:
-        if not (0 <= v <= 23):
-            raise ValueError("시(hour)는 0~23이어야 합니다.")
-        return v
-
-    @field_validator("cron_minute")
-    @classmethod
-    def minute_in_range(cls, v: int) -> int:
-        if not (0 <= v <= 59):
-            raise ValueError("분(minute)은 0~59여야 합니다.")
+    def times_not_empty(cls, v: list) -> list:
+        if not v:
+            raise ValueError("cron 모드는 시각을 최소 1개 지정해야 합니다.")
         return v
 
     @field_validator("cron_days")
@@ -774,28 +785,35 @@ def _schedule_to_dict(job_id: str) -> dict:
     return {
         "mode": s.mode,
         "interval_minutes": s.interval_minutes,
-        "cron_hour": s.cron_hour,
-        "cron_minute": s.cron_minute,
+        "cron_times": s.cron_times,
         "cron_days": s.cron_days,
     }
 
 
 def _validate_archive_schedule_gap(payload: "SchedulesIn") -> None:
     """아카이빙이 다운로드 도중 파일을 옮기다 겹치는 걸 막기 위해, 둘 다 '특정 시각'
-    모드일 때는 아카이빙이 다운로드보다 최소 10분 뒤여야 한다. 다운로드가 '몇 분마다'
-    모드면(계속 도니 안전한 간격을 이 방식으로 보장할 수 없어서) 이 검증은 건너뛴다."""
+    모드일 때는 아카이빙의 모든 지정 시각이 다운로드의 모든 지정 시각보다 최소 10분
+    뒤여야 한다(둘 다 여러 시각을 가질 수 있어서, 모든 조합을 확인한다). 다운로드가
+    '몇 분마다' 모드면(계속 도니 안전한 간격을 이 방식으로 보장할 수 없어서) 이 검증은
+    건너뛴다."""
     archive_in = payload.archive_job
     download_in = payload.download_job
     if archive_in.mode != "cron" or download_in.mode != "cron":
         return
-    download_minutes = download_in.cron_hour * 60 + download_in.cron_minute
-    archive_minutes = archive_in.cron_hour * 60 + archive_in.cron_minute
-    gap = (archive_minutes - download_minutes) % (24 * 60)
-    if gap < 10:
-        raise HTTPException(
-            status_code=422,
-            detail="아카이빙 시각은 다운로드 시각보다 최소 10분 뒤여야 합니다 (다운로드 도중 파일이 옮겨지는 걸 방지).",
-        )
+    for download_time in download_in.cron_times:
+        download_minutes = download_time.hour * 60 + download_time.minute
+        for archive_time in archive_in.cron_times:
+            archive_minutes = archive_time.hour * 60 + archive_time.minute
+            gap = (archive_minutes - download_minutes) % (24 * 60)
+            if gap < 10:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"아카이빙 시각({archive_time.hour:02d}:{archive_time.minute:02d})은 "
+                        f"다운로드 시각({download_time.hour:02d}:{download_time.minute:02d})보다 "
+                        "최소 10분 뒤여야 합니다 (다운로드 도중 파일이 옮겨지는 걸 방지)."
+                    ),
+                )
 
 
 @router.get("/settings")

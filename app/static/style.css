@@ -249,6 +249,26 @@ button:hover { border-color: var(--accent); }
   border-radius: 6px;
   font-size: 13px;
 }
+.schedule-cron-row {
+  flex-direction: column;
+  align-items: flex-start;
+}
+.schedule-times-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.schedule-time-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.schedule-time-remove {
+  font-size: 11px;
+  padding: 3px 8px;
+  margin-left: 4px;
+}
 .day-checkbox-group {
   display: flex;
   align-items: center;

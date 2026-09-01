@@ -997,8 +997,36 @@ function buildScheduleControls(jobId, schedule) {
 
   const cronRow = document.createElement("div");
   cronRow.className = "schedule-row schedule-cron-row";
-  const hourOptions = Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, "0")}</option>`).join("");
-  const minuteOptions = Array.from({ length: 60 }, (_, m) => `<option value="${m}">${String(m).padStart(2, "0")}</option>`).join("");
+
+  const timesList = document.createElement("div");
+  timesList.className = "schedule-times-list";
+
+  function addTimeRow(hour, minute) {
+    const row = document.createElement("div");
+    row.className = "schedule-time-row";
+    const hourOptions = Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, "0")}</option>`).join("");
+    const minuteOptions = Array.from({ length: 60 }, (_, m) => `<option value="${m}">${String(m).padStart(2, "0")}</option>`).join("");
+    row.innerHTML = `
+      <select class="schedule-hour">${hourOptions}</select> 시
+      <select class="schedule-minute">${minuteOptions}</select> 분
+    `;
+    row.querySelector(".schedule-hour").value = hour;
+    row.querySelector(".schedule-minute").value = minute;
+    const removeBtn = makeButton("삭제", () => {
+      if (timesList.children.length <= 1) return; // 최소 1개는 남겨야 함
+      row.remove();
+    });
+    removeBtn.className = "schedule-time-remove";
+    row.appendChild(removeBtn);
+    timesList.appendChild(row);
+  }
+
+  for (const t of schedule.cron_times) {
+    addTimeRow(t.hour, t.minute);
+  }
+
+  const addTimeBtn = makeButton("+ 시각 추가", () => addTimeRow(3, 0));
+
   const dayCheckboxes = Object.entries(DAY_LABEL)
     .map(
       ([day, label]) => `
@@ -1008,13 +1036,12 @@ function buildScheduleControls(jobId, schedule) {
       </label>`
     )
     .join("");
-  cronRow.innerHTML = `
-    <select class="schedule-hour">${hourOptions}</select> 시
-    <select class="schedule-minute">${minuteOptions}</select> 분
-    <span class="day-checkbox-group">${dayCheckboxes}<span class="schedule-day-hint">(아무 요일도 안 고르면 매일)</span></span>
-  `;
-  cronRow.querySelector(".schedule-hour").value = schedule.cron_hour;
-  cronRow.querySelector(".schedule-minute").value = schedule.cron_minute;
+  const dayRow = document.createElement("div");
+  dayRow.innerHTML = `<span class="day-checkbox-group">${dayCheckboxes}<span class="schedule-day-hint">(아무 요일도 안 고르면 매일)</span></span>`;
+
+  cronRow.appendChild(timesList);
+  cronRow.appendChild(addTimeBtn);
+  cronRow.appendChild(dayRow);
 
   function updateVisibility() {
     intervalRow.classList.toggle("hidden", modeSelect.value !== "interval");
@@ -1030,11 +1057,14 @@ function buildScheduleControls(jobId, schedule) {
 }
 
 function readScheduleControls(wrap) {
+  const cronTimes = Array.from(wrap.querySelectorAll(".schedule-time-row")).map((row) => ({
+    hour: Number(row.querySelector(".schedule-hour").value) || 0,
+    minute: Number(row.querySelector(".schedule-minute").value) || 0,
+  }));
   return {
     mode: wrap.querySelector(".schedule-mode").value,
     interval_minutes: Number(wrap.querySelector(".schedule-interval").value) || 60,
-    cron_hour: Number(wrap.querySelector(".schedule-hour").value) || 0,
-    cron_minute: Number(wrap.querySelector(".schedule-minute").value) || 0,
+    cron_times: cronTimes.length > 0 ? cronTimes : [{ hour: 3, minute: 0 }],
     cron_days: Array.from(wrap.querySelectorAll(".schedule-day:checked")).map((el) => el.value),
   };
 }

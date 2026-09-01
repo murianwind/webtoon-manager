@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
@@ -531,13 +532,23 @@ _JOB_FUNCS = {
 
 
 def _build_trigger(schedule: JobSchedule):
-    """off면 None(=스케줄 없음), interval이면 N분마다, cron이면 지정한 시:분/요일에.
-    hour/minute은 한국시간 기준으로 해석된다(스케줄러 자체가 Asia/Seoul로 고정됨)."""
+    """off면 None(=스케줄 없음), interval이면 N분마다, cron이면 지정한 시:분들/요일에.
+    hour/minute은 한국시간 기준으로 해석된다(스케줄러 자체가 Asia/Seoul로 고정됨).
+    시각을 여러 개 지정할 수 있어서(예: 07:00과 19:30 둘 다), 시각마다 CronTrigger를
+    하나씩 만들고 OrTrigger로 묶는다 — hour/minute을 각각 콤마로 나열하면(예:
+    hour='7,19', minute='0,30') 두 필드가 독립적으로 평가되어 07:30/19:00처럼
+    의도하지 않은 조합까지 걸리므로, 반드시 각 시각을 별개 트리거로 만들어야 한다."""
     if schedule.mode == "off":
         return None
     if schedule.mode == "cron":
         day_of_week = ",".join(schedule.cron_days) if schedule.cron_days else "*"
-        return CronTrigger(hour=schedule.cron_hour, minute=schedule.cron_minute, day_of_week=day_of_week, timezone="Asia/Seoul")
+        triggers = [
+            CronTrigger(hour=t["hour"], minute=t["minute"], day_of_week=day_of_week, timezone="Asia/Seoul")
+            for t in schedule.cron_times
+        ]
+        if len(triggers) == 1:
+            return triggers[0]
+        return OrTrigger(triggers)
     return IntervalTrigger(minutes=schedule.interval_minutes)
 
 
