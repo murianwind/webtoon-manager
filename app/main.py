@@ -12,6 +12,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
+from starlette.types import Scope
 
 from app import discord_config
 from app.api.routes import router as api_router
@@ -60,4 +62,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="웹툰 구독 관리", lifespan=lifespan)
 app.include_router(api_router)
-app.mount("/", StaticFiles(directory="app/static", html=True), name="static")
+class NoCacheStaticFiles(StaticFiles):
+    """
+    app.js/style.css/index.html에 파일명 해시가 없어서, 브라우저가 자체 판단으로
+    캐싱해버리면 서버는 최신 버전인데 화면은 예전 버전을 계속 보여주는 문제가
+    실제로 있었다(고쳤다고 안내드려도 브라우저 캐시 때문에 반영이 안 보임) —
+    매번 서버에 검증(If-None-Match)하도록 강제해서, 실제로 안 바뀌었으면
+    304로 가볍게 넘어가고 바뀌었으면 항상 새로 받도록 한다.
+    """
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/", NoCacheStaticFiles(directory="app/static", html=True), name="static")

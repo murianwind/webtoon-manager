@@ -37,11 +37,11 @@
        ports:
          - "${WEB_PORT:-8000}:8000"
        environment:
-         DOWNLOAD_ROOT: /data/Webtoon_Download
+         DOWNLOAD_ROOT: /webtoon_download
          DATABASE_PATH: /data/webtoons.db
          COOKIE_FILE_PATH: /cookies/${COOKIE_FILE_NAME:-cookies.json}
        volumes:
-         - ${WEBTOON_DOWNLOAD_HOST_PATH}:/data/Webtoon_Download
+         - ${WEBTOON_DOWNLOAD_HOST_PATH}:/webtoon_download
          - ${APP_DATA_HOST_PATH}:/data
          - ${COOKIE_DIR_HOST_PATH}:/cookies:ro
    ```

@@ -16,17 +16,17 @@ services:
     ports:
       - "${WEB_PORT:-8000}:8000"
     environment:
-      DOWNLOAD_ROOT: /data/Webtoon_Download
+      DOWNLOAD_ROOT: /webtoon_download
       DATABASE_PATH: /data/webtoons.db
       COOKIE_FILE_PATH: /cookies/${COOKIE_FILE_NAME:-cookies.json}
     volumes:
-      # 실제 다운로드 폴더 (기존 D:\Downloads\Webtoon\Webtoon_Download 그대로 사용)
-      - ${WEBTOON_DOWNLOAD_HOST_PATH}:/data/Webtoon_Download
+      # 실제 다운로드 폴더. /data 밑이 아니라 완전히 별도 경로(/webtoon_download)에
+      # 마운트한다 — /data와 겹친 채로 두면(예전엔 /data/Webtoon_Download였음) 도커가
+      # 컨테이너를 준비할 때 그 자리를 미리 만들면서 APP_DATA_HOST_PATH 쪽 호스트
+      # 폴더에 빈 "Webtoon_Download" 폴더가 계속 생겨나는 부작용이 있었다(쿠키 폴더에서
+      # 겪었던 것과 정확히 같은 문제 — 그때 쿠키만 고치고 이건 놓쳤었다).
+      - ${WEBTOON_DOWNLOAD_HOST_PATH}:/webtoon_download
       # DB/설정 영속 볼륨
       - ${APP_DATA_HOST_PATH}:/data
       # 브라우저 쿠키 export 파일이 들어있는 폴더 (파일명은 COOKIE_FILE_NAME으로 지정)
-      # /data 밑이 아니라 완전히 별도 경로(/cookies)에 마운트한다 — /data와 겹친 채로
-      # 두면(예전엔 /data/cookies였음) 도커가 컨테이너를 준비할 때 그 자리를 미리
-      # 만들면서 APP_DATA_HOST_PATH 쪽 호스트 폴더에 빈 "cookies" 폴더가 계속
-      # 생겨나는 부작용이 있었다(실제로 사용자가 겪음) — 경로를 분리해서 근본적으로 없앤다.
       - ${COOKIE_DIR_HOST_PATH}:/cookies:ro

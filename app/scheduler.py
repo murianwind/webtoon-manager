@@ -207,10 +207,18 @@ async def _run_download_job_impl() -> None:
             log.error("쿠키 상태 판단/알림 중 예외: %s", e)
 
         if failures:
-            try:
-                await _notify_download_failures(session, settings, failures)
-            except Exception as e:
-                log.error("실패 요약 알림 전송 중 예외: %s", e)
+            # 다운로드 리포트가 켜져 있으면 실패 목록이 리포트에도 그대로 포함되므로
+            # (동일한 내용이 두 번 오는 게 실제로 불편하다는 피드백 있었음), 이 자리의
+            # 즉시 실패 알림은 건너뛴다. 리포트가 꺼져 있으면(설정 안 함) 여기서라도
+            # 알려야 사용자가 실패를 알 방법이 없으므로 그대로 보낸다.
+            report_configured = schedule_config.get_schedule(
+                "report_job", DEFAULT_SCHEDULES["report_job"]
+            ).mode != "off"
+            if not report_configured:
+                try:
+                    await _notify_download_failures(session, settings, failures)
+                except Exception as e:
+                    log.error("실패 요약 알림 전송 중 예외: %s", e)
 
     try:
         _cleanup_old_episode_history()
@@ -306,35 +314,45 @@ def _build_report_message(success_rows: list[dict], failed_rows: list[dict], rea
     return "\n".join(parts)
 
 
-async def run_report_job() -> None:
+async def run_report_job(force_test: bool = False) -> None:
     if _report_job_lock.locked():
         job_status.log_line("report", "이미 실행 중이라 건너뜁니다 (중복 실행 방지)")
         return
     async with _report_job_lock:
-        await _run_report_job_impl()
+        await _run_report_job_impl(force_test=force_test)
 
 
-async def _run_report_job_impl() -> None:
+async def _run_report_job_impl(force_test: bool = False) -> None:
     settings = get_settings()
     job_status.start("report")
 
     since = repository.get_setting(_SETTING_KEY_REPORT_LAST_SENT_AT)
     now_iso = datetime.now(timezone.utc).isoformat()
-    if not since:
+    if not since and not force_test:
         # 최초 실행이면 지금까지 쌓인 이력을 전부 몰아 보내는 대신, 지금 시점부터
         # 집계를 시작한다 — 첫 리포트에 예전 이력이 전부 딸려오는 걸 방지.
+        # 수동 테스트(force_test)일 때는 이 규칙을 건너뛴다 — 사용자가 실제로 발송
+        # 형태를 확인해보고 싶은 것이므로.
         repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, now_iso)
         job_status.log_line("report", "최초 실행 — 이번 시점부터 집계 시작 (발송 없음)")
         job_status.finish("report", success=True)
         return
 
-    rows = repository.list_episode_history_since(since)
+    rows = repository.list_episode_history_since(since) if since else []
+    used_fallback = False
+    if not rows and force_test:
+        # 지난 발송 이후 아무 것도 없어도, 테스트 목적이면 최근 기록으로라도 실제
+        # 발송 양식을 보여준다 — 그래야 "정상적으로 오는지" 확인이 가능하다.
+        rows = repository.list_recent_episode_history(20)
+        used_fallback = True
+
     success_rows = [r for r in rows if r["status"] == "success"]
     failed_rows = [r for r in rows if r["status"] == "failed"]
 
     if not rows:
-        job_status.log_line("report", "발송할 내용 없음 (지난 리포트 이후 다운로드 기록 없음)")
-        repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, now_iso)
+        job_status.log_line("report", "발송할 내용 없음 (다운로드 기록 자체가 없음)")
+        if not force_test:
+            repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, now_iso)
         job_status.finish("report", success=True)
         return
 
@@ -345,16 +363,25 @@ async def _run_report_job_impl() -> None:
         async with aiohttp.ClientSession() as session:
             if webtoon_server_url:
                 for title in sorted({r["title_name"] for r in success_rows}):
+                    # 웹툰서버는 실제 디스크 폴더명 기준으로 매칭한다. 그런데 폴더를
+                    # 만들 때는 ':' 같은 금지문자를 전각 문자로 치환해서 저장하는데
+                    # (예: "제목 : 부제" → "제목 ： 부제"), 여기선 원본 제목(치환 전)을
+                    # 그대로 조회에 쓰고 있어서 문자가 안 맞아 조회가 실패하는 경우가
+                    # 있었다(실제로 확인된 사례) — 폴더명 생성과 동일한 치환을 거쳐서 조회한다.
+                    folder_safe_title = remove_forbidden_str(title)
                     url = await webtoon_server_client.fetch_reader_url(
-                        session, webtoon_server_url, title, settings.request_timeout_seconds
+                        session, webtoon_server_url, folder_safe_title, settings.request_timeout_seconds
                     )
                     if url:
                         reader_urls[title] = url
 
             message = _build_report_message(success_rows, failed_rows, reader_urls)
+            if used_fallback:
+                message = "🧪 **[테스트 발송 — 최근 기록으로 대체됨]**\n" + message
             await discord_notify.send_webhook_notification(session, settings, message)
 
-        repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, now_iso)
+        if not force_test:
+            repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, now_iso)
         job_status.log_line("report", f"리포트 발송 완료 (성공 {len(success_rows)}건, 실패 {len(failed_rows)}건)")
         job_status.finish("report", success=True)
     except Exception as e:

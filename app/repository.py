@@ -541,6 +541,27 @@ def list_episode_history_since(since_iso: str) -> list[dict]:
     ]
 
 
+def list_recent_episode_history(limit: int) -> list[dict]:
+    """가장 최근 N건을 시각 무관하게 반환한다 — 리포트 수동 테스트용으로, "지난 발송
+    이후"에 아무 것도 없어도 예전 기록으로라도 실제 발송 형태를 확인할 수 있게 한다."""
+    rows = get_connection().execute(
+        "SELECT * FROM episode_history ORDER BY downloaded_at DESC LIMIT ?", (limit,)
+    ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "title_id": r["title_id"],
+            "title_name": r["title_name"],
+            "episode_no": r["episode_no"],
+            "subtitle": r["subtitle"],
+            "status": r["status"],
+            "error_msg": r["error_msg"],
+            "downloaded_at": r["downloaded_at"],
+        }
+        for r in rows
+    ]
+
+
 
 def delete_episode_history_older_than(days: int) -> int:
     """다운로드된 지 N일 넘은 이력을 지운다 (파일은 그대로 유지됨). 지운 개수를 반환."""
