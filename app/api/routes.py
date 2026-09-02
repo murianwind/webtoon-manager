@@ -442,6 +442,32 @@ async def set_author_auto_register(payload: AuthorAutoRegisterIn):
     return await get_author_auto_register()
 
 
+class TagAutoSubscribeOut(BaseModel):
+    enabled: bool
+
+
+class TagAutoSubscribeIn(BaseModel):
+    enabled: bool
+
+
+@router.get("/settings/tag-auto-subscribe", response_model=TagAutoSubscribeOut)
+async def get_tag_auto_subscribe():
+    """등록된(watched_tags, enabled=1) 태그에 새로 편입되는 작품을 자동구독하는
+    기능 자체를 켜고 끈다. 꺼두면 개별 태그가 켜져 있어도 전부 무시된다 —
+    예전에 앱 최초 실행 시 기본 태그 2개가 사용자도 모르게 켜진 채로 심어져서,
+    원치 않는 작품이 자동구독되는 문제가 있었던 것에 대한 안전장치."""
+    enabled = await asyncio.to_thread(repository.get_setting, "tag_based_auto_subscribe_enabled")
+    return TagAutoSubscribeOut(enabled=enabled != "0")
+
+
+@router.post("/settings/tag-auto-subscribe", response_model=TagAutoSubscribeOut)
+async def set_tag_auto_subscribe(payload: TagAutoSubscribeIn):
+    await asyncio.to_thread(
+        repository.set_setting, "tag_based_auto_subscribe_enabled", None if payload.enabled else "0"
+    )
+    return await get_tag_auto_subscribe()
+
+
 # ── 카카오웹툰 작가 (네이버와 인터페이스는 같지만, 작가에 고유 ID가 없어서
 #    이름 문자열 자체를 author_id로 쓴다 — 실제 API 응답 3곳에서 확인된 제약) ──
 

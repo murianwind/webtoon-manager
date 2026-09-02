@@ -30,11 +30,15 @@ DEFAULT_TAG_IDS_AND_NAMES = {"134": "", "133": ""}
 
 
 def ensure_default_tags_seeded() -> None:
-    """watched_tags 테이블이 비어있으면(최초 실행) 기본 태그를 채운다. 이후엔 건드리지 않는다."""
+    """watched_tags 테이블이 비어있으면(최초 실행) 기본 태그를 채운다 — 단, 꺼진
+    상태(enabled=False)로만 채운다. 예전엔 켜진 상태로 심어서 사용자가 요청한 적
+    없는 태그가 자동으로 활성화되어 있었고, 그 결과 원치 않는 작품이 자동구독
+    돼버리는 문제가 실제로 있었다 — 사용자가 "작가/태그 관리"에서 원하면 직접
+    켜도록, 기본은 항상 꺼진 채로 등록만 해둔다."""
     if repository.list_watched_tags():
         return
     for tag_id in DEFAULT_TAG_IDS_AND_NAMES:
-        repository.upsert_watched_tag(tag_id, "", enabled=True)
+        repository.upsert_watched_tag(tag_id, "", enabled=False)
 
 
 async def _fetch_info_and_others(

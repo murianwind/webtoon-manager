@@ -495,9 +495,12 @@ async def _run_discovery_job_impl() -> None:
             job_status.log_line("discovery", f"작가 기반 신작 스캔 오류: {e}")
 
         try:
-            job_status.log_line("discovery", "태그 기반 신작 스캔 시작")
-            await tracker.scan_curation_tags(session, settings)
-            job_status.log_line("discovery", "태그 기반 신작 스캔 완료")
+            if repository.get_setting("tag_based_auto_subscribe_enabled") == "0":
+                job_status.log_line("discovery", "태그 기반 신작 스캔 건너뜀 (설정에서 꺼둠)")
+            else:
+                job_status.log_line("discovery", "태그 기반 신작 스캔 시작")
+                await tracker.scan_curation_tags(session, settings)
+                job_status.log_line("discovery", "태그 기반 신작 스캔 완료")
         except Exception as e:
             had_error = True
             log.error("태그 기반 신작 스캔 중 예외: %s", e)
