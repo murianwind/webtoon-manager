@@ -108,6 +108,7 @@ button:hover { border-color: var(--accent); }
 }
 .field-group {
   margin-top: 14px;
+  margin-bottom: 14px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
 }
@@ -356,6 +357,14 @@ button:hover { border-color: var(--accent); }
 }
 .registry-add-row input {
   flex: 1;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.registry-add-row select {
+  flex: 1;
+  min-width: 160px;
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;

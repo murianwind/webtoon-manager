@@ -43,20 +43,30 @@ def list_remotes(config_path: str) -> list[str]:
 
 
 def list_folders(config_path: str, remote: str, path: str) -> list[dict]:
-    """remote:path 밑의 하위 폴더만 나열한다. 각 폴더가 비어있는지(선택 가능한지)도 같이 확인한다."""
+    """remote:path 밑의 하위 폴더만 나열한다. 각 폴더가 비어있는지(선택 가능한지)도
+    같이 확인하는데, 폴더 개수만큼 rclone을 매번 새로 띄워서 확인하면(폴더 10개면
+    11번 호출) 원격 저장소 특성상 왕복마다 지연이 누적돼서 실제로 매우 느려지는
+    문제가 있었다 — 그래서 --max-depth 2로 한 번에 1단계+2단계를 전부 받아온 뒤,
+    2단계에 뭔가(파일이든 폴더든) 있는 1단계 폴더만 "이미 있음"으로 파이썬에서
+    계산한다. 이러면 폴더가 몇 개든 rclone 호출은 항상 딱 1번이다."""
     target = f"{remote}:{path}" if path else f"{remote}:"
-    output = _run(config_path, ["lsjson", target, "--dirs-only"])
+    output = _run(config_path, ["lsjson", target, "--max-depth", "2"])
     entries = json.loads(output)
+
+    depth1_dirs = [e for e in entries if e["IsDir"] and "/" not in e["Path"]]
+    non_empty_names = {e["Path"].split("/")[0] for e in entries if "/" in e["Path"]}
+
     folders = []
-    for entry in entries:
+    for entry in depth1_dirs:
         rel = f"{path}/{entry['Name']}" if path else entry["Name"]
-        selectable = is_folder_empty(config_path, remote, rel)
-        folders.append({"name": entry["Name"], "path": rel, "selectable": selectable})
+        folders.append({"name": entry["Name"], "path": rel, "selectable": entry["Name"] not in non_empty_names})
     return folders
 
 
 def is_folder_empty(config_path: str, remote: str, path: str) -> bool:
-    """이미 파일이 하나라도 있으면 False — 로컬의 is_folder_selectable_as_dest와 동일한 규칙."""
+    """이미 파일이 하나라도 있으면 False — 로컬의 is_folder_selectable_as_dest와 동일한 규칙.
+    list_folders는 이미 --max-depth 2로 한 번에 계산하므로 이 함수를 안 쓰지만,
+    "현재 위치 자체"가 선택 가능한지(목록의 하위 항목이 아니라) 확인할 때 별도로 쓰인다."""
     target = f"{remote}:{path}" if path else f"{remote}:"
     try:
         output = _run(config_path, ["lsjson", target])
