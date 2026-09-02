@@ -214,7 +214,7 @@
   <section id="page-settings" class="page hidden">
     <div class="settings-card">
       <h2>작가 자동 등록</h2>
-      <label><input type="checkbox" id="author-auto-register-toggle" /> 웹툰 구독 시 그 작품 작가를 자동으로 "등록된 작가"로 추가</label>
+      <label class="checkbox-label"><input type="checkbox" id="author-auto-register-toggle" /> 웹툰 구독 시 그 작품 작가를 자동으로 "등록된 작가"로 추가</label>
       <p class="hint">꺼두면 구독해도 작가/태그 관리 화면의 "선택됨"엔 자동으로 안 올라가고, "사용 가능"에서 원하면 직접 등록할 수 있습니다. 태그는 원래 구독 시 자동 등록되는 개념이 없어서 이 설정과 무관합니다.</p>
       <button id="btn-save-author-auto-register">저장</button>
       <span id="author-auto-register-save-result" class="hint-inline"></span>
@@ -350,9 +350,11 @@
       <h2>아카이빙 대상 웹툰</h2>
       <p class="hint">지정한 웹툰은 정해진 주기마다(마지막 회차는 남기고) 아래 그릇 폴더로 옮겨집니다.
       여러 웹툰이 같은 그릇 폴더를 고르면 자동으로 웹툰별 폴더로 나뉘고, 하나만 쓰면 그릇 폴더 바로 밑에 쌓입니다.</p>
+      <label class="field-label">1. 웹툰 선택</label>
       <div class="registry-add-row">
         <select id="archive-target-webtoon-select"></select>
       </div>
+      <label class="field-label">2. 보관할 폴더 선택</label>
       <div id="archive-target-folder-picker"></div>
       <button id="btn-add-archive-target" style="margin-top: 8px;">등록</button>
       <span id="archive-target-add-result" class="hint-inline"></span>
@@ -361,8 +363,9 @@
 
     <div class="settings-card">
       <h2>완결 자동이동 설정</h2>
-      <label><input type="checkbox" id="archive-on-finish-toggle" /> 완결된 웹툰을 구독해제하면 자동으로 전체 이동</label>
+      <label class="checkbox-label"><input type="checkbox" id="archive-on-finish-toggle" /> 완결된 웹툰을 구독해제하면 자동으로 전체 이동</label>
       <p class="hint">구독해제하는 즉시가 아니라, 아래 "실행 스케줄"이 돌 때 함께 처리됩니다. 지정 안 된 웹툰이 이 조건으로 트리거되면 "기본 그릇 폴더"를 씁니다 (지정된 웹툰은 자기 폴더로).</p>
+      <label class="field-label">지정 안 된 웹툰이 쓸 기본 그릇 폴더</label>
       <div id="archive-default-folder-picker"></div>
       <div class="field-group">
         <label for="archive-conflict-policy">같은 이름 파일이 이미 있으면</label>
@@ -400,9 +403,9 @@
     <div class="settings-card">
       <h2>폴더 일괄 이동 (1회성)</h2>
       <p class="hint">웹툰 지정과 무관하게, 아카이브 폴더 안에서 특정 폴더의 내용을 통째로 다른 폴더로 옮깁니다.</p>
-      <label>원본 폴더</label>
+      <label class="field-label">원본 폴더</label>
       <div id="bulk-move-source-picker"></div>
-      <label>목적지 폴더</label>
+      <label class="field-label">목적지 폴더</label>
       <div id="bulk-move-dest-picker"></div>
       <button id="btn-run-bulk-move" style="margin-top: 8px;">지금 이동</button>
       <span id="bulk-move-result" class="hint-inline"></span>

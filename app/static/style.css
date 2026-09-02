@@ -80,6 +80,27 @@ button:hover { border-color: var(--accent); }
   color: var(--muted);
   margin: -8px 0 16px;
 }
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.checkbox-label + .hint {
+  /* 체크박스 라벨 바로 다음에 오는 hint는 위쪽 음수 마진을 안 쓴다 —
+     라벨 자체가 스타일 없는 인라인 요소라(기본 <label>), 음수 마진이
+     라벨 텍스트와 겹쳐 보이는 문제가 실제로 있었다. */
+  margin-top: 0;
+}
+.field-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 12px 0 6px;
+}
 .hint-inline {
   font-weight: 400;
   color: var(--muted);
