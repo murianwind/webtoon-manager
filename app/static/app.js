@@ -1764,6 +1764,40 @@ async function renderFolderPickerContents(containerId, onSelect) {
       renderFolderPickerContents(containerId, onSelect);
     }
 
+    // 폴더가 비어있는지 확인은, 목록을 그릴 때 전부 미리 하지 않고 사용자가
+    // 실제로 "선택"을 누른 폴더 딱 하나에 대해서만 그 자리에서 확인한다 —
+    // 예전엔 목록 조회 시점에 하위 폴더 전부를 확인해서, 폴더가 많으면(특히
+    // rclone 원격은 폴더 개수만큼 원격에 개별 요청을 보내야 해서) 몇 분씩
+    //걸리는 문제가 실제로 있었다.
+    async function trySelectFolder(btn, warnHost, folderName, folderPath, destValue, destType) {
+      const originalText = btn.textContent;
+      btn.textContent = "확인 중...";
+      btn.disabled = true;
+      try {
+        const checkResult = await apiCall(
+          `/api/archive/folder-check?dest_type=${destType}&remote=${encodeURIComponent(state.remote || "")}&path=${encodeURIComponent(folderPath)}`
+        );
+        if (checkResult.selectable) {
+          selectAndShow(destValue, destType, folderPath);
+          return;
+        }
+        // 그 자리에서 경고 + "그래도 선택"으로 전환한다 (팝업 없이)
+        btn.remove();
+        const warnWrap = document.createElement("div");
+        warnWrap.className = "folder-picker-warn";
+        const warnText = document.createElement("span");
+        warnText.textContent = `⚠ "${folderName}"엔 이미 파일이 있습니다.`;
+        const proceedBtn = makeButton("그래도 선택", () => selectAndShow(destValue, destType, folderPath));
+        warnWrap.appendChild(warnText);
+        warnWrap.appendChild(proceedBtn);
+        warnHost.appendChild(warnWrap);
+      } catch (e) {
+        btn.textContent = originalText;
+        btn.disabled = false;
+        alert(`확인 실패: ${e.message}`);
+      }
+    }
+
     for (const folder of data.folders) {
       const row = document.createElement("div");
       row.className = "folder-picker-row";
@@ -1776,22 +1810,10 @@ async function renderFolderPickerContents(containerId, onSelect) {
       row.appendChild(nameBtn);
       const destValue = isRclone ? `${state.remote}:${folder.path}` : folder.path;
 
-      if (!folder.selectable) {
-        // confirm() 팝업 대신, 폴더 목록 화면 안에 바로 경고문과 "그래도 선택"
-        // 버튼을 보여준다 — 팝업을 눌러야만 진행되는 것보다 화면 안에서 바로
-        // 다음 행동을 고르는 게 자연스럽다.
-        const warnWrap = document.createElement("div");
-        warnWrap.className = "folder-picker-warn";
-        const warnText = document.createElement("span");
-        warnText.textContent = `⚠ "${folder.name}"엔 이미 파일이 있습니다.`;
-        const proceedBtn = makeButton("그래도 선택", () => selectAndShow(destValue, isRclone ? "rclone" : "local", folder.path));
-        warnWrap.appendChild(warnText);
-        warnWrap.appendChild(proceedBtn);
-        row.appendChild(warnWrap);
-      } else {
-        const selectBtn = makeButton("이 폴더 선택", () => selectAndShow(destValue, isRclone ? "rclone" : "local", folder.path));
-        row.appendChild(selectBtn);
-      }
+      const selectBtn = makeButton("이 폴더 선택", () => {
+        trySelectFolder(selectBtn, row, folder.name, folder.path, destValue, isRclone ? "rclone" : "local");
+      });
+      row.appendChild(selectBtn);
       listBox.appendChild(row);
     }
     listArea.appendChild(listBox);
@@ -1799,19 +1821,10 @@ async function renderFolderPickerContents(containerId, onSelect) {
     const hereLabel = isRclone ? `"${state.remote}:/${currentPath || "(최상위)"}"` : `"/${currentPath || "(최상위)"}"`;
     const hereValue = isRclone ? `${state.remote}:${currentPath}` : currentPath;
     const hereSelected = state.selectedLabel === currentPath;
-    if (!data.current_path_selectable) {
-      const warnWrap = document.createElement("div");
-      warnWrap.className = "folder-picker-warn";
-      const warnText = document.createElement("span");
-      warnText.textContent = `⚠ ${hereLabel}엔 이미 파일이 있습니다.`;
-      const proceedBtn = makeButton(`그래도 여기로 선택${hereSelected ? " ✅" : ""}`, () => selectAndShow(hereValue, isRclone ? "rclone" : "local", currentPath));
-      warnWrap.appendChild(warnText);
-      warnWrap.appendChild(proceedBtn);
-      listArea.appendChild(warnWrap);
-    } else {
-      const selectHereBtn = makeButton(`${hereLabel} 여기로 선택${hereSelected ? " ✅" : ""}`, () => selectAndShow(hereValue, isRclone ? "rclone" : "local", currentPath));
-      listArea.appendChild(selectHereBtn);
-    }
+    const hereBtn = makeButton(`${hereLabel} 여기로 선택${hereSelected ? " ✅" : ""}`, () => {
+      trySelectFolder(hereBtn, listArea, currentPath || "(최상위)", currentPath, hereValue, isRclone ? "rclone" : "local");
+    });
+    listArea.appendChild(hereBtn);
 
     const newFolderRow = document.createElement("div");
     newFolderRow.className = "registry-add-row folder-picker-new-row";

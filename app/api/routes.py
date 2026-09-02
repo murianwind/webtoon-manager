@@ -1247,14 +1247,31 @@ async def list_rclone_folders(remote: str, path: str = ""):
         folders = await asyncio.to_thread(rclone_client.list_folders, settings.rclone_config_path, remote, path)
     except rclone_client.RcloneError as e:
         raise HTTPException(status_code=502, detail=str(e))
-    try:
-        current_selectable = await asyncio.to_thread(archiver.is_folder_selectable_as_dest_rclone, settings.rclone_config_path, f"{remote}:{path}")
-    except rclone_client.RcloneError:
-        # "현재 보고 있는 폴더 자체"가 Personal Vault처럼 확인 자체가 안 되는
-        # 특수 폴더일 수 있다 — 이것 때문에 폴더 목록(위에서 이미 정상 조회됨)까지
-        # 통째로 못 보여주면 안 되니, 안전하게 "선택 불가"로만 처리하고 넘어간다.
-        current_selectable = False
-    return {"remote": remote, "path": path, "folders": folders, "current_path_selectable": current_selectable}
+    return {"remote": remote, "path": path, "folders": folders}
+
+
+@router.get("/archive/folder-check")
+async def check_folder_selectable(dest_type: str, path: str, remote: str = ""):
+    """폴더 하나가 이미 파일을 갖고 있어서 선택 불가능한지 확인한다. 목록을 보여줄
+    때 모든 하위 폴더를 한꺼번에 확인하면(예전 방식) 폴더가 많을수록 느려지고,
+    rclone은 폴더 개수만큼 원격에 개별 요청을 보내야 해서 특히 느려지는 문제가
+    있었다 — 그래서 사용자가 실제로 선택하려는 폴더 딱 하나에 대해서만, 클릭한
+    시점에 이 엔드포인트로 확인한다."""
+    settings = get_settings()
+    if dest_type == "rclone":
+        if not (settings.rclone_config_path and Path(settings.rclone_config_path).is_file()):
+            raise HTTPException(status_code=400, detail="rclone 설정 파일이 등록되어 있지 않습니다.")
+        try:
+            selectable = await asyncio.to_thread(
+                archiver.is_folder_selectable_as_dest_rclone, settings.rclone_config_path, f"{remote}:{path}"
+            )
+        except rclone_client.RcloneError as e:
+            raise HTTPException(status_code=502, detail=str(e))
+    else:
+        if not settings.archive_root:
+            raise HTTPException(status_code=400, detail="로컬 아카이빙 경로(ARCHIVE_ROOT)가 설정되어 있지 않습니다.")
+        selectable = await asyncio.to_thread(archiver.is_folder_selectable_as_dest, settings.archive_root, path)
+    return {"selectable": selectable}
 
 
 class CreateRcloneFolderIn(BaseModel):
@@ -1307,14 +1324,12 @@ async def list_archive_folders(path: str = ""):
             if not entry.is_dir():
                 continue
             rel = str(entry.relative_to(root))
-            selectable = await asyncio.to_thread(archiver.is_folder_selectable_as_dest, settings.archive_root, rel)
-            folders.append({"name": entry.name, "path": rel, "selectable": selectable})
+            folders.append({"name": entry.name, "path": rel})
         except OSError as e:
             log.warning("폴더 항목 확인 실패, 건너뜀 (%s): %s", entry, e)
             continue
 
-    current_selectable = await asyncio.to_thread(archiver.is_folder_selectable_as_dest, settings.archive_root, path)
-    return {"path": path, "folders": folders, "current_path_selectable": current_selectable}
+    return {"path": path, "folders": folders}
 
 
 class CreateFolderIn(BaseModel):

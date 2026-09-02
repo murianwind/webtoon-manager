@@ -48,51 +48,30 @@ def list_remotes(config_path: str) -> list[str]:
 
 
 def list_folders(config_path: str, remote: str, path: str) -> list[dict]:
-    """remote:path 밑의 하위 폴더만 나열한다. 각 폴더가 비어있는지(선택 가능한지)도
-    같이 확인하는데, 먼저 --max-depth 2로 한 번에 처리하는 빠른 방법을 시도한다.
+    """remote:path 밑의 하위 폴더 이름만 나열한다 (--dirs-only, 각 폴더 내부를
+    들여다보지 않음). 각 폴더가 "비어있는지"는 여기서 확인하지 않는다 —
 
-    이게 실패할 수 있다 — OneDrive의 Personal Vault처럼 접근 자체가 막힌 특수
-    폴더가 섞여 있으면, 그 폴더의 "내용"까지 들여다보려는 이 한 번의 호출 자체가
-    통째로 실패해서 정상 폴더까지 하나도 안 보이게 되는 문제가 실제로 있었다
-    ("어제까지 되던 게 갑자기 안 됨"으로 나타남). 그래서 이 시도가 실패하면,
-    폴더 이름 목록만 안전하게(--dirs-only, 내용을 안 들여다봄) 다시 가져온 뒤,
-    각 폴더가 비어있는지 하나하나 개별 확인하는 예전 방식(느리지만 안전 — 문제
-    있는 폴더 하나만 실패하고 나머지는 정상 조회됨)으로 전환한다."""
+    예전엔 목록을 보여줄 때 하위 폴더 전부를 미리 확인했는데, 이게 두 가지
+    문제를 낳았다: (1) 폴더가 많으면 그만큼 오래 걸리고, 문제있는 폴더 하나
+    때문에 전체가 실패하는 경우 폴더 개수만큼 순서대로 재시도하느라 몇 분씩
+    걸리는 사례가 실제로 있었다. (2) 애초에 사용자가 클릭하지도 않을 폴더까지
+    전부 확인하는 건 낭비다. 그래서 "비어있는지" 확인은 사용자가 실제로 그
+    폴더를 선택하려고 클릭한 시점에, 그 폴더 하나만(is_folder_empty) 하도록
+    분리했다 — 폴더가 몇 개든 목록 조회 자체는 항상 빠른 단일 호출로 끝난다."""
     target = f"{remote}:{path}" if path else f"{remote}:"
-
-    try:
-        combined_output = _run(config_path, ["lsjson", target, "--max-depth", "2"])
-        combined_entries = json.loads(combined_output)
-        depth1_dirs = [e for e in combined_entries if e["IsDir"] and "/" not in e["Path"]]
-        non_empty_names = {e["Path"].split("/")[0] for e in combined_entries if "/" in e["Path"]}
-        folders = []
-        for entry in depth1_dirs:
-            rel = f"{path}/{entry['Name']}" if path else entry["Name"]
-            folders.append({"name": entry["Name"], "path": rel, "selectable": entry["Name"] not in non_empty_names})
-        return folders
-    except RcloneError as e:
-        log.warning(
-            "폴더 내용을 한번에 확인하는 데 실패해서(%s), 폴더별로 개별 확인하는 "
-            "방식으로 대체합니다(느릴 수 있습니다).", e,
-        )
-        dirs_output = _run(config_path, ["lsjson", target, "--dirs-only"])
-        depth1_dirs = json.loads(dirs_output)
-        folders = []
-        for entry in depth1_dirs:
-            rel = f"{path}/{entry['Name']}" if path else entry["Name"]
-            try:
-                selectable = is_folder_empty(config_path, remote, rel)
-            except RcloneError as inner_e:
-                log.warning("폴더 '%s' 내용 확인 실패, 안전하게 선택 불가 처리: %s", rel, inner_e)
-                selectable = False
-            folders.append({"name": entry["Name"], "path": rel, "selectable": selectable})
-        return folders
+    dirs_output = _run(config_path, ["lsjson", target, "--dirs-only"])
+    depth1_dirs = json.loads(dirs_output)
+    folders = []
+    for entry in depth1_dirs:
+        rel = f"{path}/{entry['Name']}" if path else entry["Name"]
+        folders.append({"name": entry["Name"], "path": rel})
+    return folders
 
 
 def is_folder_empty(config_path: str, remote: str, path: str) -> bool:
-    """이미 파일이 하나라도 있으면 False — 로컬의 is_folder_selectable_as_dest와 동일한 규칙.
-    list_folders는 이미 --max-depth 2로 한 번에 계산하므로 이 함수를 안 쓰지만,
-    "현재 위치 자체"가 선택 가능한지(목록의 하위 항목이 아니라) 확인할 때 별도로 쓰인다."""
+    """이미 파일이 하나라도 있으면 False — 로컬의 is_folder_selectable_as_dest와
+    동일한 규칙. 사용자가 특정 폴더를 실제로 선택하려는 시점에, 그 폴더 딱
+    하나에 대해서만 호출된다(목록 조회 시점엔 안 씀 — list_folders 설명 참고)."""
     target = f"{remote}:{path}" if path else f"{remote}:"
     try:
         output = _run(config_path, ["lsjson", target])
