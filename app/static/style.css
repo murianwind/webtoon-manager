@@ -604,6 +604,14 @@ select {
   max-height: calc(100vh - 260px);
   overflow-y: auto;
 }
+/* 아카이빙 탭은 이 리스트가 페이지 전체를 차지하는 게 아니라, 다른 카드들과
+   함께 쌓이는 카드 하나일 뿐이다 — 위 max-height(뷰포트 기준)를 그대로 쓰면
+   리스트 자체가 너무 커져서, 항목이 늘어날 때 리스트 안에서 스크롤되기 전에
+   이미 페이지 전체가 밀려버리는 문제가 있었다. 훨씬 작은 고정 높이로 잘라서
+   카드 안에서만 스크롤되게 한다. */
+.job-history-list-compact {
+  max-height: 280px;
+}
 .scroll-table-wrapper {
   overflow-y: auto;
   border-radius: 8px;
