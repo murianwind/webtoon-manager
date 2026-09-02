@@ -1245,9 +1245,15 @@ async def list_rclone_folders(remote: str, path: str = ""):
         raise HTTPException(status_code=400, detail="rclone 설정 파일이 등록되어 있지 않습니다.")
     try:
         folders = await asyncio.to_thread(rclone_client.list_folders, settings.rclone_config_path, remote, path)
-        current_selectable = await asyncio.to_thread(archiver.is_folder_selectable_as_dest_rclone, settings.rclone_config_path, f"{remote}:{path}")
     except rclone_client.RcloneError as e:
         raise HTTPException(status_code=502, detail=str(e))
+    try:
+        current_selectable = await asyncio.to_thread(archiver.is_folder_selectable_as_dest_rclone, settings.rclone_config_path, f"{remote}:{path}")
+    except rclone_client.RcloneError:
+        # "현재 보고 있는 폴더 자체"가 Personal Vault처럼 확인 자체가 안 되는
+        # 특수 폴더일 수 있다 — 이것 때문에 폴더 목록(위에서 이미 정상 조회됨)까지
+        # 통째로 못 보여주면 안 되니, 안전하게 "선택 불가"로만 처리하고 넘어간다.
+        current_selectable = False
     return {"remote": remote, "path": path, "folders": folders, "current_path_selectable": current_selectable}
 
 

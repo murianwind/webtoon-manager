@@ -49,23 +49,44 @@ def list_remotes(config_path: str) -> list[str]:
 
 def list_folders(config_path: str, remote: str, path: str) -> list[dict]:
     """remote:path 밑의 하위 폴더만 나열한다. 각 폴더가 비어있는지(선택 가능한지)도
-    같이 확인하는데, 폴더 개수만큼 rclone을 매번 새로 띄워서 확인하면(폴더 10개면
-    11번 호출) 원격 저장소 특성상 왕복마다 지연이 누적돼서 실제로 매우 느려지는
-    문제가 있었다 — 그래서 --max-depth 2로 한 번에 1단계+2단계를 전부 받아온 뒤,
-    2단계에 뭔가(파일이든 폴더든) 있는 1단계 폴더만 "이미 있음"으로 파이썬에서
-    계산한다. 이러면 폴더가 몇 개든 rclone 호출은 항상 딱 1번이다."""
+    같이 확인하는데, 먼저 --max-depth 2로 한 번에 처리하는 빠른 방법을 시도한다.
+
+    이게 실패할 수 있다 — OneDrive의 Personal Vault처럼 접근 자체가 막힌 특수
+    폴더가 섞여 있으면, 그 폴더의 "내용"까지 들여다보려는 이 한 번의 호출 자체가
+    통째로 실패해서 정상 폴더까지 하나도 안 보이게 되는 문제가 실제로 있었다
+    ("어제까지 되던 게 갑자기 안 됨"으로 나타남). 그래서 이 시도가 실패하면,
+    폴더 이름 목록만 안전하게(--dirs-only, 내용을 안 들여다봄) 다시 가져온 뒤,
+    각 폴더가 비어있는지 하나하나 개별 확인하는 예전 방식(느리지만 안전 — 문제
+    있는 폴더 하나만 실패하고 나머지는 정상 조회됨)으로 전환한다."""
     target = f"{remote}:{path}" if path else f"{remote}:"
-    output = _run(config_path, ["lsjson", target, "--max-depth", "2"])
-    entries = json.loads(output)
 
-    depth1_dirs = [e for e in entries if e["IsDir"] and "/" not in e["Path"]]
-    non_empty_names = {e["Path"].split("/")[0] for e in entries if "/" in e["Path"]}
-
-    folders = []
-    for entry in depth1_dirs:
-        rel = f"{path}/{entry['Name']}" if path else entry["Name"]
-        folders.append({"name": entry["Name"], "path": rel, "selectable": entry["Name"] not in non_empty_names})
-    return folders
+    try:
+        combined_output = _run(config_path, ["lsjson", target, "--max-depth", "2"])
+        combined_entries = json.loads(combined_output)
+        depth1_dirs = [e for e in combined_entries if e["IsDir"] and "/" not in e["Path"]]
+        non_empty_names = {e["Path"].split("/")[0] for e in combined_entries if "/" in e["Path"]}
+        folders = []
+        for entry in depth1_dirs:
+            rel = f"{path}/{entry['Name']}" if path else entry["Name"]
+            folders.append({"name": entry["Name"], "path": rel, "selectable": entry["Name"] not in non_empty_names})
+        return folders
+    except RcloneError as e:
+        log.warning(
+            "폴더 내용을 한번에 확인하는 데 실패해서(%s), 폴더별로 개별 확인하는 "
+            "방식으로 대체합니다(느릴 수 있습니다).", e,
+        )
+        dirs_output = _run(config_path, ["lsjson", target, "--dirs-only"])
+        depth1_dirs = json.loads(dirs_output)
+        folders = []
+        for entry in depth1_dirs:
+            rel = f"{path}/{entry['Name']}" if path else entry["Name"]
+            try:
+                selectable = is_folder_empty(config_path, remote, rel)
+            except RcloneError as inner_e:
+                log.warning("폴더 '%s' 내용 확인 실패, 안전하게 선택 불가 처리: %s", rel, inner_e)
+                selectable = False
+            folders.append({"name": entry["Name"], "path": rel, "selectable": selectable})
+        return folders
 
 
 def is_folder_empty(config_path: str, remote: str, path: str) -> bool:
