@@ -15,22 +15,27 @@ import subprocess
 log = logging.getLogger(__name__)
 
 _TIMEOUT_SECONDS = 30
+# 파일 업로드(moveto)는 폴더 조회 같은 가벼운 명령과 성격이 다르다 — 대용량
+# 파일을 느린 원격(원드라이브 등)에 올리는 거라 30초를 훌쩍 넘길 수 있는데,
+# 그 짧은 타임아웃 때문에 "실제로는 업로드+원본삭제까지 다 끝났는데 rclone이
+# 마지막 정리 단계에서 죽어서 실패로 잘못 기록되는" 문제가 실제로 있었다.
+_UPLOAD_TIMEOUT_SECONDS = 1800
 
 
 class RcloneError(Exception):
     pass
 
 
-def _run(config_path: str, args: list[str]) -> str:
+def _run(config_path: str, args: list[str], timeout: int = _TIMEOUT_SECONDS) -> str:
     try:
         result = subprocess.run(
             ["rclone", "--config", config_path, *args],
-            capture_output=True, text=True, timeout=_TIMEOUT_SECONDS,
+            capture_output=True, text=True, timeout=timeout,
         )
     except FileNotFoundError:
         raise RcloneError("rclone 프로그램을 찾을 수 없습니다 (이미지에 설치되어 있어야 합니다).")
     except subprocess.TimeoutExpired:
-        raise RcloneError("rclone 응답이 시간 내에 오지 않았습니다 (원격 저장소 연결 상태를 확인하세요).")
+        raise RcloneError(f"rclone 응답이 {timeout}초 내에 오지 않았습니다 (원격 저장소 연결 상태를 확인하세요).")
     if result.returncode != 0:
         raise RcloneError(result.stderr.strip() or f"rclone 명령 실패 (종료코드 {result.returncode})")
     return result.stdout
@@ -87,7 +92,7 @@ def move_file_to_remote(config_path: str, local_file_path: str, remote: str, des
     (rclone moveto가 원자적으로 처리). 충돌 정책(덮어쓰기/건너뛰기/이름변경)은 호출부(archiver.py)가
     is_folder_empty 등으로 미리 확인한 뒤 최종 파일명을 정해서 넘겨준다."""
     target = f"{remote}:{dest_path}/{dest_file_name}" if dest_path else f"{remote}:{dest_file_name}"
-    _run(config_path, ["moveto", local_file_path, target])
+    _run(config_path, ["moveto", local_file_path, target], timeout=_UPLOAD_TIMEOUT_SECONDS)
 
 
 def file_exists(config_path: str, remote: str, path: str, file_name: str) -> bool:

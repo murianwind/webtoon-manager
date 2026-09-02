@@ -167,7 +167,23 @@ def _move_file_to_rclone_with_conflict_policy(rclone_config_path: str, src: Path
                 counter += 1
         # overwrite: 그대로 진행, rclone moveto가 덮어씀
 
-    rclone_client.move_file_to_remote(rclone_config_path, str(src), remote, dest_path, dest_name)
+    try:
+        rclone_client.move_file_to_remote(rclone_config_path, str(src), remote, dest_path, dest_name)
+    except rclone_client.RcloneError as e:
+        if not src.exists():
+            # moveto는 목적지 복사가 성공적으로 끝난 걸 확인한 뒤에만 원본을 지운다.
+            # 그러니 시간초과 에러가 나도 로컬 원본이 이미 없어졌다면, 실제로는
+            # 업로드까지 다 끝나고 rclone이 마지막 정리 단계에서 응답이 늦어졌을
+            # 가능성이 높다 — 이걸 그냥 "실패"로 처리하면 파일이 어디로도 기록 안
+            # 남고 사라진 것처럼 보이는 문제가 실제로 있었다. 성공으로 간주하되
+            # 불확실하다는 걸 로그에 명확히 남긴다.
+            log.warning(
+                "rclone 응답 시간초과(%s)가 났지만 로컬 원본이 이미 사라짐 — 실제로는 "
+                "업로드가 성공했을 가능성이 높습니다. 원격(%s:%s/%s)에서 직접 확인해보세요.",
+                e, remote, dest_path, dest_name,
+            )
+        else:
+            raise
     return dest_name
 
 

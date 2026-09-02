@@ -1538,6 +1538,34 @@ const savedTab = sessionStorage.getItem(ACTIVE_TAB_KEY);
 
 let archiveFolderPickerState = {}; // pickerId -> 현재 탐색 중인 경로
 
+// 아카이빙 탭 안에 폴더 선택기가 여러 개(대상 지정용, 기본폴더용, 일괄이동
+// 원본/목적지용) 있는데, 각자가 /api/archive/settings와 /api/archive/rclone/remotes를
+// 따로 조회하면 화면 하나 열 때 같은 API가 8~10번씩 중복 호출되는 문제가 실제로
+// 있었다 — 페이지 방문당 한 번만 조회해서 캐싱하고 재사용한다. loadArchivePage가
+// 새로 호출될 때(탭 재방문)만 캐시를 지워서 최신값을 다시 받아온다.
+let _archiveSettingsCache = null;
+let _rcloneRemotesCache = null;
+
+function invalidateArchiveCaches() {
+  _archiveSettingsCache = null;
+  _rcloneRemotesCache = null;
+}
+
+async function getArchiveSettingsCached() {
+  if (!_archiveSettingsCache) {
+    _archiveSettingsCache = await apiCall("/api/archive/settings");
+  }
+  return _archiveSettingsCache;
+}
+
+async function getRcloneRemotesCached() {
+  if (!_rcloneRemotesCache) {
+    _rcloneRemotesCache = await apiCall("/api/archive/rclone/remotes");
+  }
+  return _rcloneRemotesCache;
+}
+
+
 function _folderPickerStorageKey(containerId) {
   return `folderPickerState:${containerId}`;
 }
@@ -1575,7 +1603,7 @@ async function renderFolderPicker(containerId, onSelect, initialPath) {
   // 그래서 시작 모드를 실제로 뭐가 되는지 먼저 확인해서 정한다.
   let startMode = "local";
   try {
-    const archiveSettings = await apiCall("/api/archive/settings");
+    const archiveSettings = await getArchiveSettingsCached();
     if (!archiveSettings.local_available && archiveSettings.rclone_available) {
       startMode = "rclone";
     }
@@ -1594,7 +1622,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
 
   let archiveSettings;
   try {
-    archiveSettings = await apiCall("/api/archive/settings");
+    archiveSettings = await getArchiveSettingsCached();
   } catch (e) {
     container.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
     return;
@@ -1640,7 +1668,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
 
     if (state.mode === "rclone" && !state.remote) {
       // 원격을 아직 안 골랐으면 원격 선택 드롭다운부터
-      const remotesData = await apiCall("/api/archive/rclone/remotes");
+      const remotesData = await getRcloneRemotesCached();
       listArea.innerHTML = "";
       const remoteRow = document.createElement("div");
       remoteRow.className = "registry-add-row";
@@ -1753,8 +1781,9 @@ let archiveSelectedBulkSourcePath = "";
 let archiveSelectedBulkDestPath = "";
 
 async function loadArchivePage() {
+  invalidateArchiveCaches(); // 탭을 새로 열 때마다 최신값을 다시 받아오게 캐시 초기화
   try {
-    const settingsCheck = await apiCall("/api/archive/settings");
+    const settingsCheck = await getArchiveSettingsCached();
     const isAvailable = settingsCheck.local_available || settingsCheck.rclone_available;
     document.getElementById("archive-disabled-guide").classList.toggle("hidden", isAvailable);
     document.getElementById("archive-main-content").classList.toggle("hidden", !isAvailable);
@@ -1876,7 +1905,7 @@ document.getElementById("btn-add-archive-target").addEventListener("click", asyn
 
 async function loadArchiveSettings() {
   try {
-    const data = await apiCall("/api/archive/settings");
+    const data = await getArchiveSettingsCached();
     document.getElementById("archive-on-finish-toggle").checked = data.on_finish_unsubscribe;
     document.getElementById("archive-conflict-policy").value = data.conflict_policy;
     archiveSelectedDefaultPath = data.default_base_path;
@@ -1899,6 +1928,7 @@ document.getElementById("btn-save-archive-settings").addEventListener("click", a
         on_finish_unsubscribe: document.getElementById("archive-on-finish-toggle").checked,
       }),
     });
+    invalidateArchiveCaches();
     resultEl.style.color = "";
     resultEl.textContent = "저장했습니다.";
   } catch (e) {
