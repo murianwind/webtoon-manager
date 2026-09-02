@@ -639,6 +639,10 @@ select {
   color: var(--muted);
   font-size: 12px;
   flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .job-history-delete-btn {
   font-size: 11px;
@@ -704,18 +708,40 @@ select {
 .folder-picker-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   max-height: 200px;
   overflow-y: auto;
-  margin-bottom: 8px;
+  margin-bottom: 14px;
 }
 .folder-picker-row {
   display: flex;
   gap: 6px;
   align-items: center;
 }
+.folder-picker-row button {
+  height: 36px;
+}
 .folder-picker-row button:first-child {
   flex: 1;
   text-align: left;
+}
+.folder-picker-row-selected {
+  background: var(--accent-bg, #eef6ff);
+  border-radius: 6px;
+}
+.folder-picker-warn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  font-size: 12px;
+  color: #c62828;
+}
+.folder-picker-warn button {
+  height: 36px;
+  flex-shrink: 0;
+}
+.folder-picker-new-row {
+  margin-top: 4px;
 }
 

@@ -1618,6 +1618,16 @@ async function renderFolderPicker(containerId, onSelect, initialPath) {
   renderFolderPickerContents(containerId, onSelect);
 }
 
+let _folderListCache = {}; // "local|rclone:remote:path" -> {folders, current_path_selectable}
+
+function _folderListCacheKey(isRclone, remote, path) {
+  return `${isRclone ? "rclone" : "local"}:${remote || ""}:${path}`;
+}
+
+function _invalidateFolderListCache(isRclone, remote, path) {
+  delete _folderListCache[_folderListCacheKey(isRclone, remote, path)];
+}
+
 async function renderFolderPickerContents(containerId, onSelect) {
   const container = document.getElementById(containerId);
   const state = archiveFolderPickerState[containerId];
@@ -1667,11 +1677,16 @@ async function renderFolderPickerContents(containerId, onSelect) {
     return;
   }
 
-  try {
-    listArea.innerHTML = '<p class="hint-inline">⏳ 폴더 목록을 불러오는 중입니다... (원격 저장소는 응답이 느릴 수 있습니다)</p>';
+  const backToStartBtn = () =>
+    makeButton("⬅ 처음으로 돌아가기", () => {
+      archiveFolderPickerState[containerId] = { mode: state.mode, path: "", remote: "" };
+      renderFolderPickerContents(containerId, onSelect);
+    });
 
+  try {
     if (state.mode === "rclone" && !state.remote) {
       // 원격을 아직 안 골랐으면 원격 선택 드롭다운부터
+      listArea.innerHTML = '<p class="hint-inline">⏳ 원격 목록을 불러오는 중입니다...</p>';
       const remotesData = await getRcloneRemotesCached();
       listArea.innerHTML = "";
       const remoteRow = document.createElement("div");
@@ -1690,9 +1705,30 @@ async function renderFolderPickerContents(containerId, onSelect) {
 
     const isRclone = state.mode === "rclone";
     const currentPath = state.path || "";
-    const data = isRclone
-      ? await apiCall(`/api/archive/rclone/folders?remote=${encodeURIComponent(state.remote)}&path=${encodeURIComponent(currentPath)}`)
-      : await apiCall(`/api/archive/folders?path=${encodeURIComponent(currentPath)}`);
+    const cacheKey = _folderListCacheKey(isRclone, state.remote, currentPath);
+
+    let data = _folderListCache[cacheKey];
+    if (!data) {
+      // 로딩 중에도 무한정 기다리지 않고 벗어날 수 있게, 취소 버튼을 로딩 문구와
+      // 함께 바로 보여준다 — 예전엔 요청이 오래 걸리는 동안(특히 원격 저장소가
+      // 느리거나 응답이 없을 때) 화면에 아무 것도 못 누르고 새로고침하는 수밖에
+      // 없었다. 요청 자체(백엔드의 rclone 실행)를 강제로 멈추진 못하지만, 최소한
+      // 화면은 바로 이전 상태로 돌아갈 수 있게 한다.
+      const controller = new AbortController();
+      listArea.innerHTML = "";
+      listArea.appendChild(Object.assign(document.createElement("p"), { className: "hint-inline", textContent: "⏳ 폴더 목록을 불러오는 중입니다... (원격 저장소는 응답이 느릴 수 있습니다)" }));
+      const cancelBtn = makeButton("취소하고 돌아가기", () => {
+        controller.abort();
+        renderFolderPickerContents(containerId, onSelect);
+      });
+      listArea.appendChild(cancelBtn);
+
+      const url = isRclone
+        ? `/api/archive/rclone/folders?remote=${encodeURIComponent(state.remote)}&path=${encodeURIComponent(currentPath)}`
+        : `/api/archive/folders?path=${encodeURIComponent(currentPath)}`;
+      data = await apiCall(url, { signal: controller.signal });
+      _folderListCache[cacheKey] = data;
+    }
     listArea.innerHTML = "";
 
     const pathRow = document.createElement("div");
@@ -1719,41 +1755,66 @@ async function renderFolderPickerContents(containerId, onSelect) {
       listBox.appendChild(upBtn);
     }
 
+    function selectAndShow(value, destType, label) {
+      state.selectedLabel = label;
+      onSelect(value, destType);
+      // 방금 고른 걸 화면에서도 바로 보이게 다시 그린다 — 예전엔 onSelect를
+      // 호출만 하고 화면엔 아무 표시가 없어서, 실제로 선택이 됐는지 눈으로
+      //확인할 방법이 없었다.
+      renderFolderPickerContents(containerId, onSelect);
+    }
+
     for (const folder of data.folders) {
       const row = document.createElement("div");
       row.className = "folder-picker-row";
-      const nameBtn = makeButton(`📁 ${folder.name}`, () => {
+      const isSelected = state.selectedLabel === folder.path;
+      if (isSelected) row.classList.add("folder-picker-row-selected");
+      const nameBtn = makeButton(`📁 ${folder.name}${isSelected ? " ✅" : ""}`, () => {
         state.path = folder.path;
         renderFolderPickerContents(containerId, onSelect);
       });
       row.appendChild(nameBtn);
       const destValue = isRclone ? `${state.remote}:${folder.path}` : folder.path;
-      const selectBtn = makeButton(
-        folder.selectable ? "이 폴더 선택" : "⚠ 이미 파일 있음 (선택)",
-        () => {
-          if (!folder.selectable && !confirm(`"${folder.name}" 폴더엔 이미 파일이 있습니다. 다른 웹툰의 파일과 섞일 수 있는데, 그래도 선택하시겠습니까?`)) {
-            return;
-          }
-          onSelect(destValue, isRclone ? "rclone" : "local");
-        }
-      );
-      row.appendChild(selectBtn);
+
+      if (!folder.selectable) {
+        // confirm() 팝업 대신, 폴더 목록 화면 안에 바로 경고문과 "그래도 선택"
+        // 버튼을 보여준다 — 팝업을 눌러야만 진행되는 것보다 화면 안에서 바로
+        // 다음 행동을 고르는 게 자연스럽다.
+        const warnWrap = document.createElement("div");
+        warnWrap.className = "folder-picker-warn";
+        const warnText = document.createElement("span");
+        warnText.textContent = `⚠ "${folder.name}"엔 이미 파일이 있습니다.`;
+        const proceedBtn = makeButton("그래도 선택", () => selectAndShow(destValue, isRclone ? "rclone" : "local", folder.path));
+        warnWrap.appendChild(warnText);
+        warnWrap.appendChild(proceedBtn);
+        row.appendChild(warnWrap);
+      } else {
+        const selectBtn = makeButton("이 폴더 선택", () => selectAndShow(destValue, isRclone ? "rclone" : "local", folder.path));
+        row.appendChild(selectBtn);
+      }
       listBox.appendChild(row);
     }
     listArea.appendChild(listBox);
 
     const hereLabel = isRclone ? `"${state.remote}:/${currentPath || "(최상위)"}"` : `"/${currentPath || "(최상위)"}"`;
     const hereValue = isRclone ? `${state.remote}:${currentPath}` : currentPath;
-    const selectHereBtn = makeButton(`${hereLabel} 여기로 선택${data.current_path_selectable ? "" : " ⚠"}`, () => {
-      if (!data.current_path_selectable && !confirm(`${hereLabel}엔 이미 파일이 있습니다. 다른 웹툰의 파일과 섞일 수 있는데, 그래도 선택하시겠습니까?`)) {
-        return;
-      }
-      onSelect(hereValue, isRclone ? "rclone" : "local");
-    });
-    listArea.appendChild(selectHereBtn);
+    const hereSelected = state.selectedLabel === currentPath;
+    if (!data.current_path_selectable) {
+      const warnWrap = document.createElement("div");
+      warnWrap.className = "folder-picker-warn";
+      const warnText = document.createElement("span");
+      warnText.textContent = `⚠ ${hereLabel}엔 이미 파일이 있습니다.`;
+      const proceedBtn = makeButton(`그래도 여기로 선택${hereSelected ? " ✅" : ""}`, () => selectAndShow(hereValue, isRclone ? "rclone" : "local", currentPath));
+      warnWrap.appendChild(warnText);
+      warnWrap.appendChild(proceedBtn);
+      listArea.appendChild(warnWrap);
+    } else {
+      const selectHereBtn = makeButton(`${hereLabel} 여기로 선택${hereSelected ? " ✅" : ""}`, () => selectAndShow(hereValue, isRclone ? "rclone" : "local", currentPath));
+      listArea.appendChild(selectHereBtn);
+    }
 
     const newFolderRow = document.createElement("div");
-    newFolderRow.className = "registry-add-row";
+    newFolderRow.className = "registry-add-row folder-picker-new-row";
     const newFolderInput = document.createElement("input");
     newFolderInput.type = "text";
     newFolderInput.placeholder = "새 폴더 이름";
@@ -1766,6 +1827,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
       } else {
         await apiCall("/api/archive/folders", { method: "POST", body: JSON.stringify({ path: newPath }) });
       }
+      _invalidateFolderListCache(isRclone, state.remote, currentPath); // 새 폴더가 생겼으니 이 경로는 다시 조회해야 함
       state.path = newPath;
       renderFolderPickerContents(containerId, onSelect);
     });
@@ -1773,6 +1835,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
     newFolderRow.appendChild(newFolderBtn);
     listArea.appendChild(newFolderRow);
   } catch (e) {
+    if (e.name === "AbortError") return; // 사용자가 직접 취소한 것 — 에러로 취급 안 함
     // 조회에 실패한 위치를 계속 기억하고 있으면, 새로고침해도 매번 똑같이
     // 고장난 위치를 다시 열려다 또 실패하는 문제가 실제로 있었다(예: OneDrive의
     // Personal Vault처럼 API로 접근 자체가 원천적으로 안 되는 특수 폴더) —
@@ -1787,11 +1850,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
     errorMsg.className = "error";
     errorMsg.textContent = e.message;
     listArea.appendChild(errorMsg);
-    const resetBtn = makeButton("⬅ 처음으로 돌아가기", () => {
-      archiveFolderPickerState[containerId] = { mode: state.mode, path: "", remote: "" };
-      renderFolderPickerContents(containerId, onSelect);
-    });
-    listArea.appendChild(resetBtn);
+    listArea.appendChild(backToStartBtn());
   }
 }
 
@@ -1887,12 +1946,14 @@ async function loadArchiveTargetList() {
         loadArchiveTargetList();
         loadArchiveManualSelectList();
       });
+      toggleBtn.className = "job-history-delete-btn";
       const deleteBtn = makeButton("삭제", async (ev) => {
         ev.stopPropagation();
         await apiCall(`/api/archive/targets/${encodeURIComponent(t.title_id)}`, { method: "DELETE" });
         loadArchiveTargetList();
         loadArchiveManualSelectList();
       });
+      deleteBtn.className = "job-history-delete-btn";
       summary.appendChild(toggleBtn);
       summary.appendChild(deleteBtn);
       entry.appendChild(summary);
