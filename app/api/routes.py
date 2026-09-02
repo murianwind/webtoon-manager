@@ -1389,6 +1389,12 @@ async def clear_archive_history():
     return {"status": "cleared"}
 
 
+@router.delete("/archive/history/{entry_id}")
+async def delete_archive_history_entry(entry_id: int):
+    await asyncio.to_thread(repository.delete_archive_history_entry, entry_id)
+    return {"status": "deleted"}
+
+
 _KEY_ARCHIVE_HISTORY_RETENTION_DAYS = "archive_history_retention_days"
 
 

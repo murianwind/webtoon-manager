@@ -1442,12 +1442,12 @@ function stopJobPolling() {
 
 async function loadEpisodeHistory(page) {
   loadRetentionDays();
-  const tbody = document.getElementById("episode-history-tbody");
+  const listContainer = document.getElementById("episode-history-list");
   const emptyEl = document.getElementById("episode-history-empty");
   const status = document.getElementById("episode-history-status").value;
   const search = document.getElementById("episode-history-search").value.trim();
 
-  tbody.innerHTML = "";
+  listContainer.innerHTML = "";
   try {
     const params = new URLSearchParams({ page: String(page) });
     if (status) params.set("status", status);
@@ -1456,26 +1456,29 @@ async function loadEpisodeHistory(page) {
 
     emptyEl.classList.toggle("hidden", data.items.length > 0);
     for (const item of data.items) {
-      const tr = document.createElement("tr");
+      const wrap = document.createElement("div");
+      wrap.className = "job-history-entry";
       const timeLabel = formatKoreanTime(item.downloaded_at);
       const statusLabel = item.status === "success" ? "성공" : `실패${item.error_msg ? ` (${item.error_msg})` : ""}`;
-      tr.innerHTML = `
-        <td>${escapeHtml(item.title_name)}</td>
-        <td>${item.episode_no}화 ${escapeHtml(item.subtitle)}</td>
-        <td>${escapeHtml(statusLabel)}</td>
-        <td>${escapeHtml(timeLabel)}</td>
-        <td></td>
+
+      const summary = document.createElement("div");
+      summary.className = "job-history-summary";
+      summary.innerHTML = `
+        <span class="job-history-name">${escapeHtml(item.title_name)}</span>
+        <span class="job-history-time">${item.episode_no}화 ${escapeHtml(item.subtitle)} · ${escapeHtml(timeLabel)}</span>
+        <span class="badge job-${item.status}">${escapeHtml(statusLabel)}</span>
       `;
-      tr.querySelector("td:last-child").appendChild(
-        makeButton("삭제", async () => {
-          await apiCall(`/api/episode-history/${item.id}`, { method: "DELETE" });
-          loadEpisodeHistory(page);
-        })
-      );
-      tbody.appendChild(tr);
+      const deleteBtn = makeButton("삭제", async (ev) => {
+        ev.stopPropagation();
+        await apiCall(`/api/episode-history/${item.id}`, { method: "DELETE" });
+        loadEpisodeHistory(page);
+      });
+      deleteBtn.className = "job-history-delete-btn";
+      summary.appendChild(deleteBtn);
+      wrap.appendChild(summary);
+      listContainer.appendChild(wrap);
     }
     renderEpisodeHistoryPagination(data.page, data.total, data.page_size);
-    requestAnimationFrame(() => fitScrollWrapperToViewport("episode-history-table-wrapper", 60));
   } catch (e) {
     emptyEl.textContent = e.message;
     emptyEl.classList.remove("hidden");
@@ -2046,27 +2049,38 @@ document.getElementById("btn-run-bulk-move").addEventListener("click", async () 
 
 async function loadArchiveHistory(page) {
   loadArchiveHistoryRetentionDays();
-  const tbody = document.getElementById("archive-history-tbody");
-  const emptyEl = document.getElementById("archive-history-empty");
-  tbody.innerHTML = "";
+  const listContainer = document.getElementById("archive-history-list");
+  listContainer.innerHTML = "";
   try {
     const data = await apiCall(`/api/archive/history?page=${page}`);
-    emptyEl.classList.toggle("hidden", data.items.length > 0);
+    if (data.items.length === 0) {
+      listContainer.innerHTML = "<p>기록이 없습니다.</p>";
+    }
     for (const item of data.items) {
-      const tr = document.createElement("tr");
       const triggerLabel = { periodic: "주기적", manual: "수동", finish_unsubscribe: "완결자동", bulk_move: "일괄이동" }[item.trigger_type] || item.trigger_type;
-      tr.innerHTML = `
-        <td>${escapeHtml(item.title_name)}</td>
-        <td>${escapeHtml(item.file_name)}</td>
-        <td>${escapeHtml(triggerLabel)}</td>
-        <td>${escapeHtml(formatKoreanTime(item.archived_at))}</td>
+      const wrap = document.createElement("div");
+      wrap.className = "job-history-entry";
+
+      const summary = document.createElement("div");
+      summary.className = "job-history-summary";
+      summary.innerHTML = `
+        <span class="job-history-name">${escapeHtml(item.title_name)}</span>
+        <span class="job-history-time">${escapeHtml(item.file_name)} · ${escapeHtml(formatKoreanTime(item.archived_at))}</span>
+        <span class="badge">${escapeHtml(triggerLabel)}</span>
       `;
-      tbody.appendChild(tr);
+      const deleteBtn = makeButton("삭제", async (ev) => {
+        ev.stopPropagation();
+        await apiCall(`/api/archive/history/${item.id}`, { method: "DELETE" });
+        loadArchiveHistory(page);
+      });
+      deleteBtn.className = "job-history-delete-btn";
+      summary.appendChild(deleteBtn);
+      wrap.appendChild(summary);
+      listContainer.appendChild(wrap);
     }
     renderArchiveHistoryPagination(data.page, data.total, data.page_size);
-    requestAnimationFrame(() => fitScrollWrapperToViewport("archive-history-table-wrapper", 60));
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="4" class="error">${escapeHtml(e.message)}</td></tr>`;
+    listContainer.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
   }
 }
 
@@ -2081,6 +2095,8 @@ function renderArchiveHistoryPagination(page, total, pageSize) {
   container.appendChild(label);
   if (page < totalPages) container.appendChild(makeButton("다음", () => loadArchiveHistory(page + 1)));
 }
+
+document.getElementById("btn-refresh-archive-history").addEventListener("click", () => loadArchiveHistory(1));
 
 document.getElementById("btn-clear-archive-history").addEventListener("click", async () => {
   if (!confirm("아카이빙 이력을 전부 지웁니다 (실제로 옮겨진 파일은 그대로 유지됩니다). 계속할까요?")) return;

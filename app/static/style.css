@@ -32,6 +32,22 @@ button {
   color: var(--text);
 }
 button:hover { border-color: var(--accent); }
+select {
+  /* 앱 전체에서 select 하나하나 다르게 스타일링되어 높이/생김새가 제각각이던
+     문제가 실제로 있었다(버튼과 나란히 있으면 flex가 늘려서 36px, 혼자 있으면
+     30px, 스타일 자체가 없는 곳은 브라우저 기본값) — 전역으로 한 번에 통일한다.
+     height를 명시적으로 고정해서(일반 버튼과 거의 같은 값), padding만 맞춰선
+     안 없어지던 1px 안팎의 오차까지 최대한 줄인다. button 쪽엔 height를 강제로
+     넣지 않는다 — 삭제 버튼처럼 의도적으로 작게 만든 버튼들까지 전부 커져버리는
+     부작용이 있었다.*/
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text);
+  height: 36px;
+}
 
 /* 상단 탭: 스크롤해도 항상 보이게 고정 */
 .main-tabs {
@@ -323,6 +339,7 @@ button:hover { border-color: var(--accent); }
 .badge.job-idle { background: #f0f0f0; color: var(--muted); }
 .badge.job-running { background: #e6f0ff; color: #1a5fd6; }
 .badge.job-success { background: #e6f9ee; color: #03823d; }
+.badge.job-failed { background: #fdecea; color: #c62828; }
 .badge.job-error { background: #fdecec; color: var(--danger); }
 
 /* 진행 로그: 검은 터미널이 아니라 일반 웹 카드 스타일로 */
@@ -365,10 +382,6 @@ button:hover { border-color: var(--accent); }
 .registry-add-row select {
   flex: 1;
   min-width: 160px;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 12px;
 }
 .registry-list {
   display: flex;

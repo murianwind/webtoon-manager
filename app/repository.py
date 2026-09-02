@@ -449,6 +449,11 @@ def clear_archive_history() -> None:
         conn.execute("DELETE FROM archive_history")
 
 
+def delete_archive_history_entry(entry_id: int) -> None:
+    with write_transaction() as conn:
+        conn.execute("DELETE FROM archive_history WHERE id = ?", (entry_id,))
+
+
 def delete_archive_history_older_than(days: int) -> int:
     """기록된 지 N일 넘은 아카이빙 이력을 지운다. 지운 개수를 반환."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
