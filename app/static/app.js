@@ -1218,7 +1218,33 @@ async function loadSettingsPage() {
   }
   loadDiscordSettings();
   loadWebtoonServerUrl();
+  loadAuthorAutoRegisterSetting();
 }
+
+async function loadAuthorAutoRegisterSetting() {
+  try {
+    const data = await apiCall("/api/settings/author-auto-register");
+    document.getElementById("author-auto-register-toggle").checked = data.enabled;
+  } catch (e) {
+    // 조용히 무시
+  }
+}
+
+document.getElementById("btn-save-author-auto-register").addEventListener("click", async () => {
+  const resultEl = document.getElementById("author-auto-register-save-result");
+  resultEl.textContent = "";
+  try {
+    await apiCall("/api/settings/author-auto-register", {
+      method: "POST",
+      body: JSON.stringify({ enabled: document.getElementById("author-auto-register-toggle").checked }),
+    });
+    resultEl.style.color = "";
+    resultEl.textContent = "저장했습니다.";
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+});
+
 
 async function loadManualRunPage() {
   await refreshJobStatus();

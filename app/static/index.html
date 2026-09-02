@@ -213,6 +213,13 @@
   <!-- 설정 -->
   <section id="page-settings" class="page hidden">
     <div class="settings-card">
+      <h2>작가 자동 등록</h2>
+      <label><input type="checkbox" id="author-auto-register-toggle" /> 웹툰 구독 시 그 작품 작가를 자동으로 "등록된 작가"로 추가</label>
+      <p class="hint">꺼두면 구독해도 작가/태그 관리 화면의 "선택됨"엔 자동으로 안 올라가고, "사용 가능"에서 원하면 직접 등록할 수 있습니다. 태그는 원래 구독 시 자동 등록되는 개념이 없어서 이 설정과 무관합니다.</p>
+      <button id="btn-save-author-auto-register">저장</button>
+      <span id="author-auto-register-save-result" class="hint-inline"></span>
+    </div>
+    <div class="settings-card">
       <h2>실행 스케줄</h2>
       <div class="schedule-block" data-job="discovery_job">
         <h3>신작 스캔</h3>

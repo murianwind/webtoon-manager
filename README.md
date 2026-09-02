@@ -63,7 +63,7 @@
    | `APP_DATA_HOST_PATH` | `D:\WebtoonManagerData` | 설정/DB를 저장할, 비어있는 폴더 |
    | `COOKIE_DIR_HOST_PATH` | `D:\WebtoonManagerData\cookies` | 네이버 로그인 쿠키 파일이 들어있는 폴더 |
    | `COOKIE_FILE_NAME` | `cookies.json` | 위 폴더 안 쿠키 파일 이름 |
-   | `RCLONE_CONFIG_HOST_PATH` | `D:\WebtoonManagerData\rclone` | rclone.conf 파일이 들어있는 폴더 (안 쓰면 아무 빈 폴더나 지정) |
+   | `RCLONE_CONFIG_HOST_PATH` | `D:\WebtoonManagerData\rclone` | rclone.conf 파일이 들어있는 폴더 (안 쓰실 거면 이 줄 자체를 지우세요) |
    | `WEB_PORT` | `8000` | 브라우저로 접속할 포트 (이미 쓰는 포트면 다른 숫자로) |
 
 4. **Deploy the stack** 클릭

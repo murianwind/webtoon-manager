@@ -96,6 +96,12 @@ def _get_or_404(title_id: str):
     return wt
 
 
+def _is_author_auto_register_enabled() -> bool:
+    """구독 시 그 작품 작가를 '등록된 작가'(자동 신작추가 대상)로 자동 등록할지 여부.
+    값이 명시적으로 '0'일 때만 꺼짐 — 기존 사용자는 값이 아예 없을 테니 켜짐 유지."""
+    return repository.get_setting("auto_register_author_on_subscribe") != "0"
+
+
 def _trigger_enrich(title_id: str, register_authors_enabled: bool = True) -> None:
     """
     백그라운드에서 정보/작가등록을 바로 채운다 (다음 정기 스캔까지 기다리지 않음).
@@ -134,7 +140,7 @@ async def list_webtoons(status: str | None = None):
 async def subscribe(title_id: str):
     await asyncio.to_thread(_get_or_404, title_id)
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_ACTIVE)
-    _trigger_enrich(title_id)
+    _trigger_enrich(title_id, register_authors_enabled=await asyncio.to_thread(_is_author_auto_register_enabled))
     return _to_out(await asyncio.to_thread(repository.get, title_id))
 
 
@@ -280,7 +286,7 @@ async def naver_list_subscribe(title_id: str, payload: NaverListEntryIn):
             payload.thumbnail_url,
         )
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_ACTIVE)
-    _trigger_enrich(title_id)
+    _trigger_enrich(title_id, register_authors_enabled=await asyncio.to_thread(_is_author_auto_register_enabled))
     return _to_out(await asyncio.to_thread(repository.get, title_id))
 
 
@@ -410,6 +416,30 @@ async def remove_watched_author(author_id: str):
     """레지스트리에서 완전히 지운다 (이름 없이 남은 예전 데이터 등을 정리할 때 사용)."""
     await asyncio.to_thread(repository.delete_watched_author, author_id)
     return {"status": "deleted"}
+
+
+class AuthorAutoRegisterOut(BaseModel):
+    enabled: bool
+
+
+class AuthorAutoRegisterIn(BaseModel):
+    enabled: bool
+
+
+@router.get("/settings/author-auto-register", response_model=AuthorAutoRegisterOut)
+async def get_author_auto_register():
+    """구독할 때 그 작품 작가를 '등록된 작가'로 자동 등록할지 여부. 태그는 이 기능이
+    없다 — 애초에 태그는 구독 시점에 자동 등록되는 개념 자체가 없기 때문(작가만 해당)."""
+    enabled = await asyncio.to_thread(_is_author_auto_register_enabled)
+    return AuthorAutoRegisterOut(enabled=enabled)
+
+
+@router.post("/settings/author-auto-register", response_model=AuthorAutoRegisterOut)
+async def set_author_auto_register(payload: AuthorAutoRegisterIn):
+    await asyncio.to_thread(
+        repository.set_setting, "auto_register_author_on_subscribe", None if payload.enabled else "0"
+    )
+    return await get_author_auto_register()
 
 
 # ── 카카오웹툰 작가 (네이버와 인터페이스는 같지만, 작가에 고유 ID가 없어서
