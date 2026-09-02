@@ -1219,7 +1219,6 @@ async function loadSettingsPage() {
   loadDiscordSettings();
   loadWebtoonServerUrl();
   loadAuthorAutoRegisterSetting();
-  loadTagAutoSubscribeSetting();
 }
 
 async function loadAuthorAutoRegisterSetting() {
@@ -1238,30 +1237,6 @@ document.getElementById("btn-save-author-auto-register").addEventListener("click
     await apiCall("/api/settings/author-auto-register", {
       method: "POST",
       body: JSON.stringify({ enabled: document.getElementById("author-auto-register-toggle").checked }),
-    });
-    resultEl.style.color = "";
-    resultEl.textContent = "저장했습니다.";
-  } catch (e) {
-    resultEl.textContent = e.message;
-  }
-});
-
-async function loadTagAutoSubscribeSetting() {
-  try {
-    const data = await apiCall("/api/settings/tag-auto-subscribe");
-    document.getElementById("tag-auto-subscribe-toggle").checked = data.enabled;
-  } catch (e) {
-    // 조용히 무시
-  }
-}
-
-document.getElementById("btn-save-tag-auto-subscribe").addEventListener("click", async () => {
-  const resultEl = document.getElementById("tag-auto-subscribe-save-result");
-  resultEl.textContent = "";
-  try {
-    await apiCall("/api/settings/tag-auto-subscribe", {
-      method: "POST",
-      body: JSON.stringify({ enabled: document.getElementById("tag-auto-subscribe-toggle").checked }),
     });
     resultEl.style.color = "";
     resultEl.textContent = "저장했습니다.";
