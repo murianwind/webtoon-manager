@@ -333,7 +333,9 @@ def add_seen_kakao_title(author_name: str, title_id: int, title_name: str) -> No
 # ── archive_targets (아카이빙 대상 웹툰 + 목적지 그릇 폴더) ──────────────
 
 def list_archive_targets() -> list[ArchiveTarget]:
-    rows = fetchall("SELECT * FROM archive_targets ORDER BY title_id")
+    """최근 등록한 게 위로 오도록 정렬한다 — 예전엔 title_id(작품 고유번호) 순이라
+    등록 순서와 무관하게 뒤죽박죽으로 보였다."""
+    rows = fetchall("SELECT * FROM archive_targets ORDER BY created_at DESC")
     return [
         ArchiveTarget(
             title_id=r["title_id"], dest_base_path=r["dest_base_path"], enabled=bool(r["enabled"]),
