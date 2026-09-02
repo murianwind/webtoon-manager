@@ -36,7 +36,12 @@ def _list_episode_files_sorted(title_dir: Path) -> list[tuple[int, Path]]:
     if not title_dir.is_dir():
         return []
     results = []
-    for entry in title_dir.iterdir():
+    try:
+        entries = list(title_dir.iterdir())
+    except OSError as e:
+        log.error("다운로드 폴더 목록 조회 실패 (%s): %s", title_dir, e)
+        return []
+    for entry in entries:
         if not entry.is_file() or entry.suffix != ".zip":
             continue
         match = _LEADING_DIGITS_RE.match(entry.name)
@@ -47,11 +52,18 @@ def _list_episode_files_sorted(title_dir: Path) -> list[tuple[int, Path]]:
 
 
 def is_folder_selectable_as_dest(archive_root: str, base_path: str) -> bool:
-    """이미 파일이 하나라도 있으면 새 목적지로 선택 불가 (뒤섞임 방지)."""
+    """이미 파일이 하나라도 있으면 새 목적지로 선택 불가 (뒤섞임 방지).
+    rclone 마운트처럼 일반적이지 않은 폴더는 목록 조회 자체가 예외를 던질 수 있어서
+    (실제로 겪은 사례) 안전하게 "선택 불가"로 처리한다 — 뭔가 있는지 확신 못 하면
+    비어있다고 잘못 판단해서 파일이 섞이는 것보다는, 막아두는 쪽이 안전하다."""
     dest = Path(archive_root) / base_path
     if not dest.exists():
         return True
-    return not any(dest.iterdir())
+    try:
+        return not any(dest.iterdir())
+    except OSError as e:
+        log.warning("폴더 내용 확인 실패, 안전하게 선택 불가 처리 (%s): %s", dest, e)
+        return False
 
 
 def resolve_archive_dest(archive_root: str, title_name: str, base_path: str, *, force_subfolder: bool) -> Path:
@@ -214,12 +226,20 @@ def bulk_move_folder(archive_root: str, source_path: str, dest_path: str) -> int
     dest.mkdir(parents=True, exist_ok=True)
     policy = get_conflict_policy()
     moved = 0
-    for item in list(src.iterdir()):
-        if item.is_dir():
-            shutil.move(str(item), str(dest / item.name))
-            moved += 1
-        else:
-            saved_name = move_file_with_conflict_policy(item, dest, policy)
-            if saved_name is not None:
+    try:
+        entries = list(src.iterdir())
+    except OSError as e:
+        raise ValueError(f"원본 폴더 목록을 읽을 수 없습니다 (마운트가 불안정할 수 있습니다): {e}")
+
+    for item in entries:
+        try:
+            if item.is_dir():
+                shutil.move(str(item), str(dest / item.name))
                 moved += 1
+            else:
+                saved_name = move_file_with_conflict_policy(item, dest, policy)
+                if saved_name is not None:
+                    moved += 1
+        except OSError as e:
+            log.error("일괄 이동 중 개별 항목 실패, 건너뜀 (%s): %s", item, e)
     return moved

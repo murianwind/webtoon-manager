@@ -1149,7 +1149,11 @@ async def set_archive_settings(payload: ArchiveSettingsIn):
 @router.get("/archive/folders")
 async def list_archive_folders(path: str = ""):
     """ARCHIVE_ROOT 기준 하위 폴더 목록을 보여준다 — 폴더 찾아보기 UI용.
-    각 폴더가 이미 파일을 갖고 있어서 선택 불가능한지도 같이 알려준다."""
+    각 폴더가 이미 파일을 갖고 있어서 선택 불가능한지도 같이 알려준다.
+
+    rclone 마운트 같은 특수 폴더는 존재는 하는데 목록조회(iterdir)나 종류 확인(is_dir)
+    자체가 예외를 던지는 경우가 실제로 있어서, 항목 하나하나 개별 예외 처리를 한다 —
+    문제있는 항목 하나 때문에 폴더 찾아보기 전체가 500으로 죽으면 안 되기 때문."""
     settings = get_settings()
     root = Path(settings.archive_root).resolve()
     target = (root / path).resolve()
@@ -1157,12 +1161,27 @@ async def list_archive_folders(path: str = ""):
         raise HTTPException(status_code=400, detail="잘못된 경로입니다.")
     if not target.exists():
         return {"path": path, "folders": []}
+
     folders = []
-    for entry in sorted(target.iterdir()):
-        if entry.is_dir():
+    try:
+        entries = sorted(target.iterdir())
+    except OSError as e:
+        log.error("폴더 목록 조회 실패 (%s): %s", target, e)
+        raise HTTPException(
+            status_code=502,
+            detail=f"이 폴더의 목록을 읽을 수 없습니다 (마운트가 불안정할 수 있습니다): {e}",
+        )
+
+    for entry in entries:
+        try:
+            if not entry.is_dir():
+                continue
             rel = str(entry.relative_to(root))
             selectable = await asyncio.to_thread(archiver.is_folder_selectable_as_dest, settings.archive_root, rel)
             folders.append({"name": entry.name, "path": rel, "selectable": selectable})
+        except OSError as e:
+            log.warning("폴더 항목 확인 실패, 건너뜀 (%s): %s", entry, e)
+            continue
     return {"path": path, "folders": folders}
 
 
