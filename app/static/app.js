@@ -1601,8 +1601,15 @@ async function renderFolderPickerContents(containerId, onSelect) {
       });
       row.appendChild(nameBtn);
       const destValue = isRclone ? `${state.remote}:${folder.path}` : folder.path;
-      const selectBtn = makeButton(folder.selectable ? "이 폴더 선택" : "이미 파일 있음", () => onSelect(destValue, isRclone ? "rclone" : "local"));
-      selectBtn.disabled = !folder.selectable;
+      const selectBtn = makeButton(
+        folder.selectable ? "이 폴더 선택" : "⚠ 이미 파일 있음 (선택)",
+        () => {
+          if (!folder.selectable && !confirm(`"${folder.name}" 폴더엔 이미 파일이 있습니다. 다른 웹툰의 파일과 섞일 수 있는데, 그래도 선택하시겠습니까?`)) {
+            return;
+          }
+          onSelect(destValue, isRclone ? "rclone" : "local");
+        }
+      );
       row.appendChild(selectBtn);
       listBox.appendChild(row);
     }
@@ -1610,7 +1617,12 @@ async function renderFolderPickerContents(containerId, onSelect) {
 
     const hereLabel = isRclone ? `"${state.remote}:/${currentPath || "(최상위)"}"` : `"/${currentPath || "(최상위)"}"`;
     const hereValue = isRclone ? `${state.remote}:${currentPath}` : currentPath;
-    const selectHereBtn = makeButton(`${hereLabel} 여기로 선택`, () => onSelect(hereValue, isRclone ? "rclone" : "local"));
+    const selectHereBtn = makeButton(`${hereLabel} 여기로 선택${data.current_path_selectable ? "" : " ⚠"}`, () => {
+      if (!data.current_path_selectable && !confirm(`${hereLabel}엔 이미 파일이 있습니다. 다른 웹툰의 파일과 섞일 수 있는데, 그래도 선택하시겠습니까?`)) {
+        return;
+      }
+      onSelect(hereValue, isRclone ? "rclone" : "local");
+    });
     container.appendChild(selectHereBtn);
 
     const newFolderRow = document.createElement("div");
@@ -1646,6 +1658,16 @@ let archiveSelectedBulkSourcePath = "";
 let archiveSelectedBulkDestPath = "";
 
 async function loadArchivePage() {
+  try {
+    const settingsCheck = await apiCall("/api/archive/settings");
+    const isAvailable = settingsCheck.local_available || settingsCheck.rclone_available;
+    document.getElementById("archive-disabled-guide").classList.toggle("hidden", isAvailable);
+    document.getElementById("archive-main-content").classList.toggle("hidden", !isAvailable);
+    if (!isAvailable) return;
+  } catch (e) {
+    // 조용히 무시하고 본문 계속 로드 시도
+  }
+
   await loadArchiveTargetWebtoonOptions();
   renderFolderPicker("archive-target-folder-picker", (path, destType) => {
     archiveSelectedTargetPath = path;

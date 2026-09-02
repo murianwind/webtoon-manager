@@ -40,6 +40,7 @@ from app import kakao_api
 from app import webtoon_server_client
 from app import archiver
 from app import rclone_client
+from app import rclone_updater
 from app.config import get_settings
 
 log = logging.getLogger(__name__)
@@ -1045,6 +1046,7 @@ class ArchiveTargetOut(BaseModel):
     dest_base_path: str
     dest_type: str
     enabled: bool
+    folder_had_existing_files: bool = False
 
 
 class ArchiveTargetIn(BaseModel):
@@ -1087,20 +1089,21 @@ async def add_archive_target(payload: ArchiveTargetIn):
             archiver.is_folder_selectable_as_dest_rclone, settings.rclone_config_path, payload.dest_base_path
         )
     else:
+        if not settings.archive_root:
+            raise HTTPException(status_code=400, detail="로컬 아카이빙 경로(ARCHIVE_ROOT)가 설정되어 있지 않습니다.")
         selectable = await asyncio.to_thread(
             archiver.is_folder_selectable_as_dest, settings.archive_root, payload.dest_base_path
         )
-    existing = await asyncio.to_thread(repository.get_archive_target, payload.title_id)
-    # 이미 이 웹툰이 그 경로를 쓰고 있었다면(경로 변경 없이 재저장) 통과시킨다 —
-    # "이미 파일 있어서 선택 불가" 규칙은 새로 그 폴더를 쓰기 시작하는 경우만 막는 것.
-    if not selectable and not (existing and existing.dest_base_path == payload.dest_base_path):
-        raise HTTPException(status_code=409, detail="이미 파일이 있는 폴더는 새 목적지로 지정할 수 없습니다.")
+    # 이미 파일이 있는 폴더도 이제는 허용한다 — 대신 응답에 경고 플래그를 담아서
+    # 프론트엔드가 사용자에게 주의를 주게 한다 (전에는 여기서 막았었음).
 
     await asyncio.to_thread(
         repository.upsert_archive_target, payload.title_id, payload.dest_base_path, True, payload.dest_type
     )
     target = await asyncio.to_thread(repository.get_archive_target, payload.title_id)
-    return _archive_target_to_out(target)
+    out = _archive_target_to_out(target)
+    out.folder_had_existing_files = not selectable
+    return out
 
 
 @router.post("/archive/targets/{title_id}/enable", response_model=ArchiveTargetOut)
@@ -1133,6 +1136,7 @@ class ArchiveSettingsOut(BaseModel):
     conflict_policy: str
     on_finish_unsubscribe: bool
     rclone_available: bool
+    local_available: bool
 
 
 class ArchiveSettingsIn(BaseModel):
@@ -1169,11 +1173,19 @@ async def get_archive_settings():
         conflict_policy=conflict_policy,
         on_finish_unsubscribe=on_finish,
         rclone_available=bool(settings.rclone_config_path) and Path(settings.rclone_config_path).is_file(),
+        local_available=bool(settings.archive_root),
     )
 
 
 @router.post("/archive/settings", response_model=ArchiveSettingsOut)
 async def set_archive_settings(payload: ArchiveSettingsIn):
+    settings = get_settings()
+    if payload.default_dest_type == "local" and payload.default_base_path.strip() and not settings.archive_root:
+        raise HTTPException(status_code=400, detail="로컬 아카이빙 경로(ARCHIVE_ROOT)가 설정되어 있지 않습니다.")
+    if payload.default_dest_type == "rclone" and payload.default_base_path.strip() and not (
+        settings.rclone_config_path and Path(settings.rclone_config_path).is_file()
+    ):
+        raise HTTPException(status_code=400, detail="rclone 설정 파일이 등록되어 있지 않습니다.")
     await asyncio.to_thread(repository.set_setting, "archive_default_base_path", payload.default_base_path.strip() or None)
     await asyncio.to_thread(repository.set_setting, "archive_default_dest_type", payload.default_dest_type)
     await asyncio.to_thread(repository.set_setting, "archive_conflict_policy", payload.conflict_policy)
@@ -1202,9 +1214,10 @@ async def list_rclone_folders(remote: str, path: str = ""):
         raise HTTPException(status_code=400, detail="rclone 설정 파일이 등록되어 있지 않습니다.")
     try:
         folders = await asyncio.to_thread(rclone_client.list_folders, settings.rclone_config_path, remote, path)
+        current_selectable = await asyncio.to_thread(archiver.is_folder_selectable_as_dest_rclone, settings.rclone_config_path, f"{remote}:{path}")
     except rclone_client.RcloneError as e:
         raise HTTPException(status_code=502, detail=str(e))
-    return {"remote": remote, "path": path, "folders": folders}
+    return {"remote": remote, "path": path, "folders": folders, "current_path_selectable": current_selectable}
 
 
 class CreateRcloneFolderIn(BaseModel):
@@ -1233,6 +1246,8 @@ async def list_archive_folders(path: str = ""):
     자체가 예외를 던지는 경우가 실제로 있어서, 항목 하나하나 개별 예외 처리를 한다 —
     문제있는 항목 하나 때문에 폴더 찾아보기 전체가 500으로 죽으면 안 되기 때문."""
     settings = get_settings()
+    if not settings.archive_root:
+        raise HTTPException(status_code=400, detail="로컬 아카이빙 경로(ARCHIVE_ROOT)가 설정되어 있지 않습니다.")
     root = Path(settings.archive_root).resolve()
     target = (root / path).resolve()
     if root != target and root not in target.parents:
@@ -1260,7 +1275,9 @@ async def list_archive_folders(path: str = ""):
         except OSError as e:
             log.warning("폴더 항목 확인 실패, 건너뜀 (%s): %s", entry, e)
             continue
-    return {"path": path, "folders": folders}
+
+    current_selectable = await asyncio.to_thread(archiver.is_folder_selectable_as_dest, settings.archive_root, path)
+    return {"path": path, "folders": folders, "current_path_selectable": current_selectable}
 
 
 class CreateFolderIn(BaseModel):
@@ -1270,6 +1287,8 @@ class CreateFolderIn(BaseModel):
 @router.post("/archive/folders")
 async def create_archive_folder(payload: CreateFolderIn):
     settings = get_settings()
+    if not settings.archive_root:
+        raise HTTPException(status_code=400, detail="로컬 아카이빙 경로(ARCHIVE_ROOT)가 설정되어 있지 않습니다.")
     root = Path(settings.archive_root).resolve()
     target = (root / payload.path).resolve()
     if root != target and root not in target.parents:
@@ -1288,6 +1307,12 @@ async def run_archive_now(payload: ArchiveRunIn):
     job_status.start("archive")
 
     async def _run():
+        try:
+            update_result = await rclone_updater.check_and_update()
+            job_status.log_line("archive", update_result)
+        except Exception as e:
+            job_status.log_line("archive", f"rclone 업데이트 확인 중 오류(무시하고 계속): {e}")
+
         try:
             if payload.title_ids:
                 moved = await asyncio.to_thread(

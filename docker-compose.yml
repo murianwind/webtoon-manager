@@ -17,6 +17,9 @@ services:
       - "${WEB_PORT:-8000}:8000"
     environment:
       DOWNLOAD_ROOT: /webtoon_download
+      # 아카이빙(웹툰 파일을 별도 보관 폴더로 자동 정리) 기능을 쓰고 싶을 때만
+      # 필요하다. 안 쓰실 거면 이 줄과 아래 대응하는 volumes 줄을 통째로 지우면
+      # "아카이빙" 탭에 안내 화면이 뜨고 나머지 기능엔 영향 없다.
       ARCHIVE_ROOT: /webtoon_archive
       DATABASE_PATH: /data/webtoons.db
       COOKIE_FILE_PATH: /cookies/${COOKIE_FILE_NAME:-cookies.json}

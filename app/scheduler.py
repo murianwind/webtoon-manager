@@ -27,6 +27,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app import archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, naver_api, repository, schedule_config, tracker, webtoon_server_client
+from app import rclone_updater
 from app.config import Settings, get_settings
 from app.cookie_loader import get_adult_cookies
 from app.downloader import download_single_episode
@@ -332,6 +333,12 @@ async def run_archive_job() -> None:
     async with _archive_job_lock:
         settings = get_settings()
         job_status.start("archive")
+        try:
+            update_result = await rclone_updater.check_and_update()
+            job_status.log_line("archive", update_result)
+        except Exception as e:
+            log.error("rclone 자동 업데이트 확인 중 예외: %s", e)
+            job_status.log_line("archive", f"rclone 업데이트 확인 중 오류(무시하고 계속): {e}")
         try:
             moved = await asyncio.to_thread(archiver.run_periodic_archive, settings.archive_root, settings.download_root, settings.rclone_config_path)
             job_status.log_line("archive", f"지정 웹툰 {moved}개 파일 이동 완료")

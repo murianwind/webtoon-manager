@@ -52,6 +52,9 @@ async def lifespan(app: FastAPI):
     _configure_logging()
     ensure_default_tags_seeded()
     await start_bot()
+    # rclone 최신화는 이제 컨테이너 시작 시점이 아니라, 아카이빙 잡이 실행될 때마다
+    # 확인한다(app/rclone_updater.py) — "컨테이너를 자주 재시작 안 하니 시작 시점
+    # 확인은 사실상 이미지 빌드 시점 고정과 다를 게 없다"는 지적을 반영해 변경.
     scheduler = create_scheduler()
     scheduler.start()
     app.state.scheduler = scheduler

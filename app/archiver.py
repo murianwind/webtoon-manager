@@ -181,6 +181,9 @@ def _archive_title(
     if dest_type == "rclone" and not (rclone_config_path and Path(rclone_config_path).is_file()):
         log.error("rclone 목적지인데 RCLONE_CONFIG_PATH가 설정 안 되어 있어 건너뜀 (title_id=%s)", title_id)
         return 0
+    if dest_type == "local" and not archive_root:
+        log.error("로컬 목적지인데 ARCHIVE_ROOT가 설정 안 되어 있어 건너뜀 (title_id=%s)", title_id)
+        return 0
 
     title_dir = Path(download_root) / remove_forbidden_str(title_name)
     files = _list_episode_files_sorted(title_dir)
