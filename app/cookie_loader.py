@@ -19,10 +19,6 @@ log = logging.getLogger(__name__)
 _TARGET_COOKIE_NAMES = ("NID_AUT", "NID_SES")
 
 
-class CookieLoadError(Exception):
-    """쿠키 파일을 읽거나 파싱할 수 없을 때 발생."""
-
-
 def load_naver_auth_cookies(cookie_file_path: str) -> dict[str, str]:
     """
     성공 시 {"NID_AUT": "...", "NID_SES": "..."} 형태로 반환.

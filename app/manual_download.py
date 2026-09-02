@@ -9,7 +9,7 @@ last_downloaded_no를 자연스럽게 갱신한다(있을 때만; 구독 안 한
 """
 
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 import aiohttp

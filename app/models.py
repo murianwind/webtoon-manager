@@ -102,15 +102,6 @@ class WatchedTag:
 
 
 @dataclass
-class KakaoTitle:
-    """카카오웹툰 검색 결과 한 건 — 작가는 고유 ID가 없어서 이름 문자열 그 자체로 다룬다."""
-    title_id: int
-    title_name: str
-    is_adult: bool = False
-    author_names: list[str] = field(default_factory=list)
-
-
-@dataclass
 class ArchiveTarget:
     title_id: str
     dest_base_path: str

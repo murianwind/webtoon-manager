@@ -31,7 +31,6 @@ DEFAULT_HEADERS = {
     "Referer": "https://comic.naver.com/webtoon/list",
 }
 
-DISCORD_API = "https://discord.com/api/v10"
 DISCORD_MESSAGE_CHUNK_LIMIT = 1900
 
 # 웹툰 폴더 네이밍 규칙 (기존 NWebtoon_Downloader / change.py와 동일)

@@ -305,10 +305,8 @@ async def resync_registry(session: aiohttp.ClientSession, settings: Settings) ->
         return 0
 
     semaphore = asyncio.Semaphore(settings.artist_scan_concurrency)
-    registered_count = 0
 
     async def _run_one(wt) -> bool:
-        nonlocal registered_count
         async with semaphore:
             # 제외된 웹툰의 정보는 채우되(썸네일/장르/태그 등), 그 저자를 "등록된 작가"로
             # 올리진 않는다 — 목록제외한 웹툰의 작가가 관심작가가 되면 안 되기 때문.
@@ -321,8 +319,7 @@ async def resync_registry(session: aiohttp.ClientSession, settings: Settings) ->
             return success and message.startswith("작가 등록") and register_authors_enabled
 
     results = await asyncio.gather(*(_run_one(wt) for wt in targets))
-    registered_count = sum(1 for r in results if r)
-    return registered_count
+    return sum(1 for r in results if r)
 
 
 async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, settings: Settings) -> None:

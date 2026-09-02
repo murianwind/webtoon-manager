@@ -67,15 +67,20 @@ def is_folder_selectable_as_dest(archive_root: str, base_path: str) -> bool:
         return False
 
 
-def resolve_archive_dest(archive_root: str, title_name: str, base_path: str, *, force_subfolder: bool) -> Path:
-    """실제 저장 위치를 계산하고 폴더를 만들어서 반환한다.
-    force_subfolder=True면(완결 자동이동의 기본 경로) 항상 웹툰별 서브폴더를 만들고,
-    아니면 이 base_path를 지정해서 쓰는 활성 웹툰이 2개 이상일 때만 서브폴더를 만든다."""
+def _should_use_subfolder(base_path: str, dest_type: str, *, force_subfolder: bool) -> bool:
+    """이 base_path를 지정해서 쓰는 활성 웹툰이 2개 이상이면(또는 완결 자동이동의
+    기본 경로라 항상 여러 웹툰을 받는 공용 그릇이면) 웹툰별 서브폴더를 만든다.
+    로컬/rclone 둘 다 이 판단 기준을 공유한다 — 예전엔 이 로직이 두 곳에 거의
+    똑같이 복사돼 있었다."""
     if force_subfolder:
-        use_subfolder = True
-    else:
-        sharing_count = repository.count_archive_targets_with_base_path(base_path)
-        use_subfolder = sharing_count > 1
+        return True
+    sharing_count = repository.count_archive_targets_with_base_path(base_path, dest_type)
+    return sharing_count > 1
+
+
+def resolve_archive_dest(archive_root: str, title_name: str, base_path: str, *, force_subfolder: bool) -> Path:
+    """실제 저장 위치를 계산하고 폴더를 만들어서 반환한다."""
+    use_subfolder = _should_use_subfolder(base_path, "local", force_subfolder=force_subfolder)
 
     if use_subfolder:
         dest = Path(archive_root) / base_path / remove_forbidden_str(title_name)
@@ -136,11 +141,7 @@ def is_folder_selectable_as_dest_rclone(rclone_config_path: str, base_path: str)
 
 def _resolve_archive_dest_rclone(rclone_config_path: str, title_name: str, base_path: str, *, force_subfolder: bool) -> str:
     remote, path = _parse_rclone_target(base_path)
-    if force_subfolder:
-        use_subfolder = True
-    else:
-        sharing_count = repository.count_archive_targets_with_base_path(base_path, "rclone")
-        use_subfolder = sharing_count > 1
+    use_subfolder = _should_use_subfolder(base_path, "rclone", force_subfolder=force_subfolder)
 
     if use_subfolder:
         folder_name = remove_forbidden_str(title_name)
