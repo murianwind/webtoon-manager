@@ -333,11 +333,11 @@ async def run_archive_job() -> None:
         settings = get_settings()
         job_status.start("archive")
         try:
-            moved = await asyncio.to_thread(archiver.run_periodic_archive, settings.archive_root, settings.download_root)
+            moved = await asyncio.to_thread(archiver.run_periodic_archive, settings.archive_root, settings.download_root, settings.rclone_config_path)
             job_status.log_line("archive", f"지정 웹툰 {moved}개 파일 이동 완료")
 
             pending_moved = await asyncio.to_thread(
-                archiver.process_pending_finish_archives, settings.archive_root, settings.download_root
+                archiver.process_pending_finish_archives, settings.archive_root, settings.download_root, settings.rclone_config_path
             )
             job_status.log_line("archive", f"완결 구독해제 대기열 {pending_moved}개 파일 이동 완료")
 

@@ -20,7 +20,7 @@ import logging
 import shutil
 from pathlib import Path
 
-from app import repository
+from app import rclone_client, repository
 from app.file_utils import remove_forbidden_str
 from app.zipper import _LEADING_DIGITS_RE
 
@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 
 _CONFLICT_POLICY_SETTING_KEY = "archive_conflict_policy"
 _DEFAULT_BASE_PATH_SETTING_KEY = "archive_default_base_path"
+_DEFAULT_DEST_TYPE_SETTING_KEY = "archive_default_dest_type"
 _ON_FINISH_UNSUBSCRIBE_SETTING_KEY = "archive_on_finish_unsubscribe"
 
 
@@ -112,15 +113,75 @@ def get_default_base_path() -> str | None:
     return repository.get_setting(_DEFAULT_BASE_PATH_SETTING_KEY)
 
 
+def get_default_dest_type() -> str:
+    return repository.get_setting(_DEFAULT_DEST_TYPE_SETTING_KEY) or "local"
+
+
 def is_finish_unsubscribe_archiving_enabled() -> bool:
     return repository.get_setting(_ON_FINISH_UNSUBSCRIBE_SETTING_KEY) == "1"
+
+
+def _parse_rclone_target(base_path: str) -> tuple[str, str]:
+    """'remote:path/to/folder' -> ('remote', 'path/to/folder')."""
+    remote, _, path = base_path.partition(":")
+    return remote, path
+
+
+def is_folder_selectable_as_dest_rclone(rclone_config_path: str, base_path: str) -> bool:
+    remote, path = _parse_rclone_target(base_path)
+    if not remote:
+        return False
+    return rclone_client.is_folder_empty(rclone_config_path, remote, path)
+
+
+def _resolve_archive_dest_rclone(rclone_config_path: str, title_name: str, base_path: str, *, force_subfolder: bool) -> str:
+    remote, path = _parse_rclone_target(base_path)
+    if force_subfolder:
+        use_subfolder = True
+    else:
+        sharing_count = repository.count_archive_targets_with_base_path(base_path, "rclone")
+        use_subfolder = sharing_count > 1
+
+    if use_subfolder:
+        folder_name = remove_forbidden_str(title_name)
+        dest_path = f"{path}/{folder_name}" if path else folder_name
+        rclone_client.create_folder(rclone_config_path, remote, dest_path)
+    else:
+        dest_path = path
+    return f"{remote}:{dest_path}"
+
+
+def _move_file_to_rclone_with_conflict_policy(rclone_config_path: str, src: Path, remote: str, dest_path: str, policy: str) -> str | None:
+    dest_name = src.name
+    if rclone_client.file_exists(rclone_config_path, remote, dest_path, dest_name):
+        if policy == "skip":
+            log.info("아카이빙 건너뜀 (원격에 이미 존재): %s:%s/%s", remote, dest_path, dest_name)
+            return None
+        elif policy == "rename":
+            stem = Path(dest_name).stem
+            suffix = Path(dest_name).suffix
+            counter = 2
+            while rclone_client.file_exists(rclone_config_path, remote, dest_path, dest_name):
+                dest_name = f"{stem} ({counter}){suffix}"
+                counter += 1
+        # overwrite: 그대로 진행, rclone moveto가 덮어씀
+
+    rclone_client.move_file_to_remote(rclone_config_path, str(src), remote, dest_path, dest_name)
+    return dest_name
 
 
 def _archive_title(
     archive_root: str, download_root: str, title_id: str, title_name: str,
     base_path: str, policy: str, trigger_type: str, keep_last: bool,
+    dest_type: str = "local", rclone_config_path: str = "",
 ) -> int:
-    """실제로 파일들을 옮기고 이력을 남긴다. 반환값은 옮긴 개수."""
+    """실제로 파일들을 옮기고 이력을 남긴다. 반환값은 옮긴 개수.
+    dest_type이 'rclone'이면 로컬 shutil 대신 rclone CLI로 처리한다(Windows 마운트를
+    거치지 않아서, Docker Desktop이 WinFsp 가상 드라이브를 못 읽는 문제를 우회함)."""
+    if dest_type == "rclone" and not (rclone_config_path and Path(rclone_config_path).is_file()):
+        log.error("rclone 목적지인데 RCLONE_CONFIG_PATH가 설정 안 되어 있어 건너뜀 (title_id=%s)", title_id)
+        return 0
+
     title_dir = Path(download_root) / remove_forbidden_str(title_name)
     files = _list_episode_files_sorted(title_dir)
     if keep_last and len(files) > 0:
@@ -130,21 +191,33 @@ def _archive_title(
         return 0
 
     force_subfolder = base_path == get_default_base_path()
-    dest_dir = resolve_archive_dest(archive_root, title_name, base_path, force_subfolder=force_subfolder)
-
     moved = 0
-    for _num, src in files:
-        try:
-            saved_name = move_file_with_conflict_policy(src, dest_dir, policy)
-            if saved_name is not None:
-                repository.add_archive_history(title_id, title_name, saved_name, trigger_type)
-                moved += 1
-        except Exception as e:
-            log.error("아카이빙 이동 실패 (%s): %s", src, e)
+
+    if dest_type == "rclone":
+        dest_target = _resolve_archive_dest_rclone(rclone_config_path, title_name, base_path, force_subfolder=force_subfolder)
+        remote, dest_path = _parse_rclone_target(dest_target)
+        for _num, src in files:
+            try:
+                saved_name = _move_file_to_rclone_with_conflict_policy(rclone_config_path, src, remote, dest_path, policy)
+                if saved_name is not None:
+                    repository.add_archive_history(title_id, title_name, saved_name, trigger_type)
+                    moved += 1
+            except Exception as e:
+                log.error("rclone 아카이빙 이동 실패 (%s): %s", src, e)
+    else:
+        dest_dir = resolve_archive_dest(archive_root, title_name, base_path, force_subfolder=force_subfolder)
+        for _num, src in files:
+            try:
+                saved_name = move_file_with_conflict_policy(src, dest_dir, policy)
+                if saved_name is not None:
+                    repository.add_archive_history(title_id, title_name, saved_name, trigger_type)
+                    moved += 1
+            except Exception as e:
+                log.error("아카이빙 이동 실패 (%s): %s", src, e)
     return moved
 
 
-def run_periodic_archive(archive_root: str, download_root: str) -> int:
+def run_periodic_archive(archive_root: str, download_root: str, rclone_config_path: str = "") -> int:
     """지정된(enabled) 웹툰 전부, 마지막 파일 보존하며 이동. 반환값은 전체 이동 개수."""
     policy = get_conflict_policy()
     total = 0
@@ -157,11 +230,12 @@ def run_periodic_archive(archive_root: str, download_root: str) -> int:
         total += _archive_title(
             archive_root, download_root, target.title_id, wt.title,
             target.dest_base_path, policy, "periodic", keep_last=True,
+            dest_type=target.dest_type, rclone_config_path=rclone_config_path,
         )
     return total
 
 
-def manual_archive_now(archive_root: str, download_root: str, title_ids: list[str]) -> int:
+def manual_archive_now(archive_root: str, download_root: str, title_ids: list[str], rclone_config_path: str = "") -> int:
     """수동 실행 — 지정된 것과 동일 규칙(마지막 파일 보존), 대상만 사용자가 고름."""
     policy = get_conflict_policy()
     total = 0
@@ -175,11 +249,12 @@ def manual_archive_now(archive_root: str, download_root: str, title_ids: list[st
         total += _archive_title(
             archive_root, download_root, title_id, wt.title,
             target.dest_base_path, policy, "manual", keep_last=True,
+            dest_type=target.dest_type, rclone_config_path=rclone_config_path,
         )
     return total
 
 
-def process_pending_finish_archives(archive_root: str, download_root: str) -> int:
+def process_pending_finish_archives(archive_root: str, download_root: str, rclone_config_path: str = "") -> int:
     """완결 구독해제로 대기열에 쌓인 웹툰들을 처리한다 — 아카이빙 주기가 돌 때
     run_periodic_archive와 함께 호출된다(즉시 실행 대신 같은 주기에 묶임)."""
     if not is_finish_unsubscribe_archiving_enabled():
@@ -195,8 +270,10 @@ def process_pending_finish_archives(archive_root: str, download_root: str) -> in
         target = repository.get_archive_target(title_id)
         if target is not None and target.enabled:
             base_path = target.dest_base_path
+            dest_type = target.dest_type
         else:
             base_path = get_default_base_path()
+            dest_type = get_default_dest_type()
             if not base_path:
                 log.warning("완결 자동이동 기본 경로가 설정 안 되어 있어 건너뜀 (title_id=%s)", title_id)
                 continue
@@ -205,6 +282,7 @@ def process_pending_finish_archives(archive_root: str, download_root: str) -> in
         total += _archive_title(
             archive_root, download_root, title_id, wt.title,
             base_path, policy, "finish_unsubscribe", keep_last=False,
+            dest_type=dest_type, rclone_config_path=rclone_config_path,
         )
         repository.remove_pending_finish_archive(title_id)
     return total

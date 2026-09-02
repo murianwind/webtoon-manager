@@ -20,6 +20,13 @@ services:
       ARCHIVE_ROOT: /webtoon_archive
       DATABASE_PATH: /data/webtoons.db
       COOKIE_FILE_PATH: /cookies/${COOKIE_FILE_NAME:-cookies.json}
+      # rclone 원격(원드라이브 등)을 아카이빙 목적지로 쓰고 싶을 때만 의미가 있다.
+      # 안 쓰실 거면 RCLONE_CONFIG_HOST_PATH를 아무 빈 폴더로 지정해두면 된다
+      # (COOKIE_DIR_HOST_PATH와 동일한 방식). 이 conf 파일은 그냥 일반 텍스트
+      # 파일이라, rclone으로 마운트한 드라이브 안이 아니라 평범한 Windows 폴더에
+      # 두면 된다 — Docker Desktop이 rclone 마운트 드라이브 자체를 못 읽는 문제
+      # (WinFsp 가상 드라이브 한계)와는 완전히 별개다.
+      RCLONE_CONFIG_PATH: /rclone-config/rclone.conf
     volumes:
       # 실제 다운로드 폴더. /data 밑이 아니라 완전히 별도 경로(/webtoon_download)에
       # 마운트한다 — /data와 겹친 채로 두면(예전엔 /data/Webtoon_Download였음) 도커가
@@ -34,3 +41,6 @@ services:
       - ${APP_DATA_HOST_PATH}:/data
       # 브라우저 쿠키 export 파일이 들어있는 폴더 (파일명은 COOKIE_FILE_NAME으로 지정)
       - ${COOKIE_DIR_HOST_PATH}:/cookies:ro
+      # rclone.conf 파일이 들어있는 폴더 (읽기전용). 안 쓰실 거면 아무 빈 폴더나
+      # 지정해두면 된다.
+      - ${RCLONE_CONFIG_HOST_PATH}:/rclone-config:ro

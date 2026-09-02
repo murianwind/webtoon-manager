@@ -45,11 +45,13 @@
          ARCHIVE_ROOT: /webtoon_archive
          DATABASE_PATH: /data/webtoons.db
          COOKIE_FILE_PATH: /cookies/${COOKIE_FILE_NAME:-cookies.json}
+         RCLONE_CONFIG_PATH: /rclone-config/rclone.conf
        volumes:
          - ${WEBTOON_DOWNLOAD_HOST_PATH}:/webtoon_download
          - ${WEBTOON_ARCHIVE_HOST_PATH}:/webtoon_archive
          - ${APP_DATA_HOST_PATH}:/data
          - ${COOKIE_DIR_HOST_PATH}:/cookies:ro
+         - ${RCLONE_CONFIG_HOST_PATH}:/rclone-config:ro
    ```
 
 3. 아래로 스크롤해서 **Environment variables**에 다음을 채워 넣기
@@ -61,6 +63,7 @@
    | `APP_DATA_HOST_PATH` | `D:\WebtoonManagerData` | 설정/DB를 저장할, 비어있는 폴더 |
    | `COOKIE_DIR_HOST_PATH` | `D:\WebtoonManagerData\cookies` | 네이버 로그인 쿠키 파일이 들어있는 폴더 |
    | `COOKIE_FILE_NAME` | `cookies.json` | 위 폴더 안 쿠키 파일 이름 |
+   | `RCLONE_CONFIG_HOST_PATH` | `D:\WebtoonManagerData\rclone` | rclone.conf 파일이 들어있는 폴더 (안 쓰면 아무 빈 폴더나 지정) |
    | `WEB_PORT` | `8000` | 브라우저로 접속할 포트 (이미 쓰는 포트면 다른 숫자로) |
 
 4. **Deploy the stack** 클릭
@@ -104,8 +107,16 @@
 - **아카이빙 대상으로 지정한 웹툰**은 "실행 스케줄"에 설정한 주기마다, **마지막 회차 파일은 남기고** 나머지를 지정한 보관 폴더로 옮깁니다 (마지막 파일을 남기는 이유: 다음 회차를 이어받을 때 "몇 화까지 받았는지" 확인하는 용도로 필요합니다).
 - 여러 웹툰이 **같은 보관 폴더**를 지정하면 자동으로 웹툰별 하위 폴더로 나뉘고, 한 웹툰만 쓰면 그 폴더 바로 밑에 쌓입니다.
 - **이미 파일이 있는 폴더는 새로 지정할 수 없습니다** — 나중에 다른 웹툰이 같은 폴더를 고르면서 파일이 뒤섞이는 걸 막기 위한 안전장치입니다.
-- **완결된 작품을 구독해제하면**(설정에서 켜둔 경우) 지정 여부와 무관하게, 스케줄과 상관없이 **그 즉시** 전체 파일이 보관 폴더로 옮겨집니다. 지정 안 된 작품은 별도로 설정한 "기본 보관 폴더"로 갑니다.
+- **완결된 작품을 구독해제하면**(설정에서 켜둔 경우) 지정 여부와 무관하게 **대기열에 등록**되고, "실행 스케줄"이 돌 때 지정 웹툰의 정기 이동과 함께 처리됩니다(구독해제하는 즉시 옮겨지는 게 아닙니다). 스케줄이 꺼져있으면 "수동 실행"으로 직접 처리할 수 있습니다. 지정 안 된 작품은 별도로 설정한 "기본 보관 폴더"로 갑니다.
 - **폴더 일괄 이동**은 아카이빙 설정과 완전히 별개로, 보관 폴더 안에서 폴더 하나를 통째로 다른 폴더로 한 번만 옮기고 싶을 때 씁니다(예: 예전에 쌓아둔 백업을 정리할 때).
+
+### rclone 원격(원드라이브 등)을 보관 폴더로 쓰고 싶다면
+
+Windows에서 rclone으로 마운트한 드라이브/폴더는 **Docker Desktop이 인식하지 못합니다** (WinFsp 가상 드라이브의 구조적 한계 — 설정으로 해결 불가능한 것으로 확인됨). 대신 이 프로그램이 **컨테이너 안에서 rclone 명령을 직접 실행**해서 원격에 업로드하는 방식을 씁니다 — Windows 쪽 마운트 자체를 거치지 않아서 이 문제가 생기지 않습니다.
+
+1. Windows PC에서 미리 rclone 설정을 마쳐서 `rclone.conf` 파일을 만들어둡니다 (`rclone config` 명령으로 생성됨, 보통 `%USERPROFILE%\.config\rclone\rclone.conf`)
+2. 그 `rclone.conf` 파일이 있는 **폴더**를 docker-compose 환경변수 `RCLONE_CONFIG_HOST_PATH`로 지정
+3. "아카이빙" 탭의 폴더 선택기에 **"rclone 원격"** 버튼이 나타나면 정상 연결된 것입니다 — 로컬 폴더와 완전히 동일한 방식(찾아보기/새 폴더 만들기/이미 파일 있으면 선택 불가)으로 원격 폴더를 다룰 수 있습니다
 
 ## 자주 묻는 질문
 

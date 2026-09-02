@@ -39,6 +39,7 @@ from app import scheduler as scheduler_mod
 from app import kakao_api
 from app import webtoon_server_client
 from app import archiver
+from app import rclone_client
 from app.config import get_settings
 
 log = logging.getLogger(__name__)
@@ -1042,12 +1043,21 @@ class ArchiveTargetOut(BaseModel):
     title_id: str
     title_name: str
     dest_base_path: str
+    dest_type: str
     enabled: bool
 
 
 class ArchiveTargetIn(BaseModel):
     title_id: str
     dest_base_path: str
+    dest_type: str = "local"
+
+    @field_validator("dest_type")
+    @classmethod
+    def valid_dest_type(cls, v: str) -> str:
+        if v not in ("local", "rclone"):
+            raise ValueError("dest_type은 local/rclone 중 하나여야 합니다.")
+        return v
 
 
 def _archive_target_to_out(target) -> ArchiveTargetOut:
@@ -1056,6 +1066,7 @@ def _archive_target_to_out(target) -> ArchiveTargetOut:
         title_id=target.title_id,
         title_name=wt.title if wt else target.title_id,
         dest_base_path=target.dest_base_path,
+        dest_type=target.dest_type,
         enabled=target.enabled,
     )
 
@@ -1069,16 +1080,25 @@ async def list_archive_targets():
 @router.post("/archive/targets", response_model=ArchiveTargetOut)
 async def add_archive_target(payload: ArchiveTargetIn):
     settings = get_settings()
-    selectable = await asyncio.to_thread(
-        archiver.is_folder_selectable_as_dest, settings.archive_root, payload.dest_base_path
-    )
+    if payload.dest_type == "rclone":
+        if not (settings.rclone_config_path and Path(settings.rclone_config_path).is_file()):
+            raise HTTPException(status_code=400, detail="rclone 설정 파일이 등록되어 있지 않습니다.")
+        selectable = await asyncio.to_thread(
+            archiver.is_folder_selectable_as_dest_rclone, settings.rclone_config_path, payload.dest_base_path
+        )
+    else:
+        selectable = await asyncio.to_thread(
+            archiver.is_folder_selectable_as_dest, settings.archive_root, payload.dest_base_path
+        )
     existing = await asyncio.to_thread(repository.get_archive_target, payload.title_id)
     # 이미 이 웹툰이 그 경로를 쓰고 있었다면(경로 변경 없이 재저장) 통과시킨다 —
     # "이미 파일 있어서 선택 불가" 규칙은 새로 그 폴더를 쓰기 시작하는 경우만 막는 것.
     if not selectable and not (existing and existing.dest_base_path == payload.dest_base_path):
         raise HTTPException(status_code=409, detail="이미 파일이 있는 폴더는 새 목적지로 지정할 수 없습니다.")
 
-    await asyncio.to_thread(repository.upsert_archive_target, payload.title_id, payload.dest_base_path, True)
+    await asyncio.to_thread(
+        repository.upsert_archive_target, payload.title_id, payload.dest_base_path, True, payload.dest_type
+    )
     target = await asyncio.to_thread(repository.get_archive_target, payload.title_id)
     return _archive_target_to_out(target)
 
@@ -1109,12 +1129,15 @@ async def remove_archive_target(title_id: str):
 
 class ArchiveSettingsOut(BaseModel):
     default_base_path: str
+    default_dest_type: str
     conflict_policy: str
     on_finish_unsubscribe: bool
+    rclone_available: bool
 
 
 class ArchiveSettingsIn(BaseModel):
     default_base_path: str
+    default_dest_type: str = "local"
     conflict_policy: str
     on_finish_unsubscribe: bool
 
@@ -1125,25 +1148,80 @@ class ArchiveSettingsIn(BaseModel):
             raise ValueError("conflict_policy는 overwrite/skip/rename 중 하나여야 합니다.")
         return v
 
+    @field_validator("default_dest_type")
+    @classmethod
+    def valid_dest_type(cls, v: str) -> str:
+        if v not in ("local", "rclone"):
+            raise ValueError("default_dest_type은 local/rclone 중 하나여야 합니다.")
+        return v
+
 
 @router.get("/archive/settings", response_model=ArchiveSettingsOut)
 async def get_archive_settings():
+    settings = get_settings()
     default_base_path = await asyncio.to_thread(archiver.get_default_base_path)
+    default_dest_type = await asyncio.to_thread(archiver.get_default_dest_type)
     conflict_policy = await asyncio.to_thread(archiver.get_conflict_policy)
     on_finish = await asyncio.to_thread(archiver.is_finish_unsubscribe_archiving_enabled)
     return ArchiveSettingsOut(
-        default_base_path=default_base_path or "", conflict_policy=conflict_policy, on_finish_unsubscribe=on_finish
+        default_base_path=default_base_path or "",
+        default_dest_type=default_dest_type,
+        conflict_policy=conflict_policy,
+        on_finish_unsubscribe=on_finish,
+        rclone_available=bool(settings.rclone_config_path) and Path(settings.rclone_config_path).is_file(),
     )
 
 
 @router.post("/archive/settings", response_model=ArchiveSettingsOut)
 async def set_archive_settings(payload: ArchiveSettingsIn):
     await asyncio.to_thread(repository.set_setting, "archive_default_base_path", payload.default_base_path.strip() or None)
+    await asyncio.to_thread(repository.set_setting, "archive_default_dest_type", payload.default_dest_type)
     await asyncio.to_thread(repository.set_setting, "archive_conflict_policy", payload.conflict_policy)
     await asyncio.to_thread(
         repository.set_setting, "archive_on_finish_unsubscribe", "1" if payload.on_finish_unsubscribe else None
     )
     return await get_archive_settings()
+
+
+@router.get("/archive/rclone/remotes")
+async def list_rclone_remotes():
+    settings = get_settings()
+    if not (settings.rclone_config_path and Path(settings.rclone_config_path).is_file()):
+        return {"remotes": []}
+    try:
+        remotes = await asyncio.to_thread(rclone_client.list_remotes, settings.rclone_config_path)
+    except rclone_client.RcloneError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"remotes": remotes}
+
+
+@router.get("/archive/rclone/folders")
+async def list_rclone_folders(remote: str, path: str = ""):
+    settings = get_settings()
+    if not (settings.rclone_config_path and Path(settings.rclone_config_path).is_file()):
+        raise HTTPException(status_code=400, detail="rclone 설정 파일이 등록되어 있지 않습니다.")
+    try:
+        folders = await asyncio.to_thread(rclone_client.list_folders, settings.rclone_config_path, remote, path)
+    except rclone_client.RcloneError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"remote": remote, "path": path, "folders": folders}
+
+
+class CreateRcloneFolderIn(BaseModel):
+    remote: str
+    path: str
+
+
+@router.post("/archive/rclone/folders")
+async def create_rclone_folder(payload: CreateRcloneFolderIn):
+    settings = get_settings()
+    if not (settings.rclone_config_path and Path(settings.rclone_config_path).is_file()):
+        raise HTTPException(status_code=400, detail="rclone 설정 파일이 등록되어 있지 않습니다.")
+    try:
+        await asyncio.to_thread(rclone_client.create_folder, settings.rclone_config_path, payload.remote, payload.path)
+    except rclone_client.RcloneError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"remote": payload.remote, "path": payload.path}
 
 
 @router.get("/archive/folders")
@@ -1213,18 +1291,18 @@ async def run_archive_now(payload: ArchiveRunIn):
         try:
             if payload.title_ids:
                 moved = await asyncio.to_thread(
-                    archiver.manual_archive_now, settings.archive_root, settings.download_root, payload.title_ids
+                    archiver.manual_archive_now, settings.archive_root, settings.download_root, payload.title_ids, settings.rclone_config_path
                 )
                 job_status.log_line("archive", f"{moved}개 파일 이동 완료")
             else:
                 all_ids = [t.title_id for t in repository.list_archive_targets() if t.enabled]
                 moved = await asyncio.to_thread(
-                    archiver.manual_archive_now, settings.archive_root, settings.download_root, all_ids
+                    archiver.manual_archive_now, settings.archive_root, settings.download_root, all_ids, settings.rclone_config_path
                 )
                 job_status.log_line("archive", f"지정 웹툰 {moved}개 파일 이동 완료")
 
                 pending_moved = await asyncio.to_thread(
-                    archiver.process_pending_finish_archives, settings.archive_root, settings.download_root
+                    archiver.process_pending_finish_archives, settings.archive_root, settings.download_root, settings.rclone_config_path
                 )
                 job_status.log_line("archive", f"완결 구독해제 대기열 {pending_moved}개 파일 이동 완료")
 

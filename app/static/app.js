@@ -1513,30 +1513,80 @@ const savedTab = sessionStorage.getItem(ACTIVE_TAB_KEY);
 let archiveFolderPickerState = {}; // pickerId -> 현재 탐색 중인 경로
 
 function renderFolderPicker(containerId, onSelect, initialPath) {
-  const container = document.getElementById(containerId);
-  archiveFolderPickerState[containerId] = initialPath || "";
+  archiveFolderPickerState[containerId] = { mode: "local", path: initialPath || "", remote: "" };
   renderFolderPickerContents(containerId, onSelect);
 }
 
 async function renderFolderPickerContents(containerId, onSelect) {
   const container = document.getElementById(containerId);
-  const currentPath = archiveFolderPickerState[containerId] || "";
+  const state = archiveFolderPickerState[containerId];
   container.innerHTML = '<p class="hint-inline">불러오는 중...</p>';
+
   try {
-    const data = await apiCall(`/api/archive/folders?path=${encodeURIComponent(currentPath)}`);
+    // 로컬/rclone 전환 UI (rclone 설정 있을 때만 표시)
+    const archiveSettings = await apiCall("/api/archive/settings");
     container.innerHTML = "";
+
+    if (archiveSettings.rclone_available) {
+      const modeRow = document.createElement("div");
+      modeRow.className = "folder-picker-mode-row";
+      const localBtn = makeButton("로컬 폴더", () => {
+        archiveFolderPickerState[containerId] = { mode: "local", path: "", remote: "" };
+        renderFolderPickerContents(containerId, onSelect);
+      });
+      const rcloneBtn = makeButton("rclone 원격", () => {
+        archiveFolderPickerState[containerId] = { mode: "rclone", path: "", remote: "" };
+        renderFolderPickerContents(containerId, onSelect);
+      });
+      if (state.mode === "local") localBtn.disabled = true;
+      if (state.mode === "rclone") rcloneBtn.disabled = true;
+      modeRow.appendChild(localBtn);
+      modeRow.appendChild(rcloneBtn);
+      container.appendChild(modeRow);
+    }
+
+    if (state.mode === "rclone" && !state.remote) {
+      // 원격을 아직 안 골랐으면 원격 선택 드롭다운부터
+      const remotesData = await apiCall("/api/archive/rclone/remotes");
+      const remoteRow = document.createElement("div");
+      remoteRow.className = "registry-add-row";
+      const select = document.createElement("select");
+      select.innerHTML = remotesData.remotes.map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join("");
+      const chooseBtn = makeButton("이 원격 사용", () => {
+        state.remote = select.value;
+        renderFolderPickerContents(containerId, onSelect);
+      });
+      remoteRow.appendChild(select);
+      remoteRow.appendChild(chooseBtn);
+      container.appendChild(remoteRow);
+      return;
+    }
+
+    const isRclone = state.mode === "rclone";
+    const currentPath = state.path || "";
+    const data = isRclone
+      ? await apiCall(`/api/archive/rclone/folders?remote=${encodeURIComponent(state.remote)}&path=${encodeURIComponent(currentPath)}`)
+      : await apiCall(`/api/archive/folders?path=${encodeURIComponent(currentPath)}`);
 
     const pathRow = document.createElement("div");
     pathRow.className = "folder-picker-path";
-    pathRow.textContent = `현재 위치: /${currentPath}`;
+    pathRow.textContent = isRclone ? `현재 위치: ${state.remote}:/${currentPath}` : `현재 위치: /${currentPath}`;
     container.appendChild(pathRow);
 
     const listBox = document.createElement("div");
     listBox.className = "folder-picker-list";
 
+    if (isRclone) {
+      const backBtn = makeButton("⬅ 원격 다시 선택", () => {
+        state.remote = "";
+        state.path = "";
+        renderFolderPickerContents(containerId, onSelect);
+      });
+      listBox.appendChild(backBtn);
+    }
     if (currentPath) {
       const upBtn = makeButton("⬆ 상위 폴더", () => {
-        archiveFolderPickerState[containerId] = currentPath.split("/").slice(0, -1).join("/");
+        state.path = currentPath.split("/").slice(0, -1).join("/");
         renderFolderPickerContents(containerId, onSelect);
       });
       listBox.appendChild(upBtn);
@@ -1546,18 +1596,21 @@ async function renderFolderPickerContents(containerId, onSelect) {
       const row = document.createElement("div");
       row.className = "folder-picker-row";
       const nameBtn = makeButton(`📁 ${folder.name}`, () => {
-        archiveFolderPickerState[containerId] = folder.path;
+        state.path = folder.path;
         renderFolderPickerContents(containerId, onSelect);
       });
       row.appendChild(nameBtn);
-      const selectBtn = makeButton(folder.selectable ? "이 폴더 선택" : "이미 파일 있음", () => onSelect(folder.path));
+      const destValue = isRclone ? `${state.remote}:${folder.path}` : folder.path;
+      const selectBtn = makeButton(folder.selectable ? "이 폴더 선택" : "이미 파일 있음", () => onSelect(destValue, isRclone ? "rclone" : "local"));
       selectBtn.disabled = !folder.selectable;
       row.appendChild(selectBtn);
       listBox.appendChild(row);
     }
     container.appendChild(listBox);
 
-    const selectHereBtn = makeButton(`"/${currentPath || "(최상위)"}" 여기로 선택`, () => onSelect(currentPath));
+    const hereLabel = isRclone ? `"${state.remote}:/${currentPath || "(최상위)"}"` : `"/${currentPath || "(최상위)"}"`;
+    const hereValue = isRclone ? `${state.remote}:${currentPath}` : currentPath;
+    const selectHereBtn = makeButton(`${hereLabel} 여기로 선택`, () => onSelect(hereValue, isRclone ? "rclone" : "local"));
     container.appendChild(selectHereBtn);
 
     const newFolderRow = document.createElement("div");
@@ -1569,8 +1622,12 @@ async function renderFolderPickerContents(containerId, onSelect) {
       const name = newFolderInput.value.trim();
       if (!name) return;
       const newPath = currentPath ? `${currentPath}/${name}` : name;
-      await apiCall("/api/archive/folders", { method: "POST", body: JSON.stringify({ path: newPath }) });
-      archiveFolderPickerState[containerId] = newPath;
+      if (isRclone) {
+        await apiCall("/api/archive/rclone/folders", { method: "POST", body: JSON.stringify({ remote: state.remote, path: newPath }) });
+      } else {
+        await apiCall("/api/archive/folders", { method: "POST", body: JSON.stringify({ path: newPath }) });
+      }
+      state.path = newPath;
       renderFolderPickerContents(containerId, onSelect);
     });
     newFolderRow.appendChild(newFolderInput);
@@ -1582,18 +1639,21 @@ async function renderFolderPickerContents(containerId, onSelect) {
 }
 
 let archiveSelectedTargetPath = "";
+let archiveSelectedTargetDestType = "local";
 let archiveSelectedDefaultPath = "";
+let archiveSelectedDefaultDestType = "local";
 let archiveSelectedBulkSourcePath = "";
 let archiveSelectedBulkDestPath = "";
 
 async function loadArchivePage() {
   await loadArchiveTargetWebtoonOptions();
-  renderFolderPicker("archive-target-folder-picker", (path) => {
+  renderFolderPicker("archive-target-folder-picker", (path, destType) => {
     archiveSelectedTargetPath = path;
-    document.getElementById("archive-target-folder-picker").previousElementSibling;
+    archiveSelectedTargetDestType = destType;
   });
-  renderFolderPicker("archive-default-folder-picker", (path) => {
+  renderFolderPicker("archive-default-folder-picker", (path, destType) => {
     archiveSelectedDefaultPath = path;
+    archiveSelectedDefaultDestType = destType;
   });
   renderFolderPicker("bulk-move-source-picker", (path) => {
     archiveSelectedBulkSourcePath = path;
@@ -1649,7 +1709,7 @@ async function loadArchiveTargetList() {
       summary.className = "job-history-summary";
       summary.innerHTML = `
         <span class="job-history-name">${escapeHtml(t.title_name)}</span>
-        <span class="job-history-time">/${escapeHtml(t.dest_base_path)}</span>
+        <span class="job-history-time">${t.dest_type === "rclone" ? "☁️ " : "💾 "}${escapeHtml(t.dest_base_path)}</span>
         <span class="badge">${t.enabled ? "사용중" : "꺼짐"}</span>
       `;
       const toggleBtn = makeButton(t.enabled ? "끄기" : "켜기", async (ev) => {
@@ -1686,7 +1746,7 @@ document.getElementById("btn-add-archive-target").addEventListener("click", asyn
   try {
     await apiCall("/api/archive/targets", {
       method: "POST",
-      body: JSON.stringify({ title_id: titleId, dest_base_path: archiveSelectedTargetPath }),
+      body: JSON.stringify({ title_id: titleId, dest_base_path: archiveSelectedTargetPath, dest_type: archiveSelectedTargetDestType }),
     });
     resultEl.style.color = "";
     resultEl.textContent = "등록했습니다.";
@@ -1703,6 +1763,7 @@ async function loadArchiveSettings() {
     document.getElementById("archive-on-finish-toggle").checked = data.on_finish_unsubscribe;
     document.getElementById("archive-conflict-policy").value = data.conflict_policy;
     archiveSelectedDefaultPath = data.default_base_path;
+    archiveSelectedDefaultDestType = data.default_dest_type;
   } catch (e) {
     // 조용히 무시
   }
@@ -1716,6 +1777,7 @@ document.getElementById("btn-save-archive-settings").addEventListener("click", a
       method: "POST",
       body: JSON.stringify({
         default_base_path: archiveSelectedDefaultPath || "",
+        default_dest_type: archiveSelectedDefaultDestType,
         conflict_policy: document.getElementById("archive-conflict-policy").value,
         on_finish_unsubscribe: document.getElementById("archive-on-finish-toggle").checked,
       }),

@@ -115,3 +115,4 @@ class ArchiveTarget:
     title_id: str
     dest_base_path: str
     enabled: bool
+    dest_type: str = "local"

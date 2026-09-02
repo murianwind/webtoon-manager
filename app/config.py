@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     # 경로
     download_root: str = "/webtoon_download"
     archive_root: str = "/webtoon_archive"
+    rclone_config_path: str = ""
     database_path: str = "/data/webtoons.db"
     cookie_file_path: str = "/cookies/chokobo_murian.json"
 

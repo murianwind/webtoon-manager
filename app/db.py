@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS kakao_seen_titles (
 CREATE TABLE IF NOT EXISTS archive_targets (
     title_id TEXT PRIMARY KEY,
     dest_base_path TEXT NOT NULL,
+    dest_type TEXT NOT NULL DEFAULT 'local',
     enabled INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -125,6 +126,7 @@ _MIGRATIONS = [
     ("webtoons", "is_new", "ALTER TABLE webtoons ADD COLUMN is_new INTEGER NOT NULL DEFAULT 0"),
     ("webtoons", "writer_names", "ALTER TABLE webtoons ADD COLUMN writer_names TEXT NOT NULL DEFAULT '[]'"),
     ("watched_authors", "platform", "ALTER TABLE watched_authors ADD COLUMN platform TEXT NOT NULL DEFAULT 'naver'"),
+    ("archive_targets", "dest_type", "ALTER TABLE archive_targets ADD COLUMN dest_type TEXT NOT NULL DEFAULT 'local'"),
 ]
 
 

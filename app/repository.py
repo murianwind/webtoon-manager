@@ -347,7 +347,10 @@ def add_seen_kakao_title(author_name: str, title_id: int, title_name: str) -> No
 def list_archive_targets() -> list[ArchiveTarget]:
     rows = get_connection().execute("SELECT * FROM archive_targets ORDER BY title_id").fetchall()
     return [
-        ArchiveTarget(title_id=r["title_id"], dest_base_path=r["dest_base_path"], enabled=bool(r["enabled"]))
+        ArchiveTarget(
+            title_id=r["title_id"], dest_base_path=r["dest_base_path"], enabled=bool(r["enabled"]),
+            dest_type=r["dest_type"],
+        )
         for r in rows
     ]
 
@@ -356,23 +359,26 @@ def get_archive_target(title_id: str) -> ArchiveTarget | None:
     row = get_connection().execute("SELECT * FROM archive_targets WHERE title_id = ?", (title_id,)).fetchone()
     if row is None:
         return None
-    return ArchiveTarget(title_id=row["title_id"], dest_base_path=row["dest_base_path"], enabled=bool(row["enabled"]))
+    return ArchiveTarget(
+        title_id=row["title_id"], dest_base_path=row["dest_base_path"], enabled=bool(row["enabled"]),
+        dest_type=row["dest_type"],
+    )
 
 
-def upsert_archive_target(title_id: str, dest_base_path: str, enabled: bool = True) -> None:
+def upsert_archive_target(title_id: str, dest_base_path: str, enabled: bool = True, dest_type: str = "local") -> None:
     now = _now()
     with write_transaction() as conn:
         existing = conn.execute("SELECT 1 FROM archive_targets WHERE title_id = ?", (title_id,)).fetchone()
         if existing:
             conn.execute(
-                "UPDATE archive_targets SET dest_base_path = ?, enabled = ?, updated_at = ? WHERE title_id = ?",
-                (dest_base_path, int(enabled), now, title_id),
+                "UPDATE archive_targets SET dest_base_path = ?, dest_type = ?, enabled = ?, updated_at = ? WHERE title_id = ?",
+                (dest_base_path, dest_type, int(enabled), now, title_id),
             )
         else:
             conn.execute(
-                "INSERT INTO archive_targets (title_id, dest_base_path, enabled, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (title_id, dest_base_path, int(enabled), now, now),
+                "INSERT INTO archive_targets (title_id, dest_base_path, dest_type, enabled, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (title_id, dest_base_path, dest_type, int(enabled), now, now),
             )
 
 
@@ -389,9 +395,10 @@ def delete_archive_target(title_id: str) -> None:
         conn.execute("DELETE FROM archive_targets WHERE title_id = ?", (title_id,))
 
 
-def count_archive_targets_with_base_path(dest_base_path: str) -> int:
+def count_archive_targets_with_base_path(dest_base_path: str, dest_type: str = "local") -> int:
     row = get_connection().execute(
-        "SELECT COUNT(*) AS c FROM archive_targets WHERE dest_base_path = ? AND enabled = 1", (dest_base_path,)
+        "SELECT COUNT(*) AS c FROM archive_targets WHERE dest_base_path = ? AND dest_type = ? AND enabled = 1",
+        (dest_base_path, dest_type),
     ).fetchone()
     return row["c"]
 
