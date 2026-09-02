@@ -1538,7 +1538,38 @@ const savedTab = sessionStorage.getItem(ACTIVE_TAB_KEY);
 
 let archiveFolderPickerState = {}; // pickerId -> 현재 탐색 중인 경로
 
+function _folderPickerStorageKey(containerId) {
+  return `folderPickerState:${containerId}`;
+}
+
+function saveFolderPickerState(containerId) {
+  try {
+    sessionStorage.setItem(_folderPickerStorageKey(containerId), JSON.stringify(archiveFolderPickerState[containerId]));
+  } catch (e) {
+    // 조용히 무시 — sessionStorage를 못 쓰는 환경이어도 기능 자체는 그대로 동작해야 함
+  }
+}
+
+function loadSavedFolderPickerState(containerId) {
+  try {
+    const raw = sessionStorage.getItem(_folderPickerStorageKey(containerId));
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function renderFolderPicker(containerId, onSelect, initialPath) {
+  // 새로고침해도 뭘 보고 있었는지 잃지 않게, sessionStorage에 저장된 상태가
+  // 있으면 그걸 우선 복원한다 — 원격 폴더 조회가 느릴 수 있어서, 매번 원격
+  // 선택부터 다시 하게 되면 특히 불편하다는 문제가 실제로 있었다.
+  const saved = loadSavedFolderPickerState(containerId);
+  if (saved) {
+    archiveFolderPickerState[containerId] = saved;
+    renderFolderPickerContents(containerId, onSelect);
+    return;
+  }
+
   // 로컬이 설정 안 돼 있는데 무조건 "local"로 시작하면, 그 즉시 폴더 조회가
   // 실패해서 에러만 뜨고 rclone으로 바꿀 방법이 없어지는 문제가 실제로 있었다 —
   // 그래서 시작 모드를 실제로 뭐가 되는지 먼저 확인해서 정한다.
@@ -1558,6 +1589,7 @@ async function renderFolderPicker(containerId, onSelect, initialPath) {
 async function renderFolderPickerContents(containerId, onSelect) {
   const container = document.getElementById(containerId);
   const state = archiveFolderPickerState[containerId];
+  saveFolderPickerState(containerId);
   container.innerHTML = '<p class="hint-inline">불러오는 중...</p>';
 
   let archiveSettings;
@@ -1604,9 +1636,12 @@ async function renderFolderPickerContents(containerId, onSelect) {
   }
 
   try {
+    listArea.innerHTML = '<p class="hint-inline">⏳ 폴더 목록을 불러오는 중입니다... (원격 저장소는 응답이 느릴 수 있습니다)</p>';
+
     if (state.mode === "rclone" && !state.remote) {
       // 원격을 아직 안 골랐으면 원격 선택 드롭다운부터
       const remotesData = await apiCall("/api/archive/rclone/remotes");
+      listArea.innerHTML = "";
       const remoteRow = document.createElement("div");
       remoteRow.className = "registry-add-row";
       const select = document.createElement("select");
@@ -1626,6 +1661,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
     const data = isRclone
       ? await apiCall(`/api/archive/rclone/folders?remote=${encodeURIComponent(state.remote)}&path=${encodeURIComponent(currentPath)}`)
       : await apiCall(`/api/archive/folders?path=${encodeURIComponent(currentPath)}`);
+    listArea.innerHTML = "";
 
     const pathRow = document.createElement("div");
     pathRow.className = "folder-picker-path";

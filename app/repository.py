@@ -9,7 +9,7 @@ SQL을 직접 다루지 않는다 (SRP). 모든 함수는 동기(sync)이며, �
 import json
 from datetime import datetime, timedelta, timezone
 
-from app.db import get_connection, write_transaction
+from app.db import fetchall, fetchone, read_lock, write_transaction
 from app.models import ArchiveTarget, WatchedAuthor, WatchedTag, WebtoonRecord
 
 STATUS_ACTIVE = "active"
@@ -50,28 +50,22 @@ def _row_to_record(row) -> WebtoonRecord:
 
 
 def list_all() -> list[WebtoonRecord]:
-    rows = get_connection().execute("SELECT * FROM webtoons ORDER BY title").fetchall()
+    rows = fetchall("SELECT * FROM webtoons ORDER BY title")
     return [_row_to_record(r) for r in rows]
 
 
 def list_by_status(status: str) -> list[WebtoonRecord]:
-    rows = get_connection().execute(
-        "SELECT * FROM webtoons WHERE status = ? ORDER BY title", (status,)
-    ).fetchall()
+    rows = fetchall("SELECT * FROM webtoons WHERE status = ? ORDER BY title", (status,))
     return [_row_to_record(r) for r in rows]
 
 
 def get(title_id: str) -> WebtoonRecord | None:
-    row = get_connection().execute(
-        "SELECT * FROM webtoons WHERE title_id = ?", (title_id,)
-    ).fetchone()
+    row = fetchone("SELECT * FROM webtoons WHERE title_id = ?", (title_id,))
     return _row_to_record(row) if row else None
 
 
 def exists(title_id: str) -> bool:
-    row = get_connection().execute(
-        "SELECT 1 FROM webtoons WHERE title_id = ?", (title_id,)
-    ).fetchone()
+    row = fetchone("SELECT 1 FROM webtoons WHERE title_id = ?", (title_id,))
     return row is not None
 
 
@@ -167,7 +161,7 @@ def update_writer_ids_and_names(title_id: str, writer_ids: list[str], writer_nam
 def list_all_writer_id_name_pairs() -> dict[str, str]:
     """상태와 무관하게 DB에 있는 모든 웹툰에서 (author_id -> author_name)을 모은다.
     watched_authors에 이름 없이 등록된 경우 이걸로 보정한다."""
-    rows = get_connection().execute("SELECT writer_ids, writer_names FROM webtoons").fetchall()
+    rows = fetchall("SELECT writer_ids, writer_names FROM webtoons")
     result: dict[str, str] = {}
     for row in rows:
         ids = json.loads(row["writer_ids"] or "[]")
@@ -237,7 +231,7 @@ def hard_delete(title_id: str) -> None:
 # ── settings (key-value) ──────────────────────────────────────────
 
 def get_setting(key: str) -> str | None:
-    row = get_connection().execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    row = fetchone("SELECT value FROM settings WHERE key = ?", (key,))
     return row["value"] if row else None
 
 
@@ -263,9 +257,7 @@ def _author_row_to_record(row) -> WatchedAuthor:
 
 
 def list_watched_authors(platform: str = "naver") -> list[WatchedAuthor]:
-    rows = get_connection().execute(
-        "SELECT * FROM watched_authors WHERE platform = ? ORDER BY author_name", (platform,)
-    ).fetchall()
+    rows = fetchall("SELECT * FROM watched_authors WHERE platform = ? ORDER BY author_name", (platform,))
     return [_author_row_to_record(r) for r in rows]
 
 
@@ -312,9 +304,7 @@ def set_watched_author_enabled(author_id: str, enabled: bool, author_name: str =
 
 
 def get_enabled_author_ids(platform: str = "naver") -> set[str]:
-    rows = get_connection().execute(
-        "SELECT author_id FROM watched_authors WHERE enabled = 1 AND platform = ?", (platform,)
-    ).fetchall()
+    rows = fetchall("SELECT author_id FROM watched_authors WHERE enabled = 1 AND platform = ?", (platform,))
     return {r["author_id"] for r in rows}
 
 
@@ -328,9 +318,7 @@ def delete_watched_author(author_id: str, platform: str = "naver") -> None:
 # ── kakao_seen_titles (카카오웹툰 작가별로 이미 알고 있는 작품 목록) ──────
 
 def get_seen_kakao_title_ids(author_name: str) -> set[int]:
-    rows = get_connection().execute(
-        "SELECT title_id FROM kakao_seen_titles WHERE author_name = ?", (author_name,)
-    ).fetchall()
+    rows = fetchall("SELECT title_id FROM kakao_seen_titles WHERE author_name = ?", (author_name,))
     return {r["title_id"] for r in rows}
 
 
@@ -345,7 +333,7 @@ def add_seen_kakao_title(author_name: str, title_id: int, title_name: str) -> No
 # ── archive_targets (아카이빙 대상 웹툰 + 목적지 그릇 폴더) ──────────────
 
 def list_archive_targets() -> list[ArchiveTarget]:
-    rows = get_connection().execute("SELECT * FROM archive_targets ORDER BY title_id").fetchall()
+    rows = fetchall("SELECT * FROM archive_targets ORDER BY title_id")
     return [
         ArchiveTarget(
             title_id=r["title_id"], dest_base_path=r["dest_base_path"], enabled=bool(r["enabled"]),
@@ -356,7 +344,7 @@ def list_archive_targets() -> list[ArchiveTarget]:
 
 
 def get_archive_target(title_id: str) -> ArchiveTarget | None:
-    row = get_connection().execute("SELECT * FROM archive_targets WHERE title_id = ?", (title_id,)).fetchone()
+    row = fetchone("SELECT * FROM archive_targets WHERE title_id = ?", (title_id,))
     if row is None:
         return None
     return ArchiveTarget(
@@ -396,10 +384,10 @@ def delete_archive_target(title_id: str) -> None:
 
 
 def count_archive_targets_with_base_path(dest_base_path: str, dest_type: str = "local") -> int:
-    row = get_connection().execute(
+    row = fetchone(
         "SELECT COUNT(*) AS c FROM archive_targets WHERE dest_base_path = ? AND dest_type = ? AND enabled = 1",
         (dest_base_path, dest_type),
-    ).fetchone()
+    )
     return row["c"]
 
 
@@ -425,7 +413,7 @@ def add_pending_finish_archive(title_id: str) -> None:
 
 
 def list_pending_finish_archive() -> list[str]:
-    rows = get_connection().execute("SELECT title_id FROM archive_pending_finish").fetchall()
+    rows = fetchall("SELECT title_id FROM archive_pending_finish")
     return [r["title_id"] for r in rows]
 
 
@@ -435,12 +423,12 @@ def remove_pending_finish_archive(title_id: str) -> None:
 
 
 def list_archive_history(page: int = 1, page_size: int = 30) -> tuple[list[dict], int]:
-    conn = get_connection()
-    total = conn.execute("SELECT COUNT(*) AS c FROM archive_history").fetchone()["c"]
-    rows = conn.execute(
-        "SELECT * FROM archive_history ORDER BY archived_at DESC LIMIT ? OFFSET ?",
-        (page_size, (page - 1) * page_size),
-    ).fetchall()
+    with read_lock() as conn:
+        total = conn.execute("SELECT COUNT(*) AS c FROM archive_history").fetchone()["c"]
+        rows = conn.execute(
+            "SELECT * FROM archive_history ORDER BY archived_at DESC LIMIT ? OFFSET ?",
+            (page_size, (page - 1) * page_size),
+        ).fetchall()
     items = [
         {
             "id": r["id"],
@@ -462,7 +450,7 @@ def _tag_row_to_record(row) -> WatchedTag:
 
 
 def list_watched_tags() -> list[WatchedTag]:
-    rows = get_connection().execute("SELECT * FROM watched_tags ORDER BY tag_name").fetchall()
+    rows = fetchall("SELECT * FROM watched_tags ORDER BY tag_name")
     return [_tag_row_to_record(r) for r in rows]
 
 
@@ -497,9 +485,7 @@ def delete_watched_tag(tag_id: str) -> None:
 
 
 def get_enabled_tag_ids() -> list[str]:
-    rows = get_connection().execute(
-        "SELECT tag_id FROM watched_tags WHERE enabled = 1"
-    ).fetchall()
+    rows = fetchall("SELECT tag_id FROM watched_tags WHERE enabled = 1")
     return [r["tag_id"] for r in rows]
 
 
@@ -527,25 +513,25 @@ def add_job_history(job_name: str, started_at: str, finished_at: str, status: st
 
 
 def list_job_history(limit_per_job: int = 10) -> list[dict]:
-    conn = get_connection()
-    job_names = [r["job_name"] for r in conn.execute("SELECT DISTINCT job_name FROM job_history").fetchall()]
-    results: list[dict] = []
-    for job_name in job_names:
-        rows = conn.execute(
-            "SELECT * FROM job_history WHERE job_name = ? ORDER BY started_at DESC LIMIT ?",
-            (job_name, limit_per_job),
-        ).fetchall()
-        for r in rows:
-            results.append(
-                {
-                    "id": r["id"],
-                    "job_name": r["job_name"],
-                    "started_at": r["started_at"],
-                    "finished_at": r["finished_at"],
-                    "status": r["status"],
-                    "log": json.loads(r["log"] or "[]"),
-                }
-            )
+    with read_lock() as conn:
+        job_names = [r["job_name"] for r in conn.execute("SELECT DISTINCT job_name FROM job_history").fetchall()]
+        results: list[dict] = []
+        for job_name in job_names:
+            rows = conn.execute(
+                "SELECT * FROM job_history WHERE job_name = ? ORDER BY started_at DESC LIMIT ?",
+                (job_name, limit_per_job),
+            ).fetchall()
+            for r in rows:
+                results.append(
+                    {
+                        "id": r["id"],
+                        "job_name": r["job_name"],
+                        "started_at": r["started_at"],
+                        "finished_at": r["finished_at"],
+                        "status": r["status"],
+                        "log": json.loads(r["log"] or "[]"),
+                    }
+                )
     results.sort(key=lambda r: r["started_at"], reverse=True)
     return results
 
@@ -587,7 +573,6 @@ def list_episode_history(
     status: str | None = None, search: str = "", page: int = 1, page_size: int = 30
 ) -> tuple[list[dict], int]:
     """(행 목록, 전체 개수)를 반환한다 — 상태/제목 검색 필터 + 페이지네이션."""
-    conn = get_connection()
     where_clauses = []
     params: list = []
     if status:
@@ -599,11 +584,12 @@ def list_episode_history(
         params.extend([pattern, pattern])
     where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-    total = conn.execute(f"SELECT COUNT(*) FROM episode_history {where_sql}", params).fetchone()[0]
-    rows = conn.execute(
-        f"SELECT * FROM episode_history {where_sql} ORDER BY downloaded_at DESC LIMIT ? OFFSET ?",
-        [*params, page_size, (page - 1) * page_size],
-    ).fetchall()
+    with read_lock() as conn:
+        total = conn.execute(f"SELECT COUNT(*) FROM episode_history {where_sql}", params).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT * FROM episode_history {where_sql} ORDER BY downloaded_at DESC LIMIT ? OFFSET ?",
+            [*params, page_size, (page - 1) * page_size],
+        ).fetchall()
 
     result = [
         {
@@ -635,10 +621,10 @@ def clear_episode_history() -> None:
 def list_episode_history_since(since_iso: str) -> list[dict]:
     """지정 시각 이후에 기록된 모든 회차 이력을 반환한다 (성공/실패 전부, 페이지네이션 없음) —
     리포트 발송용으로, 지난 발송 이후 구간을 통째로 훑을 때 쓴다."""
-    rows = get_connection().execute(
+    rows = fetchall(
         "SELECT * FROM episode_history WHERE downloaded_at > ? ORDER BY downloaded_at ASC",
         (since_iso,),
-    ).fetchall()
+    )
     return [
         {
             "id": r["id"],
@@ -657,10 +643,10 @@ def list_episode_history_since(since_iso: str) -> list[dict]:
 def list_episode_history_between(start_iso: str, end_iso: str) -> list[dict]:
     """[start_iso, end_iso) 구간의 이력을 반환한다 — 리포트 테스트 발송에서 "오늘"
     또는 "어제" 하루치만 정확히 뽑아낼 때 쓴다."""
-    rows = get_connection().execute(
+    rows = fetchall(
         "SELECT * FROM episode_history WHERE downloaded_at >= ? AND downloaded_at < ? ORDER BY downloaded_at ASC",
         (start_iso, end_iso),
-    ).fetchall()
+    )
     return [
         {
             "id": r["id"],
@@ -694,18 +680,18 @@ def export_all() -> dict:
     """백업에는 디스코드 비밀값을 포함하지 않는다 — 암호화 키가 없는 다른 환경으로
     복원하면 어차피 복호화가 안 되고, 백업 파일 자체가 새어나갈 경우의 위험도 줄인다.
     새 환경에서는 설정 페이지에서 다시 입력하면 된다."""
-    conn = get_connection()
-    settings_rows = [
-        dict(r)
-        for r in conn.execute("SELECT * FROM settings").fetchall()
-        if r["key"] not in _SECRET_SETTING_KEYS
-    ]
-    return {
-        "webtoons": [dict(r) for r in conn.execute("SELECT * FROM webtoons").fetchall()],
-        "settings": settings_rows,
-        "watched_authors": [dict(r) for r in conn.execute("SELECT * FROM watched_authors").fetchall()],
-        "watched_tags": [dict(r) for r in conn.execute("SELECT * FROM watched_tags").fetchall()],
-    }
+    with read_lock() as conn:
+        settings_rows = [
+            dict(r)
+            for r in conn.execute("SELECT * FROM settings").fetchall()
+            if r["key"] not in _SECRET_SETTING_KEYS
+        ]
+        return {
+            "webtoons": [dict(r) for r in conn.execute("SELECT * FROM webtoons").fetchall()],
+            "settings": settings_rows,
+            "watched_authors": [dict(r) for r in conn.execute("SELECT * FROM watched_authors").fetchall()],
+            "watched_tags": [dict(r) for r in conn.execute("SELECT * FROM watched_tags").fetchall()],
+        }
 
 
 _WEBTOON_COLUMNS = (

@@ -42,6 +42,10 @@ services:
       - ${APP_DATA_HOST_PATH}:/data
       # 브라우저 쿠키 export 파일이 들어있는 폴더 (파일명은 COOKIE_FILE_NAME으로 지정)
       - ${COOKIE_DIR_HOST_PATH}:/cookies:ro
-      # rclone.conf 파일이 들어있는 폴더 (읽기전용). 안 쓰실 거면 이 줄도
-      # 위 환경변수 줄과 함께 지우면 된다.
-      - ${RCLONE_CONFIG_HOST_PATH}:/rclone-config:ro
+      # rclone.conf 파일이 들어있는 폴더. 반드시 쓰기 가능해야 한다 — OneDrive,
+      # 구글드라이브 같은 OAuth 기반 원격은 rclone이 액세스 토큰을 주기적으로
+      # 갱신하면서 그 결과를 이 conf 파일에 다시 써야 하는데, 읽기전용(:ro)으로
+      # 마운트해두면 그 저장 자체가 실패해서("read-only file system") 결국 토큰이
+      # 만료되면 인증이 깨진다(실제로 이 문제로 폴더 조회가 실패하는 게 확인됨).
+      # 안 쓰실 거면 이 줄도 위 환경변수 줄과 함께 지우면 된다.
+      - ${RCLONE_CONFIG_HOST_PATH}:/rclone-config

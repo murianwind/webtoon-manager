@@ -161,6 +161,29 @@ def get_connection() -> sqlite3.Connection:
 
 
 @contextmanager
+def read_lock():
+    """읽기 쿼리도 이 락으로 감싸서 실행한다. check_same_thread=False로 크로스스레드
+    접근 자체는 허용해뒀지만, 여러 스레드가 "동시에" 같은 sqlite3 Connection 객체를
+    건드리면 내부 커서 상태가 꼬여 'bad parameter or other API misuse' 에러가 실제로
+    발생했다 — 폴링이 잦은 화면(아카이빙 설정 등)에서 여러 요청이 asyncio.to_thread로
+    서로 다른 스레드에서 동시에 조회할 때 재현됨. write_transaction과 같은 락을 공유해서
+    모든 DB 접근(읽기+쓰기)을 완전히 직렬화한다 — SQLite는 로컬 파일 기반이라 이 정도
+    직렬화로 인한 성능 영향은 미미하다."""
+    with _write_lock:
+        yield get_connection()
+
+
+def fetchone(query: str, params: tuple = ()) -> sqlite3.Row | None:
+    with read_lock() as conn:
+        return conn.execute(query, params).fetchone()
+
+
+def fetchall(query: str, params: tuple = ()) -> list[sqlite3.Row]:
+    with read_lock() as conn:
+        return conn.execute(query, params).fetchall()
+
+
+@contextmanager
 def write_transaction():
     """쓰기 작업은 전부 이 컨텍스트를 통해서만 수행한다 (레이스 컨디션 방지)."""
     with _write_lock:
