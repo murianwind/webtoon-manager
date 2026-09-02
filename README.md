@@ -114,6 +114,8 @@
 
 Windows에서 rclone으로 마운트한 드라이브/폴더는 **Docker Desktop이 인식하지 못합니다** (WinFsp 가상 드라이브의 구조적 한계 — 설정으로 해결 불가능한 것으로 확인됨). 대신 이 프로그램이 **컨테이너 안에서 rclone 명령을 직접 실행**해서 원격에 업로드하는 방식을 씁니다 — Windows 쪽 마운트 자체를 거치지 않아서 이 문제가 생기지 않습니다.
 
+컨테이너 안에는 [wiserain/rclone](https://github.com/wiserain/rclone)(원드라이브 안정성 개선이 반영된 포크)의 **항상 최신 버전**이 이미지 빌드 시점마다 자동으로 설치됩니다.
+
 1. Windows PC에서 미리 rclone 설정을 마쳐서 `rclone.conf` 파일을 만들어둡니다 (`rclone config` 명령으로 생성됨, 보통 `%USERPROFILE%\.config\rclone\rclone.conf`)
 2. 그 `rclone.conf` 파일이 있는 **폴더**를 docker-compose 환경변수 `RCLONE_CONFIG_HOST_PATH`로 지정
 3. "아카이빙" 탭의 폴더 선택기에 **"rclone 원격"** 버튼이 나타나면 정상 연결된 것입니다 — 로컬 폴더와 완전히 동일한 방식(찾아보기/새 폴더 만들기/이미 파일 있으면 선택 불가)으로 원격 폴더를 다룰 수 있습니다
