@@ -1538,8 +1538,20 @@ const savedTab = sessionStorage.getItem(ACTIVE_TAB_KEY);
 
 let archiveFolderPickerState = {}; // pickerId -> 현재 탐색 중인 경로
 
-function renderFolderPicker(containerId, onSelect, initialPath) {
-  archiveFolderPickerState[containerId] = { mode: "local", path: initialPath || "", remote: "" };
+async function renderFolderPicker(containerId, onSelect, initialPath) {
+  // 로컬이 설정 안 돼 있는데 무조건 "local"로 시작하면, 그 즉시 폴더 조회가
+  // 실패해서 에러만 뜨고 rclone으로 바꿀 방법이 없어지는 문제가 실제로 있었다 —
+  // 그래서 시작 모드를 실제로 뭐가 되는지 먼저 확인해서 정한다.
+  let startMode = "local";
+  try {
+    const archiveSettings = await apiCall("/api/archive/settings");
+    if (!archiveSettings.local_available && archiveSettings.rclone_available) {
+      startMode = "rclone";
+    }
+  } catch (e) {
+    // 조용히 무시하고 기본값(local)으로 진행 — 아래에서 다시 확인하고 에러 표시함
+  }
+  archiveFolderPickerState[containerId] = { mode: startMode, path: initialPath || "", remote: "" };
   renderFolderPickerContents(containerId, onSelect);
 }
 
@@ -1548,29 +1560,50 @@ async function renderFolderPickerContents(containerId, onSelect) {
   const state = archiveFolderPickerState[containerId];
   container.innerHTML = '<p class="hint-inline">불러오는 중...</p>';
 
+  let archiveSettings;
   try {
-    // 로컬/rclone 전환 UI (rclone 설정 있을 때만 표시)
-    const archiveSettings = await apiCall("/api/archive/settings");
-    container.innerHTML = "";
+    archiveSettings = await apiCall("/api/archive/settings");
+  } catch (e) {
+    container.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+    return;
+  }
+  container.innerHTML = "";
 
-    if (archiveSettings.rclone_available) {
-      const modeRow = document.createElement("div");
-      modeRow.className = "folder-picker-mode-row";
-      const localBtn = makeButton("로컬 폴더", () => {
-        archiveFolderPickerState[containerId] = { mode: "local", path: "", remote: "" };
-        renderFolderPickerContents(containerId, onSelect);
-      });
-      const rcloneBtn = makeButton("rclone 원격", () => {
-        archiveFolderPickerState[containerId] = { mode: "rclone", path: "", remote: "" };
-        renderFolderPickerContents(containerId, onSelect);
-      });
-      if (state.mode === "local") localBtn.disabled = true;
-      if (state.mode === "rclone") rcloneBtn.disabled = true;
-      modeRow.appendChild(localBtn);
-      modeRow.appendChild(rcloneBtn);
-      container.appendChild(modeRow);
-    }
+  // 모드 전환 버튼은 이 함수 안에서 무슨 일이 있어도(목록 조회가 실패하더라도)
+  // 항상 살아있어야 한다 — 로컬이 미설정이라 목록 조회가 실패해도, 최소한
+  // rclone으로 바꿀 방법은 남아있어야 하기 때문 (실제로 이게 막혀서 오도가도
+  // 못하는 문제가 있었다).
+  if (archiveSettings.rclone_available && archiveSettings.local_available) {
+    const modeRow = document.createElement("div");
+    modeRow.className = "folder-picker-mode-row";
+    const localBtn = makeButton("로컬 폴더", () => {
+      archiveFolderPickerState[containerId] = { mode: "local", path: "", remote: "" };
+      renderFolderPickerContents(containerId, onSelect);
+    });
+    const rcloneBtn = makeButton("rclone 원격", () => {
+      archiveFolderPickerState[containerId] = { mode: "rclone", path: "", remote: "" };
+      renderFolderPickerContents(containerId, onSelect);
+    });
+    if (state.mode === "local") localBtn.disabled = true;
+    if (state.mode === "rclone") rcloneBtn.disabled = true;
+    modeRow.appendChild(localBtn);
+    modeRow.appendChild(rcloneBtn);
+    container.appendChild(modeRow);
+  }
 
+  const listArea = document.createElement("div");
+  container.appendChild(listArea);
+
+  if (state.mode === "local" && !archiveSettings.local_available) {
+    listArea.innerHTML = '<p class="error">로컬 아카이빙 경로(ARCHIVE_ROOT)가 설정되어 있지 않습니다.</p>';
+    return;
+  }
+  if (state.mode === "rclone" && !archiveSettings.rclone_available) {
+    listArea.innerHTML = '<p class="error">rclone 설정 파일이 등록되어 있지 않습니다.</p>';
+    return;
+  }
+
+  try {
     if (state.mode === "rclone" && !state.remote) {
       // 원격을 아직 안 골랐으면 원격 선택 드롭다운부터
       const remotesData = await apiCall("/api/archive/rclone/remotes");
@@ -1584,7 +1617,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
       });
       remoteRow.appendChild(select);
       remoteRow.appendChild(chooseBtn);
-      container.appendChild(remoteRow);
+      listArea.appendChild(remoteRow);
       return;
     }
 
@@ -1597,7 +1630,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
     const pathRow = document.createElement("div");
     pathRow.className = "folder-picker-path";
     pathRow.textContent = isRclone ? `현재 위치: ${state.remote}:/${currentPath}` : `현재 위치: /${currentPath}`;
-    container.appendChild(pathRow);
+    listArea.appendChild(pathRow);
 
     const listBox = document.createElement("div");
     listBox.className = "folder-picker-list";
@@ -1639,7 +1672,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
       row.appendChild(selectBtn);
       listBox.appendChild(row);
     }
-    container.appendChild(listBox);
+    listArea.appendChild(listBox);
 
     const hereLabel = isRclone ? `"${state.remote}:/${currentPath || "(최상위)"}"` : `"/${currentPath || "(최상위)"}"`;
     const hereValue = isRclone ? `${state.remote}:${currentPath}` : currentPath;
@@ -1649,7 +1682,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
       }
       onSelect(hereValue, isRclone ? "rclone" : "local");
     });
-    container.appendChild(selectHereBtn);
+    listArea.appendChild(selectHereBtn);
 
     const newFolderRow = document.createElement("div");
     newFolderRow.className = "registry-add-row";
@@ -1670,9 +1703,9 @@ async function renderFolderPickerContents(containerId, onSelect) {
     });
     newFolderRow.appendChild(newFolderInput);
     newFolderRow.appendChild(newFolderBtn);
-    container.appendChild(newFolderRow);
+    listArea.appendChild(newFolderRow);
   } catch (e) {
-    container.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+    listArea.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
   }
 }
 
