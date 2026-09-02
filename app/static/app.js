@@ -137,6 +137,7 @@ function switchToTab(page) {
   document.getElementById(`page-${page}`).classList.remove("hidden");
   stopJobPolling();
   stopRegistryPolling();
+  stopArchiveJobPolling();
   pageLoaders[page]?.();
 }
 
@@ -1769,7 +1770,25 @@ async function renderFolderPickerContents(containerId, onSelect) {
     newFolderRow.appendChild(newFolderBtn);
     listArea.appendChild(newFolderRow);
   } catch (e) {
-    listArea.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+    // 조회에 실패한 위치를 계속 기억하고 있으면, 새로고침해도 매번 똑같이
+    // 고장난 위치를 다시 열려다 또 실패하는 문제가 실제로 있었다(예: OneDrive의
+    // Personal Vault처럼 API로 접근 자체가 원천적으로 안 되는 특수 폴더) —
+    // 그래서 실패하면 저장해둔 위치를 지우고, 처음으로 되돌아갈 방법을 준다.
+    try {
+      sessionStorage.removeItem(_folderPickerStorageKey(containerId));
+    } catch (_) {
+      // 조용히 무시
+    }
+    listArea.innerHTML = "";
+    const errorMsg = document.createElement("p");
+    errorMsg.className = "error";
+    errorMsg.textContent = e.message;
+    listArea.appendChild(errorMsg);
+    const resetBtn = makeButton("⬅ 처음으로 돌아가기", () => {
+      archiveFolderPickerState[containerId] = { mode: state.mode, path: "", remote: "" };
+      renderFolderPickerContents(containerId, onSelect);
+    });
+    listArea.appendChild(resetBtn);
   }
 }
 
@@ -1811,6 +1830,7 @@ async function loadArchivePage() {
   await loadArchiveSettings();
   await loadArchiveManualSelectList();
   await refreshArchiveJobStatus();
+  startArchiveJobPolling();
   await loadArchiveHistory(1);
 
   try {
@@ -1990,6 +2010,20 @@ async function refreshArchiveJobStatus() {
   }
 }
 
+let archiveJobPollTimer = null;
+
+function startArchiveJobPolling() {
+  stopArchiveJobPolling();
+  archiveJobPollTimer = setInterval(refreshArchiveJobStatus, 2000);
+}
+
+function stopArchiveJobPolling() {
+  if (archiveJobPollTimer) {
+    clearInterval(archiveJobPollTimer);
+    archiveJobPollTimer = null;
+  }
+}
+
 document.getElementById("btn-run-bulk-move").addEventListener("click", async () => {
   const resultEl = document.getElementById("bulk-move-result");
   resultEl.textContent = "";
@@ -2011,10 +2045,13 @@ document.getElementById("btn-run-bulk-move").addEventListener("click", async () 
 });
 
 async function loadArchiveHistory(page) {
+  loadArchiveHistoryRetentionDays();
   const tbody = document.getElementById("archive-history-tbody");
+  const emptyEl = document.getElementById("archive-history-empty");
   tbody.innerHTML = "";
   try {
     const data = await apiCall(`/api/archive/history?page=${page}`);
+    emptyEl.classList.toggle("hidden", data.items.length > 0);
     for (const item of data.items) {
       const tr = document.createElement("tr");
       const triggerLabel = { periodic: "주기적", manual: "수동", finish_unsubscribe: "완결자동", bulk_move: "일괄이동" }[item.trigger_type] || item.trigger_type;
@@ -2044,6 +2081,38 @@ function renderArchiveHistoryPagination(page, total, pageSize) {
   container.appendChild(label);
   if (page < totalPages) container.appendChild(makeButton("다음", () => loadArchiveHistory(page + 1)));
 }
+
+document.getElementById("btn-clear-archive-history").addEventListener("click", async () => {
+  if (!confirm("아카이빙 이력을 전부 지웁니다 (실제로 옮겨진 파일은 그대로 유지됩니다). 계속할까요?")) return;
+  await apiCall("/api/archive/history", { method: "DELETE" });
+  loadArchiveHistory(1);
+});
+
+async function loadArchiveHistoryRetentionDays() {
+  try {
+    const data = await apiCall("/api/archive/history/retention-days");
+    document.getElementById("archive-history-retention-days").value = data.retention_days || "";
+  } catch (e) {
+    // 조용히 무시 — 핵심 목록 표시에 지장 없어야 함
+  }
+}
+
+document.getElementById("btn-save-archive-history-retention").addEventListener("click", async () => {
+  const resultEl = document.getElementById("archive-history-retention-result");
+  resultEl.textContent = "";
+  const input = document.getElementById("archive-history-retention-days");
+  const days = Number(input.value) || 0;
+  try {
+    await apiCall("/api/archive/history/retention-days", {
+      method: "POST",
+      body: JSON.stringify({ retention_days: days }),
+    });
+    resultEl.style.color = "";
+    resultEl.textContent = days > 0 ? "저장했습니다." : "자동삭제 껐습니다.";
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+});
 
 
 if (savedTab && document.getElementById(`page-${savedTab}`)) {

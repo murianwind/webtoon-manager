@@ -1377,6 +1377,31 @@ async def get_archive_history(page: int = 1):
     return {"items": items, "total": total, "page": page, "page_size": 30}
 
 
+@router.delete("/archive/history")
+async def clear_archive_history():
+    await asyncio.to_thread(repository.clear_archive_history)
+    return {"status": "cleared"}
+
+
+_KEY_ARCHIVE_HISTORY_RETENTION_DAYS = "archive_history_retention_days"
+
+
+@router.get("/archive/history/retention-days", response_model=RetentionDaysOut)
+async def get_archive_history_retention_days():
+    value = await asyncio.to_thread(repository.get_setting, _KEY_ARCHIVE_HISTORY_RETENTION_DAYS)
+    return RetentionDaysOut(retention_days=int(value) if value else 0)
+
+
+@router.post("/archive/history/retention-days", response_model=RetentionDaysOut)
+async def set_archive_history_retention_days(payload: RetentionDaysIn):
+    await asyncio.to_thread(
+        repository.set_setting,
+        _KEY_ARCHIVE_HISTORY_RETENTION_DAYS,
+        str(payload.retention_days) if payload.retention_days > 0 else None,
+    )
+    return await get_archive_history_retention_days()
+
+
 class BulkMoveIn(BaseModel):
     source_path: str
     dest_path: str

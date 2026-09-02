@@ -266,6 +266,20 @@ def _cleanup_old_episode_history() -> None:
         job_status.log_line("download", f"보관기간({retention_days}일) 초과 다운로드 이력 {deleted}건 정리")
 
 
+def _cleanup_old_archive_history() -> None:
+    """설정된 보관 기간(일)이 있으면, 그보다 오래된 아카이빙 이력을 정리한다
+    (실제로 옮겨진 파일은 그대로 유지됨). 설정 안 했으면 아무것도 안 함."""
+    retention_raw = repository.get_setting("archive_history_retention_days")
+    if not retention_raw:
+        return
+    retention_days = int(retention_raw)
+    if retention_days <= 0:
+        return
+    deleted = repository.delete_archive_history_older_than(retention_days)
+    if deleted:
+        job_status.log_line("archive", f"보관기간({retention_days}일) 초과 아카이빙 이력 {deleted}건 정리")
+
+
 async def _notify_download_failures(
     session: aiohttp.ClientSession, settings: Settings, failures: list[dict]
 ) -> None:
@@ -347,6 +361,7 @@ async def run_archive_job() -> None:
                 archiver.process_pending_finish_archives, settings.archive_root, settings.download_root, settings.rclone_config_path
             )
             job_status.log_line("archive", f"완결 구독해제 대기열 {pending_moved}개 파일 이동 완료")
+            _cleanup_old_archive_history()
 
             job_status.finish("archive", success=True)
         except Exception as e:

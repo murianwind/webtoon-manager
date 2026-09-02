@@ -443,6 +443,20 @@ def list_archive_history(page: int = 1, page_size: int = 30) -> tuple[list[dict]
     return items, total
 
 
+def clear_archive_history() -> None:
+    """이력만 지운다 (실제로 옮겨진 파일은 그대로 유지됨)."""
+    with write_transaction() as conn:
+        conn.execute("DELETE FROM archive_history")
+
+
+def delete_archive_history_older_than(days: int) -> int:
+    """기록된 지 N일 넘은 아카이빙 이력을 지운다. 지운 개수를 반환."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    with write_transaction() as conn:
+        cursor = conn.execute("DELETE FROM archive_history WHERE archived_at < ?", (cutoff,))
+        return cursor.rowcount
+
+
 # ── watched_tags (태그 자동추가 레지스트리) ────────────────────────
 
 def _tag_row_to_record(row) -> WatchedTag:
