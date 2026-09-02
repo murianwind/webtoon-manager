@@ -1632,6 +1632,11 @@ async function renderFolderPickerContents(containerId, onSelect) {
   const container = document.getElementById(containerId);
   const state = archiveFolderPickerState[containerId];
   saveFolderPickerState(containerId);
+  // 폴더를 선택하면 목록 전체를 다시 그리는데, 그때마다 스크롤이 맨 위로
+  // 돌아가버리면 방금 고른 게 지금 보이는 위치에서 벗어나 있을 수 있어서
+  // "선택이 제대로 됐는지" 눈으로 바로 확인하기 어려웠다 — 다시 그리기 전의
+  // 스크롤 위치를 기억해뒀다가 그대로 복원한다.
+  const prevScrollTop = container.querySelector(".folder-picker-list")?.scrollTop || 0;
   container.innerHTML = '<p class="hint-inline">불러오는 중...</p>';
 
   let archiveSettings;
@@ -1817,14 +1822,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
       listBox.appendChild(row);
     }
     listArea.appendChild(listBox);
-
-    const hereLabel = isRclone ? `"${state.remote}:/${currentPath || "(최상위)"}"` : `"/${currentPath || "(최상위)"}"`;
-    const hereValue = isRclone ? `${state.remote}:${currentPath}` : currentPath;
-    const hereSelected = state.selectedLabel === currentPath;
-    const hereBtn = makeButton(`${hereLabel} 여기로 선택${hereSelected ? " ✅" : ""}`, () => {
-      trySelectFolder(hereBtn, listArea, currentPath || "(최상위)", currentPath, hereValue, isRclone ? "rclone" : "local");
-    });
-    listArea.appendChild(hereBtn);
+    listBox.scrollTop = prevScrollTop;
 
     const newFolderRow = document.createElement("div");
     newFolderRow.className = "registry-add-row folder-picker-new-row";
