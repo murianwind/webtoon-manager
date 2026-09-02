@@ -1921,13 +1921,21 @@ async function loadArchivePage() {
 async function loadArchiveTargetWebtoonOptions() {
   const select = document.getElementById("archive-target-webtoon-select");
   try {
-    const webtoons = await apiCall("/api/webtoons?status=active");
+    const [webtoons, targets] = await Promise.all([
+      apiCall("/api/webtoons?status=active"),
+      apiCall("/api/archive/targets"),
+    ]);
+    const registeredIds = new Set(targets.map((t) => t.title_id));
     select.innerHTML = "";
     for (const w of webtoons) {
+      if (registeredIds.has(w.title_id)) continue; // 이미 등록된 웹툰은 다시 고를 필요가 없음
       const opt = document.createElement("option");
       opt.value = w.title_id;
       opt.textContent = w.title;
       select.appendChild(opt);
+    }
+    if (select.options.length === 0) {
+      select.innerHTML = '<option value="">등록 가능한 웹툰이 없습니다</option>';
     }
   } catch (e) {
     select.innerHTML = `<option>${escapeHtml(e.message)}</option>`;
@@ -1958,6 +1966,7 @@ async function loadArchiveTargetList() {
         await apiCall(`/api/archive/targets/${encodeURIComponent(t.title_id)}/${t.enabled ? "disable" : "enable"}`, { method: "POST" });
         loadArchiveTargetList();
         loadArchiveManualSelectList();
+        loadArchiveTargetWebtoonOptions();
       });
       toggleBtn.className = "job-history-delete-btn";
       const deleteBtn = makeButton("삭제", async (ev) => {
@@ -1965,6 +1974,7 @@ async function loadArchiveTargetList() {
         await apiCall(`/api/archive/targets/${encodeURIComponent(t.title_id)}`, { method: "DELETE" });
         loadArchiveTargetList();
         loadArchiveManualSelectList();
+        loadArchiveTargetWebtoonOptions();
       });
       deleteBtn.className = "job-history-delete-btn";
       summary.appendChild(toggleBtn);
@@ -1995,6 +2005,7 @@ document.getElementById("btn-add-archive-target").addEventListener("click", asyn
     resultEl.textContent = "등록했습니다.";
     loadArchiveTargetList();
     loadArchiveManualSelectList();
+    loadArchiveTargetWebtoonOptions();
   } catch (e) {
     resultEl.textContent = e.message;
   }
