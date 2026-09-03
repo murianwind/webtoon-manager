@@ -56,9 +56,6 @@ window.addEventListener("resize", () => {
   if (!document.getElementById("page-manual-download").classList.contains("hidden")) {
     fitScrollWrapperToViewport("manual-table-wrapper", 240);
   }
-  if (!document.getElementById("page-episode-history").classList.contains("hidden")) {
-    fitScrollWrapperToViewport("episode-history-table-wrapper", 60);
-  }
 });
 
 function makeButton(label, onClick) {
@@ -122,9 +119,8 @@ const pageLoaders = {
   excluded: () => loadSubscriptionTab("excluded"),
   "manual-download": () => {},
   registry: loadRegistryPage,
-  "episode-history": () => loadEpisodeHistory(1),
+  history: loadHistoryPage,
   "manual-run": loadManualRunPage,
-  "job-history": loadJobHistoryPage,
   archive: loadArchivePage,
   settings: loadSettingsPage,
 };
@@ -1250,6 +1246,16 @@ document.getElementById("btn-save-author-auto-register").addEventListener("click
 async function loadManualRunPage() {
   await refreshJobStatus();
   startJobPolling();
+  loadArchiveManualSelectList();
+  await refreshArchiveJobStatus();
+  startArchiveJobPolling();
+}
+
+async function loadHistoryPage() {
+  // 다운로드/실행/아카이빙 이력을 한 탭에 모아뒀으니, 세 개를 한 번에 로드한다.
+  loadEpisodeHistory(1);
+  loadJobHistoryPage();
+  loadArchiveHistory(1);
 }
 
 async function loadJobHistoryPage() {
@@ -1938,19 +1944,6 @@ async function loadArchivePage() {
   });
   await loadArchiveTargetList();
   await loadArchiveSettings();
-  await loadArchiveManualSelectList();
-  await refreshArchiveJobStatus();
-  startArchiveJobPolling();
-  await loadArchiveHistory(1);
-
-  try {
-    const schedules = await apiCall("/api/settings");
-    const block = document.querySelector('.schedule-block[data-job="archive_job"] .schedule-controls');
-    block.innerHTML = "";
-    block.appendChild(buildScheduleControls("archive_job", schedules["archive_job"]));
-  } catch (e) {
-    // 조용히 무시
-  }
 }
 
 async function loadArchiveTargetWebtoonOptions() {
@@ -2081,21 +2074,6 @@ document.getElementById("btn-save-archive-settings").addEventListener("click", a
     invalidateArchiveCaches();
     resultEl.style.color = "";
     resultEl.textContent = "저장했습니다.";
-  } catch (e) {
-    resultEl.textContent = e.message;
-  }
-});
-
-document.getElementById("btn-save-archive-schedule").addEventListener("click", async () => {
-  const resultEl = document.getElementById("archive-schedule-save-result");
-  resultEl.textContent = "";
-  try {
-    const current = await apiCall("/api/settings");
-    const archiveControls = document.querySelector('.schedule-block[data-job="archive_job"] .schedule-controls');
-    const updated = { ...current, archive_job: readScheduleControls(archiveControls) };
-    await apiCall("/api/settings", { method: "POST", body: JSON.stringify(updated) });
-    resultEl.textContent = "저장했습니다.";
-    resultEl.style.color = "";
   } catch (e) {
     resultEl.textContent = e.message;
   }

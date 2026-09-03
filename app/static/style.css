@@ -361,12 +361,6 @@ select {
 .job-log .log-line.log-error { color: var(--danger); }
 
 /* 작가/태그 레지스트리 */
-.registry-columns {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-}
-.registry-column h3 { font-size: 13px; margin: 0 0 8px; color: var(--muted); }
 .registry-add-row {
   display: flex;
   gap: 6px;
@@ -382,33 +376,6 @@ select {
 .registry-add-row select {
   flex: 1;
   min-width: 160px;
-}
-.registry-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 260px;
-  overflow-y: auto;
-}
-.registry-list-scroll {
-  max-height: 180px;
-  margin-top: 8px;
-  margin-bottom: 4px;
-}
-.registry-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 12px;
-}
-.registry-row.disabled { opacity: 0.5; }
-.registry-row button {
-  font-size: 11px;
-  padding: 3px 8px;
-  margin-left: 4px;
 }
 
 /* 디스코드 설정 */
@@ -580,11 +547,6 @@ select {
   margin-top: 10px;
 }
 
-.registry-subheading {
-  font-size: 13px;
-  color: var(--muted);
-  margin: 16px 0 8px;
-}
 .registry-resync-row {
   display: flex;
   align-items: center;
@@ -665,11 +627,6 @@ select {
 }
 .job-history-entry.expanded .job-log {
   display: block;
-}
-
-.registry-row .registry-meta {
-  color: var(--muted);
-  font-size: 11px;
 }
 
 /* 디스코드 설정: 라벨 위 입력창 아래로 세로 정렬, 필드마다 줄바꿈 */

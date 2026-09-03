@@ -17,9 +17,8 @@
     <button class="main-tab" data-page="excluded">제외됨</button>
     <button class="main-tab" data-page="manual-download">수동 다운로드</button>
     <button class="main-tab" data-page="registry">작가/태그 관리</button>
-    <button class="main-tab" data-page="episode-history">다운로드 이력</button>
+    <button class="main-tab" data-page="history">이력</button>
     <button class="main-tab" data-page="manual-run">수동 실행</button>
-    <button class="main-tab" data-page="job-history">실행 이력</button>
     <button class="main-tab" data-page="archive">아카이빙</button>
     <button class="main-tab" data-page="settings">설정</button>
   </nav>
@@ -179,30 +178,67 @@
     </div>
   </section>
 
-  <!-- 다운로드 이력 (회차 단위) -->
-  <section id="page-episode-history" class="page hidden">
-    <div class="toolbar">
-      <input id="episode-history-search" type="text" placeholder="작품/회차 제목으로 검색" />
-      <select id="episode-history-status">
-        <option value="">전체</option>
-        <option value="success">성공</option>
-        <option value="failed">실패</option>
-      </select>
-      <button id="btn-clear-episode-history">전체 삭제</button>
-    </div>
-    <p class="hint">이력만 지워집니다 — 실제로 받은 파일은 그대로 유지됩니다.</p>
+  <!-- 이력 (다운로드/실행/아카이빙 통합) -->
+  <section id="page-history" class="page hidden">
+    <div class="settings-card">
+      <h2>다운로드 이력</h2>
+      <div class="toolbar">
+        <input id="episode-history-search" type="text" placeholder="작품/회차 제목으로 검색" />
+        <select id="episode-history-status">
+          <option value="">전체</option>
+          <option value="success">성공</option>
+          <option value="failed">실패</option>
+        </select>
+        <button id="btn-clear-episode-history">전체 삭제</button>
+      </div>
+      <p class="hint">이력만 지워집니다 — 실제로 받은 파일은 그대로 유지됩니다.</p>
 
-    <div class="retention-row">
-      <label for="episode-history-retention-days">보관 기간(일)</label>
-      <input id="episode-history-retention-days" type="number" min="0" placeholder="0 = 자동삭제 끔" />
-      <button id="btn-save-retention-days">저장</button>
-      <span id="retention-save-result" class="hint-inline"></span>
-    </div>
-    <p class="hint">설정한 일수보다 오래된 이력은 다운로드 실행 때마다 자동으로 정리됩니다 (파일은 유지됨). 0이면 끔.</p>
+      <div class="retention-row">
+        <label for="episode-history-retention-days">보관 기간(일)</label>
+        <input id="episode-history-retention-days" type="number" min="0" placeholder="0 = 자동삭제 끔" />
+        <button id="btn-save-retention-days">저장</button>
+        <span id="retention-save-result" class="hint-inline"></span>
+      </div>
+      <p class="hint">설정한 일수보다 오래된 이력은 다운로드 실행 때마다 자동으로 정리됩니다 (파일은 유지됨). 0이면 끔.</p>
 
-    <div id="episode-history-list" class="job-history-list"></div>
-    <p id="episode-history-empty" class="hidden empty-message">기록이 없습니다.</p>
-    <div id="episode-history-pagination" class="pagination"></div>
+      <div id="episode-history-list" class="job-history-list job-history-list-compact"></div>
+      <p id="episode-history-empty" class="hidden empty-message">기록이 없습니다.</p>
+      <div id="episode-history-pagination" class="pagination"></div>
+    </div>
+
+    <div class="settings-card">
+      <h2>실행 이력</h2>
+      <p class="hint">스케줄에 따라 자동으로(또는 수동으로) 실행된 작업이 실제로 돌았는지/성공했는지 확인할 수 있습니다.</p>
+      <div class="retention-row">
+        <label for="job-history-retention-days">보관 기간(일)</label>
+        <input id="job-history-retention-days" type="number" min="0" placeholder="0 = 자동삭제 끔" />
+        <button id="btn-save-job-history-retention">저장</button>
+        <span id="job-history-retention-result" class="hint-inline"></span>
+      </div>
+      <div class="toolbar">
+        <button id="btn-refresh-history">새로고침</button>
+        <button id="btn-clear-job-history">전체 삭제</button>
+      </div>
+      <div id="job-history-list" class="job-history-list job-history-list-compact"></div>
+    </div>
+
+    <div class="settings-card">
+      <h2>아카이빙 이력</h2>
+      <p class="hint">실제로 옮겨진 파일은 그대로 유지됩니다 — 여기선 이력만 지워집니다.</p>
+      <div class="retention-row">
+        <label for="archive-history-retention-days">보관 기간(일)</label>
+        <input id="archive-history-retention-days" type="number" min="0" placeholder="0 = 자동삭제 끔" />
+        <button id="btn-save-archive-history-retention">저장</button>
+        <span id="archive-history-retention-result" class="hint-inline"></span>
+      </div>
+      <p class="hint">설정한 일수보다 오래된 이력은 아카이빙 실행 때마다 자동으로 정리됩니다 (실제로 옮겨진 파일은 유지됨). 0이면 끔.</p>
+      <div class="toolbar">
+        <button id="btn-refresh-archive-history">새로고침</button>
+        <button id="btn-clear-archive-history">전체 삭제</button>
+      </div>
+      <div id="archive-history-list" class="job-history-list job-history-list-compact"></div>
+      <div id="archive-history-pagination" class="pagination"></div>
+    </div>
   </section>
 
   <!-- 설정 -->
@@ -228,6 +264,11 @@
         <h3>다운로드 리포트</h3>
         <div class="schedule-controls"></div>
       </div>
+      <div class="schedule-block" data-job="archive_job">
+        <h3>아카이빙</h3>
+        <div class="schedule-controls"></div>
+      </div>
+      <p class="hint">다운로드와 아카이빙 둘 다 "특정 시각" 모드면, 아카이빙은 다운로드보다 최소 10분 뒤로만 설정할 수 있습니다.</p>
       <button id="btn-save-settings">저장</button>
       <span id="settings-save-result" class="error"></span>
     </div>
@@ -308,23 +349,15 @@
         <div id="report-log" class="job-log"></div>
       </div>
     </div>
-  </section>
 
-  <!-- 실행 이력 -->
-  <section id="page-job-history" class="page hidden">
     <div class="settings-card">
-      <p class="hint">스케줄에 따라 자동으로(또는 수동으로) 실행된 작업이 실제로 돌았는지/성공했는지 확인할 수 있습니다.</p>
-      <div class="retention-row">
-        <label for="job-history-retention-days">보관 기간(일)</label>
-        <input id="job-history-retention-days" type="number" min="0" placeholder="0 = 자동삭제 끔" />
-        <button id="btn-save-job-history-retention">저장</button>
-        <span id="job-history-retention-result" class="hint-inline"></span>
+      <h2>아카이빙 수동 실행</h2>
+      <div id="archive-manual-select-list" class="chip-container"></div>
+      <button id="btn-run-archive-now" style="margin-top: 10px;">지금 이동</button>
+      <div class="job-status-block">
+        <h3>아카이빙 상태 <span id="archive-status-badge" class="badge">idle</span></h3>
+        <div id="archive-log" class="job-log"></div>
       </div>
-      <div class="toolbar">
-        <button id="btn-refresh-history">새로고침</button>
-        <button id="btn-clear-job-history">전체 삭제</button>
-      </div>
-      <div id="job-history-list" class="job-history-list"></div>
     </div>
   </section>
 
@@ -363,7 +396,7 @@
     <div class="settings-card">
       <h2>완결 자동이동 설정</h2>
       <label class="checkbox-label"><input type="checkbox" id="archive-on-finish-toggle" /> 완결된 웹툰을 구독해제하면 자동으로 전체 이동</label>
-      <p class="hint">구독해제하는 즉시가 아니라, 아래 "실행 스케줄"이 돌 때 함께 처리됩니다. 지정 안 된 웹툰이 이 조건으로 트리거되면 "기본 그릇 폴더"를 씁니다 (지정된 웹툰은 자기 폴더로).</p>
+      <p class="hint">구독해제하는 즉시가 아니라, "설정" 탭의 "실행 스케줄"이 돌 때 함께 처리됩니다. 지정 안 된 웹툰이 이 조건으로 트리거되면 "기본 그릇 폴더"를 씁니다 (지정된 웹툰은 자기 폴더로).</p>
       <label class="field-label">지정 안 된 웹툰이 쓸 기본 그릇 폴더</label>
       <div id="archive-default-folder-picker"></div>
       <div class="field-group">
@@ -379,27 +412,6 @@
     </div>
 
     <div class="settings-card">
-      <h2>실행 스케줄</h2>
-      <div class="schedule-block" data-job="archive_job">
-        <h3>아카이빙</h3>
-        <div class="schedule-controls"></div>
-      </div>
-      <p class="hint">다운로드와 둘 다 "특정 시각" 모드면, 아카이빙은 다운로드보다 최소 10분 뒤로만 설정할 수 있습니다.</p>
-      <button id="btn-save-archive-schedule">저장</button>
-      <span id="archive-schedule-save-result" class="error"></span>
-    </div>
-
-    <div class="settings-card">
-      <h2>수동 실행</h2>
-      <div id="archive-manual-select-list" class="chip-container"></div>
-      <button id="btn-run-archive-now" style="margin-top: 10px;">지금 이동</button>
-      <div class="job-status-block">
-        <h3>아카이빙 상태 <span id="archive-status-badge" class="badge">idle</span></h3>
-        <div id="archive-log" class="job-log"></div>
-      </div>
-    </div>
-
-    <div class="settings-card">
       <h2>폴더 일괄 이동 (1회성)</h2>
       <p class="hint">웹툰 지정과 무관하게, 아카이브 폴더 안에서 특정 폴더의 내용을 통째로 다른 폴더로 옮깁니다.</p>
       <label class="field-label">원본 폴더</label>
@@ -408,24 +420,6 @@
       <div id="bulk-move-dest-picker"></div>
       <button id="btn-run-bulk-move" style="margin-top: 8px;">지금 이동</button>
       <span id="bulk-move-result" class="hint-inline"></span>
-    </div>
-
-    <div class="settings-card">
-      <h2>아카이빙 이력</h2>
-      <p class="hint">실제로 옮겨진 파일은 그대로 유지됩니다 — 여기선 이력만 지워집니다.</p>
-      <div class="retention-row">
-        <label for="archive-history-retention-days">보관 기간(일)</label>
-        <input id="archive-history-retention-days" type="number" min="0" placeholder="0 = 자동삭제 끔" />
-        <button id="btn-save-archive-history-retention">저장</button>
-        <span id="archive-history-retention-result" class="hint-inline"></span>
-      </div>
-      <p class="hint">설정한 일수보다 오래된 이력은 아카이빙 실행 때마다 자동으로 정리됩니다 (실제로 옮겨진 파일은 유지됨). 0이면 끔.</p>
-      <div class="toolbar">
-        <button id="btn-refresh-archive-history">새로고침</button>
-        <button id="btn-clear-archive-history">전체 삭제</button>
-      </div>
-      <div id="archive-history-list" class="job-history-list job-history-list-compact"></div>
-      <div id="archive-history-pagination" class="pagination"></div>
     </div>
     </div>
   </section>
