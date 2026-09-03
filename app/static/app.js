@@ -134,6 +134,7 @@ function switchToTab(page) {
   stopJobPolling();
   stopRegistryPolling();
   stopArchiveJobPolling();
+  stopBulkMoveJobPolling();
   pageLoaders[page]?.();
 }
 
@@ -1981,6 +1982,7 @@ async function loadArchivePage() {
   );
   await loadArchiveTargetList();
   await loadArchiveSettings();
+  await resumeBulkMoveStatusIfRunning(); // 탭을 나갔다 들어와도 실행 중이던 일괄이동을 이어서 보여줌
 }
 
 async function loadArchiveTargetWebtoonOptions() {
@@ -2169,15 +2171,34 @@ function stopArchiveJobPolling() {
   }
 }
 
+async function resumeBulkMoveStatusIfRunning() {
+  try {
+    const statuses = await apiCall("/api/jobs/status");
+    const s = statuses.bulk_move;
+    if (!s) return;
+    document.getElementById("bulk-move-status-badge").textContent = s.status;
+    document.getElementById("bulk-move-status-badge").className = `badge job-${s.status}`;
+    renderJobLog("bulk_move", s.log || []);
+    if (s.status === "running") {
+      document.getElementById("btn-run-bulk-move").disabled = true;
+      startBulkMoveJobPolling();
+    }
+  } catch (e) {
+    // 조용히 무시 — 탭 진입 자체를 막을 정도는 아님
+  }
+}
+
 document.getElementById("btn-run-bulk-move").addEventListener("click", async () => {
   const resultEl = document.getElementById("bulk-move-result");
+  const btn = document.getElementById("btn-run-bulk-move");
   resultEl.textContent = "";
   if (!archiveSelectedBulkSourcePath || !archiveSelectedBulkDestPath) {
     resultEl.textContent = "원본/목적지 폴더를 모두 선택하세요.";
     return;
   }
+  btn.disabled = true;
   try {
-    const data = await apiCall("/api/archive/bulk-move", {
+    await apiCall("/api/archive/bulk-move", {
       method: "POST",
       body: JSON.stringify({
         source_type: archiveSelectedBulkSourceType,
@@ -2186,13 +2207,53 @@ document.getElementById("btn-run-bulk-move").addEventListener("click", async () 
         dest_path: archiveSelectedBulkDestPath,
       }),
     });
-    resultEl.style.color = "";
-    resultEl.textContent = `${data.moved}개 항목 이동 완료했습니다.`;
-    loadArchiveHistory(1);
+    // 파일 개수가 많으면 수 분 걸릴 수 있어서, 응답을 기다리지 않고 바로
+    // 진행상황 폴링을 시작한다 — 끝나면(refreshBulkMoveJobStatus 안에서) 버튼을
+    // 다시 켜고 이력을 새로고침한다.
+    startBulkMoveJobPolling();
   } catch (e) {
     resultEl.textContent = e.message;
+    btn.disabled = false;
   }
 });
+
+let bulkMoveJobPollTimer = null;
+
+function startBulkMoveJobPolling() {
+  stopBulkMoveJobPolling();
+  refreshBulkMoveJobStatus();
+  bulkMoveJobPollTimer = setInterval(refreshBulkMoveJobStatus, 1500);
+}
+
+function stopBulkMoveJobPolling() {
+  if (bulkMoveJobPollTimer) {
+    clearInterval(bulkMoveJobPollTimer);
+    bulkMoveJobPollTimer = null;
+  }
+}
+
+async function refreshBulkMoveJobStatus() {
+  let statuses;
+  try {
+    statuses = await apiCall("/api/jobs/status");
+  } catch (e) {
+    return;
+  }
+  const s = statuses.bulk_move;
+  if (!s) return;
+  const badge = document.getElementById("bulk-move-status-badge");
+  badge.textContent = s.status;
+  badge.className = `badge job-${s.status}`;
+  renderJobLog("bulk_move", s.log || []);
+  if (s.status !== "running") {
+    stopBulkMoveJobPolling();
+    document.getElementById("btn-run-bulk-move").disabled = false;
+    const resultEl = document.getElementById("bulk-move-result");
+    resultEl.style.color = s.status === "error" ? "" : "";
+    resultEl.textContent = s.status === "success" ? "이동 완료했습니다." : "이동 중 오류가 발생했습니다 (아래 로그 확인).";
+    loadArchiveHistory(1);
+  }
+}
 
 async function loadArchiveHistory(page) {
   loadArchiveHistoryRetentionDays();

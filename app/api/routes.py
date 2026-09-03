@@ -1445,23 +1445,41 @@ class BulkMoveIn(BaseModel):
 
 @router.post("/archive/bulk-move")
 async def bulk_move(payload: BulkMoveIn):
+    """다른 아카이빙 잡(주기/완결/수동)과 동일하게, 즉시 응답하고 실제 이동은
+    백그라운드에서 진행하며 job_status로 진행 상황을 남긴다 — 파일이 많으면
+    수 분 걸릴 수 있는데, 예전처럼 응답이 올 때까지 화면에 아무 표시도 없으면
+    "되고 있는 건지조차" 알 수 없다는 문제가 실제로 있었다."""
     settings = get_settings()
     if "rclone" in (payload.source_type, payload.dest_type) and not (
         settings.rclone_config_path and Path(settings.rclone_config_path).is_file()
     ):
         raise HTTPException(status_code=400, detail="rclone 설정 파일이 등록되어 있지 않습니다.")
-    try:
-        moved = await asyncio.to_thread(
-            archiver.bulk_move_folder,
-            settings.archive_root, settings.rclone_config_path,
-            payload.source_type, payload.source_path,
-            payload.dest_type, payload.dest_path,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except archiver.rclone_client.RcloneError as e:
-        raise HTTPException(status_code=502, detail=str(e))
-    await asyncio.to_thread(
-        repository.add_archive_history, "-", f"{payload.source_path} → {payload.dest_path}", f"{moved}개 파일", "bulk_move"
-    )
-    return {"moved": moved}
+
+    job_status.start("bulk_move")
+
+    async def _run():
+        try:
+            moved = await asyncio.to_thread(
+                archiver.bulk_move_folder,
+                settings.archive_root, settings.rclone_config_path,
+                payload.source_type, payload.source_path,
+                payload.dest_type, payload.dest_path,
+                lambda msg: job_status.log_line("bulk_move", msg),
+            )
+            await asyncio.to_thread(
+                repository.add_archive_history, "-", f"{payload.source_path} → {payload.dest_path}", f"{moved}개 파일", "bulk_move"
+            )
+            job_status.log_line("bulk_move", f"완료 — {moved}개 파일 이동")
+            job_status.finish("bulk_move", success=True)
+        except ValueError as e:
+            job_status.log_line("bulk_move", f"오류: {e}")
+            job_status.finish("bulk_move", success=False)
+        except archiver.rclone_client.RcloneError as e:
+            job_status.log_line("bulk_move", f"rclone 오류: {e}")
+            job_status.finish("bulk_move", success=False)
+        except Exception as e:
+            job_status.log_line("bulk_move", f"예상치 못한 오류: {e}")
+            job_status.finish("bulk_move", success=False)
+
+    asyncio.create_task(_run())
+    return {"status": "started"}

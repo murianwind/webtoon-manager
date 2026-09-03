@@ -480,13 +480,22 @@ def bulk_move_folder(
     archive_root: str, rclone_config_path: str,
     source_type: str, source_path: str,
     dest_type: str, dest_path: str,
+    progress_callback=None,
 ) -> int:
     """1회성 폴더→폴더 전체 이동 (아카이빙 대상 지정 규칙과 무관, 백업 정리용).
     로컬-로컬/로컬-원격/원격-로컬/원격-원격 네 조합을 전부 지원한다.
     항상 '파일' 단위로 옮기며(폴더 자체를 통째로 옮기지 않음), 옮긴 뒤 원본 쪽에
-    파일이 하나도 안 남은 빈 폴더는 정리한다."""
+    파일이 하나도 안 남은 빈 폴더는 정리한다.
+
+    progress_callback(선택): 파일 하나 처리할 때마다 사람이 읽을 진행 메시지
+    문자열 하나를 넘겨서 호출한다. archiver.py는 이 메시지를 어디에 기록할지
+    (화면 표시용 job_status 등) 전혀 모른다 — 호출부(routes.py)가 원하는 대로
+    쓰도록 콜백으로만 분리해서, 이 모듈이 웹/잡 상태 계층에 의존하지 않게 한다."""
     policy = get_conflict_policy()
     rel_files, src_ctx = _bulk_move_collect_source_files(source_type, archive_root, rclone_config_path, source_path)
+    total = len(rel_files)
+    if progress_callback:
+        progress_callback(f"이동할 파일 {total}개 확인, 시작합니다")
 
     if dest_type == "local":
         dest_ctx = _local_archive_path(archive_root, dest_path)
@@ -500,20 +509,28 @@ def bulk_move_folder(
         dest_ctx = (remote, base_path)
 
     moved = 0
-    for rel_path in rel_files:
+    for index, rel_path in enumerate(rel_files, start=1):
         try:
             final_rel = _bulk_move_resolve_final_rel(policy, dest_type, dest_ctx, rel_path, rclone_config_path)
             if final_rel is None:
                 log.info("일괄 이동 건너뜀 (이미 존재): %s", rel_path)
+                if progress_callback:
+                    progress_callback(f"[{index}/{total}] 건너뜀(이미 존재): {rel_path}")
                 continue
             _bulk_move_single_file(
                 src_kind=source_type, src_ctx=src_ctx, dest_kind=dest_type, dest_ctx=dest_ctx,
                 rel_path=rel_path, final_rel=final_rel, rclone_config_path=rclone_config_path,
             )
             moved += 1
+            if progress_callback:
+                progress_callback(f"[{index}/{total}] 이동 완료: {rel_path}")
         except Exception as e:
             log.error("일괄 이동 중 개별 파일 실패, 건너뜀 (%s): %s", rel_path, e)
+            if progress_callback:
+                progress_callback(f"[{index}/{total}] 실패(건너뜀): {rel_path} — {e}")
 
+    if progress_callback:
+        progress_callback("원본 쪽 빈 폴더 정리 중")
     if source_type == "local":
         _cleanup_empty_dirs(src_ctx)
     else:
