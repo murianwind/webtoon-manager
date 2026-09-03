@@ -1604,9 +1604,10 @@ async function renderFolderPicker(containerId, onSelect, initialPath, options) {
   // 이 옵션을 안 주면 기존처럼 확인 절차를 그대로 거친다.
   const skipExistingCheck = !!(options && options.skipExistingCheck);
 
-  // 새로고침해도 뭘 보고 있었는지 잃지 않게, sessionStorage에 저장된 상태가
-  // 있으면 그걸 우선 복원한다 — 원격 폴더 조회가 느릴 수 있어서, 매번 원격
-  // 선택부터 다시 하게 되면 특히 불편하다는 문제가 실제로 있었다.
+  // sessionStorage는 이 브라우저 탭 안에서만 살아있고, 탭을 닫으면(다른 브라우저
+  // 탭으로 이동하는 것과는 다름) 자동으로 사라진다 — 그래서 같은 탭 안에서 다른
+  // 화면 갔다 오거나 새로고침해도 위치는 유지되면서, 탭/브라우저를 닫으면 다음에
+  // 열었을 때는 자연히 초기화된다.
   const saved = loadSavedFolderPickerState(containerId);
   if (saved) {
     // skipExistingCheck는 화면 탐색 상태가 아니라 "이 선택기가 애초에 어떻게
