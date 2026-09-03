@@ -155,14 +155,16 @@ def resolve_archive_dest(archive_root: str, title_name: str, base_path: str, *, 
     return dest
 
 
-def move_file_with_conflict_policy(src: Path, dest_dir: Path, policy: str) -> str | None:
-    """src를 dest_dir로 옮긴다. 반환값은 실제로 저장된 파일명(성공 시) 또는 None(건너뛴 경우).
+def move_file_with_conflict_policy(src: Path, dest_dir: Path, policy: str) -> tuple[str | None, bool]:
+    """src를 dest_dir로 옮긴다. 반환값은 (실제로 저장된 파일명(성공 시) 또는 None(건너뛴 경우),
+    목적지에 이미 같은 이름 파일이 있어서 정책이 실제로 작동했는지 여부).
     policy: 'overwrite' | 'skip' | 'rename'"""
     dest_path = dest_dir / src.name
-    if dest_path.exists():
+    had_conflict = dest_path.exists()
+    if had_conflict:
         if policy == "skip":
             log.info("아카이빙 건너뜀 (이미 존재): %s", dest_path)
-            return None
+            return None, True
         elif policy == "rename":
             stem, suffix = src.stem, src.suffix
             counter = 2
@@ -172,7 +174,7 @@ def move_file_with_conflict_policy(src: Path, dest_dir: Path, policy: str) -> st
         # overwrite는 dest_path 그대로 두고 shutil.move가 덮어쓰게 둔다
 
     shutil.move(str(src), str(dest_path))
-    return dest_path.name
+    return dest_path.name, had_conflict
 
 
 def get_conflict_policy() -> str:
@@ -217,12 +219,15 @@ def _resolve_archive_dest_rclone(rclone_config_path: str, title_name: str, base_
     return f"{remote}:{dest_path}"
 
 
-def _move_file_to_rclone_with_conflict_policy(rclone_config_path: str, src: Path, remote: str, dest_path: str, policy: str) -> str | None:
+def _move_file_to_rclone_with_conflict_policy(
+    rclone_config_path: str, src: Path, remote: str, dest_path: str, policy: str
+) -> tuple[str | None, bool]:
     dest_name = src.name
-    if rclone_client.file_exists(rclone_config_path, remote, dest_path, dest_name):
+    had_conflict = rclone_client.file_exists(rclone_config_path, remote, dest_path, dest_name)
+    if had_conflict:
         if policy == "skip":
             log.info("아카이빙 건너뜀 (원격에 이미 존재): %s:%s/%s", remote, dest_path, dest_name)
-            return None
+            return None, True
         elif policy == "rename":
             stem = Path(dest_name).stem
             suffix = Path(dest_name).suffix
@@ -249,17 +254,25 @@ def _move_file_to_rclone_with_conflict_policy(rclone_config_path: str, src: Path
             )
         else:
             raise
-    return dest_name
+    return dest_name, had_conflict
 
 
 def _archive_title(
     archive_root: str, download_root: str, title_id: str, title_name: str,
     base_path: str, policy: str, trigger_type: str, keep_last: bool,
     dest_type: str = "local", rclone_config_path: str = "",
+    progress_callback=None, conflict_log: list | None = None, failure_log: list | None = None,
 ) -> int:
     """실제로 파일들을 옮기고 이력을 남긴다. 반환값은 옮긴 개수.
     dest_type이 'rclone'이면 로컬 shutil 대신 rclone CLI로 처리한다(Windows 마운트를
-    거치지 않아서, Docker Desktop이 WinFsp 가상 드라이브를 못 읽는 문제를 우회함)."""
+    거치지 않아서, Docker Desktop이 WinFsp 가상 드라이브를 못 읽는 문제를 우회함).
+
+    progress_callback(선택): 파일 하나 처리할 때마다 진행 메시지 문자열로 호출한다
+    (일괄 이동과 동일한 방식) — 이 함수는 그 메시지를 화면에 어떻게 보여줄지 모른다.
+    conflict_log/failure_log(선택): 지정하면, 이번 파일에서 이름 충돌이 실제로
+    있었거나(정책이 작동함) 이동 자체가 실패했을 때 (title_name, file_name, 상세)를
+    그 리스트에 추가한다 — 호출부(scheduler.py)가 실행이 다 끝난 뒤 모아서 디스코드로
+    알릴 때 쓴다."""
     if dest_type == "rclone" and not (rclone_config_path and Path(rclone_config_path).is_file()):
         log.error("rclone 목적지인데 RCLONE_CONFIG_PATH가 설정 안 되어 있어 건너뜀 (title_id=%s)", title_id)
         return 0
@@ -284,30 +297,53 @@ def _archive_title(
         remote, dest_path = _parse_rclone_target(dest_target)
         for _num, src in files:
             try:
-                saved_name = _move_file_to_rclone_with_conflict_policy(rclone_config_path, src, remote, dest_path, policy)
+                saved_name, had_conflict = _move_file_to_rclone_with_conflict_policy(rclone_config_path, src, remote, dest_path, policy)
+                if had_conflict and conflict_log is not None:
+                    conflict_log.append((title_name, src.name, policy))
                 if saved_name is not None:
                     repository.add_archive_history(title_id, title_name, saved_name, trigger_type)
                     moved += 1
+                    if progress_callback:
+                        progress_callback(f"[{title_name}] 이동 완료: {saved_name}")
+                elif progress_callback:
+                    progress_callback(f"[{title_name}] 건너뜀(이미 존재): {src.name}")
             except Exception as e:
                 log.error("rclone 아카이빙 이동 실패 (%s): %s", src, e)
+                if progress_callback:
+                    progress_callback(f"[{title_name}] 이동 실패: {src.name} — {e}")
+                if failure_log is not None:
+                    failure_log.append((title_name, src.name, str(e)))
         if metadata_files:
             _archive_metadata_files_rclone(rclone_config_path, metadata_files, remote, dest_path, keep_last=keep_last)
     else:
         dest_dir = resolve_archive_dest(archive_root, title_name, base_path, force_subfolder=force_subfolder)
         for _num, src in files:
             try:
-                saved_name = move_file_with_conflict_policy(src, dest_dir, policy)
+                saved_name, had_conflict = move_file_with_conflict_policy(src, dest_dir, policy)
+                if had_conflict and conflict_log is not None:
+                    conflict_log.append((title_name, src.name, policy))
                 if saved_name is not None:
                     repository.add_archive_history(title_id, title_name, saved_name, trigger_type)
                     moved += 1
+                    if progress_callback:
+                        progress_callback(f"[{title_name}] 이동 완료: {saved_name}")
+                elif progress_callback:
+                    progress_callback(f"[{title_name}] 건너뜀(이미 존재): {src.name}")
             except Exception as e:
                 log.error("아카이빙 이동 실패 (%s): %s", src, e)
+                if progress_callback:
+                    progress_callback(f"[{title_name}] 이동 실패: {src.name} — {e}")
+                if failure_log is not None:
+                    failure_log.append((title_name, src.name, str(e)))
         if metadata_files:
             _archive_metadata_files_local(metadata_files, dest_dir, keep_last=keep_last)
     return moved
 
 
-def run_periodic_archive(archive_root: str, download_root: str, rclone_config_path: str = "") -> int:
+def run_periodic_archive(
+    archive_root: str, download_root: str, rclone_config_path: str = "",
+    progress_callback=None, conflict_log: list | None = None, failure_log: list | None = None,
+) -> int:
     """지정된(enabled) 웹툰 전부, 마지막 파일 보존하며 이동. 반환값은 전체 이동 개수."""
     policy = get_conflict_policy()
     total = 0
@@ -321,11 +357,15 @@ def run_periodic_archive(archive_root: str, download_root: str, rclone_config_pa
             archive_root, download_root, target.title_id, wt.title,
             target.dest_base_path, policy, "periodic", keep_last=True,
             dest_type=target.dest_type, rclone_config_path=rclone_config_path,
+            progress_callback=progress_callback, conflict_log=conflict_log, failure_log=failure_log,
         )
     return total
 
 
-def manual_archive_now(archive_root: str, download_root: str, title_ids: list[str], rclone_config_path: str = "") -> int:
+def manual_archive_now(
+    archive_root: str, download_root: str, title_ids: list[str], rclone_config_path: str = "",
+    progress_callback=None,
+) -> int:
     """수동 실행 — 지정된 것과 동일 규칙(마지막 파일 보존), 대상만 사용자가 고름."""
     policy = get_conflict_policy()
     total = 0
@@ -340,11 +380,15 @@ def manual_archive_now(archive_root: str, download_root: str, title_ids: list[st
             archive_root, download_root, title_id, wt.title,
             target.dest_base_path, policy, "manual", keep_last=True,
             dest_type=target.dest_type, rclone_config_path=rclone_config_path,
+            progress_callback=progress_callback,
         )
     return total
 
 
-def process_pending_finish_archives(archive_root: str, download_root: str, rclone_config_path: str = "") -> int:
+def process_pending_finish_archives(
+    archive_root: str, download_root: str, rclone_config_path: str = "",
+    progress_callback=None, conflict_log: list | None = None, failure_log: list | None = None,
+) -> int:
     """완결 구독해제로 대기열에 쌓인 웹툰들을 처리한다 — 아카이빙 주기가 돌 때
     run_periodic_archive와 함께 호출된다(즉시 실행 대신 같은 주기에 묶임)."""
     if not is_finish_unsubscribe_archiving_enabled():
@@ -373,6 +417,7 @@ def process_pending_finish_archives(archive_root: str, download_root: str, rclon
             archive_root, download_root, title_id, wt.title,
             base_path, policy, "finish_unsubscribe", keep_last=False,
             dest_type=dest_type, rclone_config_path=rclone_config_path,
+            progress_callback=progress_callback, conflict_log=conflict_log, failure_log=failure_log,
         )
         # 완결 전체이동은 마지막 파일도 예외 없이 옮기므로, 다 옮기고 나면 다운로드
         # 쪽 웹툰 폴더엔 아무 것도 안 남는 게 정상이다 — 파일이 하나라도 남아있으면
@@ -501,6 +546,11 @@ def bulk_move_folder(
     if progress_callback:
         progress_callback(f"이동할 파일 {total}개 확인, 시작합니다")
 
+    # 이력에는 파일 하나마다 한 줄씩 남긴다 — 주기/수동/완결 이동과 같은 단위로
+    # 남겨야, "이력 → 아카이빙 이력"에서 어떤 이동 방식이든 항상 같은 수준의
+    # 기록을 볼 수 있다(예전엔 일괄 이동만 작업 전체에 한 줄만 남겨서 단위가 달랐음).
+    batch_label = f"{source_path} → {dest_path}"
+
     if dest_type == "local":
         dest_ctx = _local_archive_path(archive_root, dest_path)
         dest_ctx.mkdir(parents=True, exist_ok=True)
@@ -526,6 +576,7 @@ def bulk_move_folder(
                 rel_path=rel_path, final_rel=final_rel, rclone_config_path=rclone_config_path,
             )
             moved += 1
+            repository.add_archive_history("-", batch_label, final_rel, "bulk_move")
             if progress_callback:
                 progress_callback(f"[{index}/{total}] 이동 완료: {rel_path}")
         except Exception as e:

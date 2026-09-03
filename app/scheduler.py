@@ -280,6 +280,25 @@ def _cleanup_old_archive_history() -> None:
         job_status.log_line("archive", f"보관기간({retention_days}일) 초과 아카이빙 이력 {deleted}건 정리")
 
 
+async def _notify_archive_issues(
+    session: aiohttp.ClientSession, settings: Settings, conflicts: list[tuple[str, str, str]], failures: list[tuple[str, str, str]]
+) -> None:
+    """주기 아카이빙(완결 자동이동 포함) 실행 중 이름 충돌을 처리했거나 실패한 게
+    있으면 한 번에 모아서 디스코드로 알린다 — 다운로드 실패 요약과 같은 패턴
+    (건마다 알리면 스팸이 되니 실행 끝날 때 요약 1건)."""
+    policy_label = {"skip": "건너뜀", "overwrite": "덮어씀", "rename": "이름 바꿔 저장"}
+    lines = ["📦 **아카이빙 실행 알림**"]
+    if conflicts:
+        lines.append(f"⚠️ 파일명 충돌 {len(conflicts)}건")
+        for title_name, file_name, policy in conflicts:
+            lines.append(f"- {title_name}: {file_name} ({policy_label.get(policy, policy)})")
+    if failures:
+        lines.append(f"❌ 이동 실패 {len(failures)}건")
+        for title_name, file_name, error in failures:
+            lines.append(f"- {title_name}: {file_name} — {error}")
+    await discord_notify.send_webhook_notification(session, settings, "\n".join(lines))
+
+
 async def _notify_download_failures(
     session: aiohttp.ClientSession, settings: Settings, failures: list[dict]
 ) -> None:
@@ -353,15 +372,25 @@ async def run_archive_job() -> None:
         except Exception as e:
             log.error("rclone 자동 업데이트 확인 중 예외: %s", e)
             job_status.log_line("archive", f"rclone 업데이트 확인 중 오류(무시하고 계속): {e}")
+        conflicts: list[tuple[str, str, str]] = []
+        failures: list[tuple[str, str, str]] = []
         try:
-            moved = await asyncio.to_thread(archiver.run_periodic_archive, settings.archive_root, settings.download_root, settings.rclone_config_path)
+            moved = await asyncio.to_thread(
+                archiver.run_periodic_archive, settings.archive_root, settings.download_root, settings.rclone_config_path,
+                lambda msg: job_status.log_line("archive", msg), conflicts, failures,
+            )
             job_status.log_line("archive", f"지정 웹툰 {moved}개 파일 이동 완료")
 
             pending_moved = await asyncio.to_thread(
-                archiver.process_pending_finish_archives, settings.archive_root, settings.download_root, settings.rclone_config_path
+                archiver.process_pending_finish_archives, settings.archive_root, settings.download_root, settings.rclone_config_path,
+                lambda msg: job_status.log_line("archive", msg), conflicts, failures,
             )
             job_status.log_line("archive", f"완결 구독해제 대기열 {pending_moved}개 파일 이동 완료")
             _cleanup_old_archive_history()
+
+            if conflicts or failures:
+                async with aiohttp.ClientSession() as session:
+                    await _notify_archive_issues(session, settings, conflicts, failures)
 
             job_status.finish("archive", success=True)
         except Exception as e:

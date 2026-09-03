@@ -1373,18 +1373,21 @@ async def run_archive_now(payload: ArchiveRunIn):
         try:
             if payload.title_ids:
                 moved = await asyncio.to_thread(
-                    archiver.manual_archive_now, settings.archive_root, settings.download_root, payload.title_ids, settings.rclone_config_path
+                    archiver.manual_archive_now, settings.archive_root, settings.download_root, payload.title_ids, settings.rclone_config_path,
+                    lambda msg: job_status.log_line("archive", msg),
                 )
                 job_status.log_line("archive", f"{moved}개 파일 이동 완료")
             else:
                 all_ids = [t.title_id for t in repository.list_archive_targets() if t.enabled]
                 moved = await asyncio.to_thread(
-                    archiver.manual_archive_now, settings.archive_root, settings.download_root, all_ids, settings.rclone_config_path
+                    archiver.manual_archive_now, settings.archive_root, settings.download_root, all_ids, settings.rclone_config_path,
+                    lambda msg: job_status.log_line("archive", msg),
                 )
                 job_status.log_line("archive", f"지정 웹툰 {moved}개 파일 이동 완료")
 
                 pending_moved = await asyncio.to_thread(
-                    archiver.process_pending_finish_archives, settings.archive_root, settings.download_root, settings.rclone_config_path
+                    archiver.process_pending_finish_archives, settings.archive_root, settings.download_root, settings.rclone_config_path,
+                    lambda msg: job_status.log_line("archive", msg),
                 )
                 job_status.log_line("archive", f"완결 구독해제 대기열 {pending_moved}개 파일 이동 완료")
 
@@ -1471,9 +1474,9 @@ async def bulk_move(payload: BulkMoveIn):
                 payload.dest_type, payload.dest_path,
                 lambda msg: job_status.log_line("bulk_move", msg),
             )
-            await asyncio.to_thread(
-                repository.add_archive_history, "-", f"{payload.source_path} → {payload.dest_path}", f"{moved}개 파일", "bulk_move"
-            )
+            # 이력은 이제 bulk_move_folder 안에서 파일마다 한 줄씩 직접 남긴다
+            # (주기/수동/완결 이동과 동일한 단위) — 여기서 요약 한 줄을 따로 더
+            # 남기면 파일 단위 기록과 중복/불일치하므로 더 이상 남기지 않는다.
             job_status.log_line("bulk_move", f"완료 — {moved}개 파일 이동")
             job_status.finish("bulk_move", success=True)
         except ValueError as e:

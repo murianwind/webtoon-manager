@@ -1248,8 +1248,7 @@ async function loadManualRunPage() {
   await refreshJobStatus();
   startJobPolling();
   loadArchiveManualSelectList();
-  await refreshArchiveJobStatus();
-  startArchiveJobPolling();
+  await resumeArchiveJobStatusIfRunning();
 }
 
 async function loadHistoryPage() {
@@ -2141,19 +2140,54 @@ async function loadArchiveManualSelectList() {
 
 document.getElementById("btn-run-archive-now").addEventListener("click", async () => {
   const checked = Array.from(document.querySelectorAll("#archive-manual-select-list input:checked")).map((el) => el.value);
-  await apiCall("/api/archive/run", { method: "POST", body: JSON.stringify({ title_ids: checked }) });
-  refreshArchiveJobStatus();
+  const btn = document.getElementById("btn-run-archive-now");
+  btn.disabled = true;
+  try {
+    await apiCall("/api/archive/run", { method: "POST", body: JSON.stringify({ title_ids: checked }) });
+    startArchiveJobPolling();
+  } catch (e) {
+    btn.disabled = false;
+    alert(e.message);
+  }
 });
 
 async function refreshArchiveJobStatus() {
+  let statuses;
   try {
-    const statuses = await apiCall("/api/jobs/status");
-    const s = statuses.archive;
-    if (!s) return;
+    statuses = await apiCall("/api/jobs/status");
+  } catch (e) {
+    return;
+  }
+  const s = statuses.archive;
+  if (!s) return;
+  document.getElementById("archive-status-badge").textContent = s.status;
+  renderJobLog("archive", s.log || []);
+  document.getElementById("btn-run-archive-now").disabled = s.status === "running";
+  if (s.status !== "running") stopArchiveJobPolling();
+}
+
+// 탭을 새로 열었을 때는, 마침 실행 중인 게 있으면 그 진행 상황을 이어서 보여주고
+// (기존과 동일), 실행 중이 아니면 지난번 완료된 로그를 다시 보여주지 않고 빈
+// 상태로 둔다 — 브라우저/탭을 닫았다 열면 이전 실행 기록이 안 보이는 게 맞는
+// 동작이라는 요청 반영. 실행 이력 자체(다운로드 이력 탭 등)는 그대로 DB에 남는다.
+async function resumeArchiveJobStatusIfRunning() {
+  let statuses;
+  try {
+    statuses = await apiCall("/api/jobs/status");
+  } catch (e) {
+    return;
+  }
+  const s = statuses.archive;
+  if (!s) return;
+  if (s.status === "running") {
     document.getElementById("archive-status-badge").textContent = s.status;
     renderJobLog("archive", s.log || []);
-  } catch (e) {
-    // 조용히 무시
+    document.getElementById("btn-run-archive-now").disabled = true;
+    startArchiveJobPolling();
+  } else {
+    document.getElementById("archive-status-badge").textContent = "idle";
+    renderJobLog("archive", []);
+    document.getElementById("btn-run-archive-now").disabled = false;
   }
 }
 
@@ -2161,6 +2195,7 @@ let archiveJobPollTimer = null;
 
 function startArchiveJobPolling() {
   stopArchiveJobPolling();
+  refreshArchiveJobStatus();
   archiveJobPollTimer = setInterval(refreshArchiveJobStatus, 2000);
 }
 
@@ -2176,12 +2211,21 @@ async function resumeBulkMoveStatusIfRunning() {
     const statuses = await apiCall("/api/jobs/status");
     const s = statuses.bulk_move;
     if (!s) return;
-    document.getElementById("bulk-move-status-badge").textContent = s.status;
-    document.getElementById("bulk-move-status-badge").className = `badge job-${s.status}`;
-    renderJobLog("bulk_move", s.log || []);
     if (s.status === "running") {
+      // 마침 실행 중이면 그 진행 상황을 이어서 보여준다.
+      document.getElementById("bulk-move-status-badge").textContent = s.status;
+      document.getElementById("bulk-move-status-badge").className = `badge job-${s.status}`;
+      renderJobLog("bulk_move", s.log || []);
       document.getElementById("btn-run-bulk-move").disabled = true;
       startBulkMoveJobPolling();
+    } else {
+      // 실행 중이 아니면(완료/오류/유휴) 이전 실행 로그는 다시 보여주지 않고
+      // 빈 상태로 둔다 — 브라우저/탭을 닫았다 열면 초기화되어야 한다는 요청 반영.
+      // 실제 이동 이력 자체는 "이력" 탭의 아카이빙 이력에 그대로 남아있다.
+      document.getElementById("bulk-move-status-badge").textContent = "idle";
+      document.getElementById("bulk-move-status-badge").className = "badge";
+      renderJobLog("bulk_move", []);
+      document.getElementById("btn-run-bulk-move").disabled = false;
     }
   } catch (e) {
     // 조용히 무시 — 탭 진입 자체를 막을 정도는 아님
