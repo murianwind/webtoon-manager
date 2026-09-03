@@ -1597,12 +1597,22 @@ function loadSavedFolderPickerState(containerId) {
   }
 }
 
-async function renderFolderPicker(containerId, onSelect, initialPath) {
+async function renderFolderPicker(containerId, onSelect, initialPath, options) {
+  // options.skipExistingCheck: true면 폴더에 이미 파일이 있어도 확인 절차 없이
+  // 바로 선택된다 — 일괄 이동(bulk-move) 원본/목적지처럼, 애초에 "이미 파일이
+  // 있는 폴더"를 다루는 게 목적인 선택기용. 아카이빙 대상 지정용 선택기는
+  // 이 옵션을 안 주면 기존처럼 확인 절차를 그대로 거친다.
+  const skipExistingCheck = !!(options && options.skipExistingCheck);
+
   // 새로고침해도 뭘 보고 있었는지 잃지 않게, sessionStorage에 저장된 상태가
   // 있으면 그걸 우선 복원한다 — 원격 폴더 조회가 느릴 수 있어서, 매번 원격
   // 선택부터 다시 하게 되면 특히 불편하다는 문제가 실제로 있었다.
   const saved = loadSavedFolderPickerState(containerId);
   if (saved) {
+    // skipExistingCheck는 화면 탐색 상태가 아니라 "이 선택기가 애초에 어떻게
+    // 동작해야 하는지"를 정하는 호출자 쪽 설정이므로, 저장된 탐색 상태를
+    // 복원하더라도 매번 호출 시점 값으로 다시 맞춘다(상태 저장/복원 대상이 아님).
+    saved.skipExistingCheck = skipExistingCheck;
     archiveFolderPickerState[containerId] = saved;
     renderFolderPickerContents(containerId, onSelect);
     return;
@@ -1620,7 +1630,7 @@ async function renderFolderPicker(containerId, onSelect, initialPath) {
   } catch (e) {
     // 조용히 무시하고 기본값(local)으로 진행 — 아래에서 다시 확인하고 에러 표시함
   }
-  archiveFolderPickerState[containerId] = { mode: startMode, path: initialPath || "", remote: "" };
+  archiveFolderPickerState[containerId] = { mode: startMode, path: initialPath || "", remote: "", skipExistingCheck };
   renderFolderPickerContents(containerId, onSelect);
 }
 
@@ -1662,11 +1672,11 @@ async function renderFolderPickerContents(containerId, onSelect) {
     const modeRow = document.createElement("div");
     modeRow.className = "folder-picker-mode-row";
     const localBtn = makeButton("로컬 폴더", () => {
-      archiveFolderPickerState[containerId] = { mode: "local", path: "", remote: "" };
+      archiveFolderPickerState[containerId] = { mode: "local", path: "", remote: "", skipExistingCheck: state.skipExistingCheck };
       renderFolderPickerContents(containerId, onSelect);
     });
     const rcloneBtn = makeButton("rclone 원격", () => {
-      archiveFolderPickerState[containerId] = { mode: "rclone", path: "", remote: "" };
+      archiveFolderPickerState[containerId] = { mode: "rclone", path: "", remote: "", skipExistingCheck: state.skipExistingCheck };
       renderFolderPickerContents(containerId, onSelect);
     });
     if (state.mode === "local") localBtn.disabled = true;
@@ -1690,7 +1700,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
 
   const backToStartBtn = () =>
     makeButton("⬅ 처음으로 돌아가기", () => {
-      archiveFolderPickerState[containerId] = { mode: state.mode, path: "", remote: "" };
+      archiveFolderPickerState[containerId] = { mode: state.mode, path: "", remote: "", skipExistingCheck: state.skipExistingCheck };
       renderFolderPickerContents(containerId, onSelect);
     });
 
@@ -1781,6 +1791,12 @@ async function renderFolderPickerContents(containerId, onSelect) {
     // rclone 원격은 폴더 개수만큼 원격에 개별 요청을 보내야 해서) 몇 분씩
     //걸리는 문제가 실제로 있었다.
     async function trySelectFolder(btn, warnHost, folderName, folderPath, destValue, destType) {
+      // 일괄 이동(bulk-move)용 선택기는 애초에 "이미 파일이 있는 폴더"를 다루는
+      // 게 목적이라 이 확인 절차 자체가 불필요하다 — 바로 선택되게 한다.
+      if (state.skipExistingCheck) {
+        selectAndShow(destValue, destType, folderPath);
+        return;
+      }
       const originalText = btn.textContent;
       btn.textContent = "확인 중...";
       btn.disabled = true;
@@ -1845,7 +1861,10 @@ async function renderFolderPickerContents(containerId, onSelect) {
         await apiCall("/api/archive/folders", { method: "POST", body: JSON.stringify({ path: newPath }) });
       }
       _invalidateFolderListCache(isRclone, state.remote, currentPath); // 새 폴더가 생겼으니 이 경로는 다시 조회해야 함
-      state.path = newPath;
+      // 예전엔 만들자마자 그 폴더 안으로 들어가버려서, 그 폴더 자체를 고르려면
+      // 다시 상위로 나와야 하는 불편함이 있었다 — 생성 후에도 같은 위치(상위
+      // 목록)에 그대로 머물러서, 방금 만든 폴더를 목록에서 바로 선택할 수 있게 한다.
+      newFolderInput.value = "";
       renderFolderPickerContents(containerId, onSelect);
     });
     newFolderRow.appendChild(newFolderInput);
@@ -1913,7 +1932,9 @@ let archiveSelectedTargetDestType = "local";
 let archiveSelectedDefaultPath = "";
 let archiveSelectedDefaultDestType = "local";
 let archiveSelectedBulkSourcePath = "";
+let archiveSelectedBulkSourceType = "local";
 let archiveSelectedBulkDestPath = "";
+let archiveSelectedBulkDestType = "local";
 
 async function loadArchivePage() {
   invalidateArchiveCaches(); // 탭을 새로 열 때마다 최신값을 다시 받아오게 캐시 초기화
@@ -1936,12 +1957,28 @@ async function loadArchivePage() {
     archiveSelectedDefaultPath = path;
     archiveSelectedDefaultDestType = destType;
   });
-  renderFolderPicker("bulk-move-source-picker", (path) => {
-    archiveSelectedBulkSourcePath = path;
-  });
-  renderFolderPicker("bulk-move-dest-picker", (path) => {
-    archiveSelectedBulkDestPath = path;
-  });
+  // 일괄 이동은 "이미 파일이 있는 폴더"를 다루는 게 목적이므로, 대상 지정용
+  // 선택기와 달리 "이미 파일 있음" 확인 절차를 건너뛴다(skipExistingCheck).
+  // 원본/목적지가 로컬/원격 어느 조합이든(로컬-로컬, 로컬-원격, 원격-로컬,
+  // 원격-원격) 지원해야 하므로 destType도 각각 따로 기억해둔다.
+  renderFolderPicker(
+    "bulk-move-source-picker",
+    (path, destType) => {
+      archiveSelectedBulkSourcePath = path;
+      archiveSelectedBulkSourceType = destType;
+    },
+    "",
+    { skipExistingCheck: true }
+  );
+  renderFolderPicker(
+    "bulk-move-dest-picker",
+    (path, destType) => {
+      archiveSelectedBulkDestPath = path;
+      archiveSelectedBulkDestType = destType;
+    },
+    "",
+    { skipExistingCheck: true }
+  );
   await loadArchiveTargetList();
   await loadArchiveSettings();
 }
@@ -2142,7 +2179,12 @@ document.getElementById("btn-run-bulk-move").addEventListener("click", async () 
   try {
     const data = await apiCall("/api/archive/bulk-move", {
       method: "POST",
-      body: JSON.stringify({ source_path: archiveSelectedBulkSourcePath, dest_path: archiveSelectedBulkDestPath }),
+      body: JSON.stringify({
+        source_type: archiveSelectedBulkSourceType,
+        source_path: archiveSelectedBulkSourcePath,
+        dest_type: archiveSelectedBulkDestType,
+        dest_path: archiveSelectedBulkDestPath,
+      }),
     });
     resultEl.style.color = "";
     resultEl.textContent = `${data.moved}개 항목 이동 완료했습니다.`;

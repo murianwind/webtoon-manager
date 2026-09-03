@@ -1430,20 +1430,38 @@ async def set_archive_history_retention_days(payload: RetentionDaysIn):
 
 
 class BulkMoveIn(BaseModel):
-    source_path: str
+    source_type: str = "local"  # "local" | "rclone"
+    source_path: str            # local: ARCHIVE_ROOT 기준 상대경로 / rclone: "remote:path"
+    dest_type: str = "local"
     dest_path: str
+
+    @field_validator("source_type", "dest_type")
+    @classmethod
+    def type_must_be_known(cls, v: str) -> str:
+        if v not in ("local", "rclone"):
+            raise ValueError("source_type/dest_type은 local 또는 rclone이어야 합니다.")
+        return v
 
 
 @router.post("/archive/bulk-move")
 async def bulk_move(payload: BulkMoveIn):
     settings = get_settings()
+    if "rclone" in (payload.source_type, payload.dest_type) and not (
+        settings.rclone_config_path and Path(settings.rclone_config_path).is_file()
+    ):
+        raise HTTPException(status_code=400, detail="rclone 설정 파일이 등록되어 있지 않습니다.")
     try:
         moved = await asyncio.to_thread(
-            archiver.bulk_move_folder, settings.archive_root, payload.source_path, payload.dest_path
+            archiver.bulk_move_folder,
+            settings.archive_root, settings.rclone_config_path,
+            payload.source_type, payload.source_path,
+            payload.dest_type, payload.dest_path,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except archiver.rclone_client.RcloneError as e:
+        raise HTTPException(status_code=502, detail=str(e))
     await asyncio.to_thread(
-        repository.add_archive_history, "-", f"{payload.source_path} → {payload.dest_path}", f"{moved}개 항목", "bulk_move"
+        repository.add_archive_history, "-", f"{payload.source_path} → {payload.dest_path}", f"{moved}개 파일", "bulk_move"
     )
     return {"moved": moved}

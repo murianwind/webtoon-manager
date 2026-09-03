@@ -375,6 +375,22 @@
     </div>
     <div id="archive-main-content">
     <div class="settings-card">
+      <h2>아카이빙 공통 설정</h2>
+      <p class="hint">주기 이동, 수동 이동, 완결 자동이동, 폴더 일괄 이동 — 아카이빙의 모든 방식에 공통으로 적용됩니다.
+      (단, 완결 자동이동에서 info.xml/커버 이미지는 이 설정과 무관하게 항상 덮어씁니다.)</p>
+      <div class="field-group">
+        <label for="archive-conflict-policy">같은 이름 파일이 이미 있으면</label>
+        <select id="archive-conflict-policy">
+          <option value="skip">건너뛰기</option>
+          <option value="overwrite">덮어쓰기</option>
+          <option value="rename">이름 바꿔서 저장</option>
+        </select>
+      </div>
+      <button id="btn-save-archive-settings">저장</button>
+      <span id="archive-settings-save-result" class="hint-inline"></span>
+    </div>
+
+    <div class="settings-card">
       <h2>아카이빙 대상 웹툰</h2>
       <p class="hint">지정한 웹툰은 정해진 주기마다(마지막 회차는 남기고) 아래 그릇 폴더로 옮겨집니다.
       여러 웹툰이 같은 그릇 폴더를 고르면 자동으로 웹툰별 폴더로 나뉘고, 하나만 쓰면 그릇 폴더 바로 밑에 쌓입니다.</p>
@@ -399,21 +415,13 @@
       <p class="hint">구독해제하는 즉시가 아니라, "설정" 탭의 "실행 스케줄"이 돌 때 함께 처리됩니다. 지정 안 된 웹툰이 이 조건으로 트리거되면 "기본 그릇 폴더"를 씁니다 (지정된 웹툰은 자기 폴더로).</p>
       <label class="field-label">지정 안 된 웹툰이 쓸 기본 그릇 폴더</label>
       <div id="archive-default-folder-picker"></div>
-      <div class="field-group">
-        <label for="archive-conflict-policy">같은 이름 파일이 이미 있으면</label>
-        <select id="archive-conflict-policy">
-          <option value="skip">건너뛰기</option>
-          <option value="overwrite">덮어쓰기</option>
-          <option value="rename">이름 바꿔서 저장</option>
-        </select>
-      </div>
-      <button id="btn-save-archive-settings">저장</button>
-      <span id="archive-settings-save-result" class="hint-inline"></span>
     </div>
 
     <div class="settings-card">
       <h2>폴더 일괄 이동 (1회성)</h2>
-      <p class="hint">웹툰 지정과 무관하게, 아카이브 폴더 안에서 특정 폴더의 내용을 통째로 다른 폴더로 옮깁니다.</p>
+      <p class="hint">웹툰 지정과 무관하게, 원본 폴더 안의 파일들(폴더 자체가 아니라 파일 단위)을 다른 폴더로 옮깁니다.
+      로컬 폴더와 rclone 원격을 자유롭게 조합할 수 있습니다 (로컬-로컬, 로컬-원격, 원격-로컬, 원격-원격 모두 지원).
+      이동이 끝나고 원본 쪽에 파일이 하나도 안 남으면 그 폴더도 함께 정리됩니다.</p>
       <label class="field-label">원본 폴더</label>
       <div id="bulk-move-source-picker"></div>
       <label class="field-label">목적지 폴더</label>

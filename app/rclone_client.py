@@ -103,3 +103,42 @@ def file_exists(config_path: str, remote: str, path: str, file_name: str) -> boo
         return False
     entries = json.loads(output)
     return any(e["Name"] == file_name for e in entries)
+
+
+def list_files_recursive(config_path: str, remote: str, path: str) -> list[str]:
+    """remote:path 밑의 모든 파일을 하위 폴더까지 재귀적으로 나열해서, 파일만
+    상대경로(예: 'sub/1.zip')로 반환한다. 일괄 이동이 "파일 단위"로 옮기기 위한
+    목록 수집용 — 디렉터리 항목은 제외한다(--files-only)."""
+    target = f"{remote}:{path}" if path else f"{remote}:"
+    try:
+        output = _run(config_path, ["lsjson", target, "--recursive", "--files-only"])
+    except RcloneError as e:
+        raise RcloneError(f"'{target}' 목록을 읽을 수 없습니다: {e}")
+    entries = json.loads(output)
+    return [e["Path"] for e in entries]
+
+
+def moveto(config_path: str, src_spec: str, dest_spec: str) -> None:
+    """src_spec을 dest_spec으로 옮긴다. 둘 중 하나(또는 둘 다)가 'remote:path' 형태면
+    rclone이 원격으로 처리하고, 콜론이 없는 일반 경로는 로컬 파일시스템으로 처리한다
+    (rclone 자체 규칙) — 로컬↔원격, 원격↔원격 이동을 전부 이 한 함수로 커버한다."""
+    _run(config_path, ["moveto", src_spec, dest_spec], timeout=_UPLOAD_TIMEOUT_SECONDS)
+
+
+def copyto(config_path: str, src_spec: str, dest_spec: str) -> None:
+    """moveto와 동일하지만 원본을 지우지 않는다 — 주기 아카이빙에서 info.xml/커버를
+    "복사만"할 때 쓴다(원본 다운로드 폴더 쪽에도 계속 남아있어야 하므로)."""
+    _run(config_path, ["copyto", src_spec, dest_spec], timeout=_UPLOAD_TIMEOUT_SECONDS)
+
+
+def rmdirs_if_empty(config_path: str, remote: str, path: str) -> None:
+    """remote:path 이하(자기 자신 포함)에서 파일이 하나도 없는 폴더를 정리한다.
+    이동 후 빈 껍데기 폴더가 원격에 계속 남는 걸 막기 위한 후처리용이라, 실패해도
+    (원격 특이 폴더 등) 전체 이동 자체를 실패로 취급하지 않고 로그만 남긴다."""
+    if not path:
+        return  # remote 루트 자체는 정리 대상이 아님
+    target = f"{remote}:{path}"
+    try:
+        _run(config_path, ["rmdirs", target])
+    except RcloneError as e:
+        log.warning("빈 폴더 정리 실패 (무시하고 계속): %s: %s", target, e)

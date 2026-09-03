@@ -17,8 +17,9 @@
 """
 
 import logging
+import os
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from app import rclone_client, repository
 from app.file_utils import remove_forbidden_str
@@ -50,6 +51,66 @@ def _list_episode_files_sorted(title_dir: Path) -> list[tuple[int, Path]]:
             results.append((int(match.group(1)), entry))
     results.sort(key=lambda pair: pair[0])
     return results
+
+
+def _find_metadata_files(title_dir: Path) -> list[Path]:
+    """제목 폴더 바로 밑의 info.xml / cover.* 파일을 찾는다 (여러 확장자 대응)."""
+    if not title_dir.is_dir():
+        return []
+    found = []
+    info_xml = title_dir / "info.xml"
+    if info_xml.is_file():
+        found.append(info_xml)
+    found.extend(p for p in title_dir.glob("cover.*") if p.is_file())
+    return found
+
+
+def _archive_metadata_files_local(metadata_files: list[Path], dest_dir: Path, *, keep_last: bool) -> None:
+    """info.xml/커버를 로컬 목적지로 옮긴다.
+    keep_last=True(주기/수동): 원본은 남기고 복사, 목적지에 이미 있으면 건너뜀.
+    keep_last=False(완결 전체이동): 원본을 옮기고, 목적지에 있어도 무조건 덮어쓴다
+    (zip과 달리 충돌 정책의 영향을 받지 않음 — 사용자와 논의 확정)."""
+    for src in metadata_files:
+        dest_path = dest_dir / src.name
+        try:
+            if keep_last:
+                if dest_path.exists():
+                    continue
+                shutil.copy2(src, dest_path)
+            else:
+                shutil.move(str(src), str(dest_path))
+        except OSError as e:
+            log.error("메타데이터 파일 이동 실패 (%s): %s", src, e)
+
+
+def _archive_metadata_files_rclone(
+    rclone_config_path: str, metadata_files: list[Path], remote: str, dest_path: str, *, keep_last: bool
+) -> None:
+    for src in metadata_files:
+        dest_spec = f"{remote}:{dest_path}/{src.name}" if dest_path else f"{remote}:{src.name}"
+        try:
+            if keep_last:
+                if rclone_client.file_exists(rclone_config_path, remote, dest_path, src.name):
+                    continue
+                rclone_client.copyto(rclone_config_path, str(src), dest_spec)
+            else:
+                rclone_client.moveto(rclone_config_path, str(src), dest_spec)
+        except rclone_client.RcloneError as e:
+            log.error("메타데이터 파일 원격 이동 실패 (%s): %s", src, e)
+
+
+def _cleanup_empty_dirs(root: Path) -> None:
+    """root 이하(자신 포함)에서 파일이 하나도 안 남은 폴더를 하위부터 지운다.
+    파일이 하나라도 있으면 그 폴더(와 상위)는 절대 지우지 않는다 — 안전이 최우선."""
+    if not root.is_dir():
+        return
+    for dirpath, _dirnames, _filenames in os.walk(root, topdown=False):
+        d = Path(dirpath)
+        try:
+            if not any(d.iterdir()):
+                d.rmdir()
+        except OSError as e:
+            log.warning("빈 폴더 정리 실패 (무시하고 계속): %s: %s", d, e)
 
 
 def is_folder_selectable_as_dest(archive_root: str, base_path: str) -> bool:
@@ -207,7 +268,8 @@ def _archive_title(
     if keep_last and len(files) > 0:
         files = files[:-1]  # 마지막(가장 큰 번호)은 보존
 
-    if not files:
+    metadata_files = _find_metadata_files(title_dir)
+    if not files and not metadata_files:
         return 0
 
     force_subfolder = base_path == get_default_base_path()
@@ -224,6 +286,8 @@ def _archive_title(
                     moved += 1
             except Exception as e:
                 log.error("rclone 아카이빙 이동 실패 (%s): %s", src, e)
+        if metadata_files:
+            _archive_metadata_files_rclone(rclone_config_path, metadata_files, remote, dest_path, keep_last=keep_last)
     else:
         dest_dir = resolve_archive_dest(archive_root, title_name, base_path, force_subfolder=force_subfolder)
         for _num, src in files:
@@ -234,6 +298,8 @@ def _archive_title(
                     moved += 1
             except Exception as e:
                 log.error("아카이빙 이동 실패 (%s): %s", src, e)
+        if metadata_files:
+            _archive_metadata_files_local(metadata_files, dest_dir, keep_last=keep_last)
     return moved
 
 
@@ -304,40 +370,154 @@ def process_pending_finish_archives(archive_root: str, download_root: str, rclon
             base_path, policy, "finish_unsubscribe", keep_last=False,
             dest_type=dest_type, rclone_config_path=rclone_config_path,
         )
+        # 완결 전체이동은 마지막 파일도 예외 없이 옮기므로, 다 옮기고 나면 다운로드
+        # 쪽 웹툰 폴더엔 아무 것도 안 남는 게 정상이다 — 파일이 하나라도 남아있으면
+        # (예: 이동 중 일부 실패) 안전하게 그대로 두고, 완전히 비었을 때만 지운다.
+        title_dir = Path(download_root) / remove_forbidden_str(wt.title)
+        _cleanup_empty_dirs(title_dir)
         repository.remove_pending_finish_archive(title_id)
     return total
 
 
-def bulk_move_folder(archive_root: str, source_path: str, dest_path: str) -> int:
-    """1회성 폴더→폴더 전체 이동 (아카이빙 대상 지정 규칙과 무관, 백업 드라이브 정리용).
-    ARCHIVE_ROOT 밖을 가리키지 못하게 검증한다."""
+def _local_archive_path(archive_root: str, rel_path: str) -> Path:
+    """ARCHIVE_ROOT 기준 상대경로를 실제 경로로 바꾸되, 루트 밖으로 못 나가게 검증한다."""
     root = Path(archive_root).resolve()
-    src = (root / source_path).resolve()
-    dest = (root / dest_path).resolve()
-    if root not in src.parents and src != root:
-        raise ValueError("원본 경로가 아카이브 루트 밖입니다.")
-    if root not in dest.parents and dest != root:
-        raise ValueError("목적지 경로가 아카이브 루트 밖입니다.")
-    if not src.is_dir():
-        raise ValueError("원본 폴더가 존재하지 않습니다.")
+    target = (root / rel_path).resolve()
+    if root != target and root not in target.parents:
+        raise ValueError("경로가 아카이브 루트 밖입니다.")
+    return target
 
-    dest.mkdir(parents=True, exist_ok=True)
-    policy = get_conflict_policy()
-    moved = 0
-    try:
-        entries = list(src.iterdir())
-    except OSError as e:
-        raise ValueError(f"원본 폴더 목록을 읽을 수 없습니다 (마운트가 불안정할 수 있습니다): {e}")
 
-    for item in entries:
+def _bulk_move_collect_source_files(
+    kind: str, archive_root: str, rclone_config_path: str, path_value: str
+) -> tuple[list[str], object]:
+    """원본 위치(로컬/원격) 이하의 모든 '파일'을 상대경로로 모아서 반환한다.
+    폴더 자체는 옮기는 대상이 아니다 — 아카이빙 시스템은 항상 파일 단위로 다룬다.
+    두 번째 반환값은 실제 이동 시 필요한 컨텍스트: 로컬이면 원본 루트 Path,
+    원격이면 (remote, base_path) 튜플."""
+    if kind == "local":
+        root = _local_archive_path(archive_root, path_value)
+        if not root.is_dir():
+            raise ValueError("원본 폴더가 존재하지 않습니다.")
         try:
-            if item.is_dir():
-                shutil.move(str(item), str(dest / item.name))
-                moved += 1
-            else:
-                saved_name = move_file_with_conflict_policy(item, dest, policy)
-                if saved_name is not None:
-                    moved += 1
+            rel_files = [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()]
         except OSError as e:
-            log.error("일괄 이동 중 개별 항목 실패, 건너뜀 (%s): %s", item, e)
+            raise ValueError(f"원본 폴더 목록을 읽을 수 없습니다 (마운트가 불안정할 수 있습니다): {e}")
+        return rel_files, root
+
+    remote, base_path = _parse_rclone_target(path_value)
+    if not remote:
+        raise ValueError("원본 원격 정보가 올바르지 않습니다.")
+    try:
+        rel_files = rclone_client.list_files_recursive(rclone_config_path, remote, base_path)
+    except rclone_client.RcloneError as e:
+        raise ValueError(f"원본 원격 폴더 목록을 읽을 수 없습니다: {e}")
+    return rel_files, (remote, base_path)
+
+
+def _bulk_move_dest_exists(kind: str, dest_ctx, rel_path: str, rclone_config_path: str) -> bool:
+    if kind == "local":
+        return (dest_ctx / rel_path).exists()
+    remote, base_path = dest_ctx
+    rel = PurePosixPath(rel_path)
+    check_dir = f"{base_path}/{rel.parent}" if str(rel.parent) != "." else base_path
+    return rclone_client.file_exists(rclone_config_path, remote, check_dir, rel.name)
+
+
+def _bulk_move_resolve_final_rel(
+    policy: str, dest_kind: str, dest_ctx, rel_path: str, rclone_config_path: str
+) -> str | None:
+    """목적지에 이미 같은 파일이 있을 때 정책에 따라 최종 상대경로를 정한다.
+    None이면 건너뛴다는 뜻. 파일명만 바뀌고 상위 폴더 구조는 그대로 유지한다."""
+    if not _bulk_move_dest_exists(dest_kind, dest_ctx, rel_path, rclone_config_path):
+        return rel_path
+    if policy == "skip":
+        return None
+    if policy == "overwrite":
+        return rel_path
+
+    # rename: 파일명 뒤에 (2), (3)... 붙여서 안 겹치는 이름을 찾는다
+    rel = PurePosixPath(rel_path)
+    stem, suffix = rel.stem, rel.suffix
+    counter = 2
+    while True:
+        candidate = str(rel.parent / f"{stem} ({counter}){suffix}") if str(rel.parent) != "." else f"{stem} ({counter}){suffix}"
+        if not _bulk_move_dest_exists(dest_kind, dest_ctx, candidate, rclone_config_path):
+            return candidate
+        counter += 1
+
+
+def _bulk_move_single_file(
+    *, src_kind: str, src_ctx, dest_kind: str, dest_ctx,
+    rel_path: str, final_rel: str, rclone_config_path: str,
+) -> None:
+    """파일 하나를 원본에서 목적지(final_rel 경로)로 옮긴다.
+    로컬-로컬은 shutil로, 원격이 하나라도 끼면 rclone moveto로 처리한다."""
+    if src_kind == "local" and dest_kind == "local":
+        dest_abs = dest_ctx / final_rel
+        dest_abs.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src_ctx / rel_path), str(dest_abs))
+        return
+
+    if src_kind == "local":
+        src_spec = str(src_ctx / rel_path)
+    else:
+        remote, base_path = src_ctx
+        src_spec = f"{remote}:{base_path}/{rel_path}" if base_path else f"{remote}:{rel_path}"
+
+    if dest_kind == "local":
+        dest_abs = dest_ctx / final_rel
+        dest_abs.parent.mkdir(parents=True, exist_ok=True)
+        dest_spec = str(dest_abs)
+    else:
+        remote, base_path = dest_ctx
+        dest_spec = f"{remote}:{base_path}/{final_rel}" if base_path else f"{remote}:{final_rel}"
+
+    rclone_client.moveto(rclone_config_path, src_spec, dest_spec)
+
+
+def bulk_move_folder(
+    archive_root: str, rclone_config_path: str,
+    source_type: str, source_path: str,
+    dest_type: str, dest_path: str,
+) -> int:
+    """1회성 폴더→폴더 전체 이동 (아카이빙 대상 지정 규칙과 무관, 백업 정리용).
+    로컬-로컬/로컬-원격/원격-로컬/원격-원격 네 조합을 전부 지원한다.
+    항상 '파일' 단위로 옮기며(폴더 자체를 통째로 옮기지 않음), 옮긴 뒤 원본 쪽에
+    파일이 하나도 안 남은 빈 폴더는 정리한다."""
+    policy = get_conflict_policy()
+    rel_files, src_ctx = _bulk_move_collect_source_files(source_type, archive_root, rclone_config_path, source_path)
+
+    if dest_type == "local":
+        dest_ctx = _local_archive_path(archive_root, dest_path)
+        dest_ctx.mkdir(parents=True, exist_ok=True)
+    else:
+        remote, base_path = _parse_rclone_target(dest_path)
+        if not remote:
+            raise ValueError("목적지 원격 정보가 올바르지 않습니다.")
+        if base_path:
+            rclone_client.create_folder(rclone_config_path, remote, base_path)
+        dest_ctx = (remote, base_path)
+
+    moved = 0
+    for rel_path in rel_files:
+        try:
+            final_rel = _bulk_move_resolve_final_rel(policy, dest_type, dest_ctx, rel_path, rclone_config_path)
+            if final_rel is None:
+                log.info("일괄 이동 건너뜀 (이미 존재): %s", rel_path)
+                continue
+            _bulk_move_single_file(
+                src_kind=source_type, src_ctx=src_ctx, dest_kind=dest_type, dest_ctx=dest_ctx,
+                rel_path=rel_path, final_rel=final_rel, rclone_config_path=rclone_config_path,
+            )
+            moved += 1
+        except Exception as e:
+            log.error("일괄 이동 중 개별 파일 실패, 건너뜀 (%s): %s", rel_path, e)
+
+    if source_type == "local":
+        _cleanup_empty_dirs(src_ctx)
+    else:
+        remote, base_path = src_ctx
+        rclone_client.rmdirs_if_empty(rclone_config_path, remote, base_path)
+
     return moved
