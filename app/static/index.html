@@ -376,7 +376,7 @@
     <div id="archive-main-content">
     <div class="settings-card">
       <h2>아카이빙 공통 설정</h2>
-      <p class="hint">주기 이동, 수동 이동, 완결 자동이동, 폴더 일괄 이동 — 아카이빙의 모든 방식에 공통으로 적용됩니다.
+      <p class="hint">같은 이름 파일 처리는 주기 이동, 수동 이동, 완결 자동이동, 폴더 일괄 이동 전부에 공통으로 적용됩니다.
       (단, 완결 자동이동에서 info.xml/커버 이미지는 이 설정과 무관하게 항상 덮어씁니다.)</p>
       <div class="field-group">
         <label for="archive-conflict-policy">같은 이름 파일이 이미 있으면</label>
@@ -386,6 +386,23 @@
           <option value="rename">이름 바꿔서 저장</option>
         </select>
       </div>
+
+      <div class="field-group">
+        <label for="archive-filename-template">파일명 변경 템플릿 (회차 zip 파일에만 적용, 비워두면 원본 파일명 그대로)</label>
+        <p class="hint">아래 토큰 버튼을 눌러 원하는 순서로 자유롭게 조합하세요. 토큰 사이에 원하는 글자(구분자 등)를 직접 입력할 수 있습니다.
+        확장자(.zip)는 자동으로 붙습니다. 폴더 일괄 이동과 info.xml/커버 이미지에는 적용되지 않습니다(회차 개념이 없어서).
+        파일명 구조를 알아볼 수 없는 파일(수동으로 넣은 파일 등)은 이 설정과 무관하게 원본 파일명 그대로 이동됩니다.</p>
+        <div id="archive-filename-template-tokens" class="token-button-row">
+          <button type="button" class="token-btn" data-token="{title}">웹툰명</button>
+          <button type="button" class="token-btn" data-token="{episode_no}">회차</button>
+          <button type="button" class="token-btn" data-token="{subtitle}">부제목</button>
+          <button type="button" class="token-btn" data-token="{page_count}">페이지수</button>
+          <button type="button" class="token-btn" data-token="{author}">작가</button>
+        </div>
+        <input id="archive-filename-template" type="text" placeholder="예: {title} {episode_no}화 - {subtitle}#{page_count}" />
+        <p id="archive-filename-template-preview" class="hint-inline"></p>
+      </div>
+
       <button id="btn-save-archive-settings">저장</button>
       <span id="archive-settings-save-result" class="hint-inline"></span>
     </div>

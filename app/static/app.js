@@ -2089,12 +2089,54 @@ async function loadArchiveSettings() {
     const data = await getArchiveSettingsCached();
     document.getElementById("archive-on-finish-toggle").checked = data.on_finish_unsubscribe;
     document.getElementById("archive-conflict-policy").value = data.conflict_policy;
+    document.getElementById("archive-filename-template").value = data.filename_template || "";
+    updateArchiveFilenameTemplatePreview();
     archiveSelectedDefaultPath = data.default_base_path;
     archiveSelectedDefaultDestType = data.default_dest_type;
   } catch (e) {
     // 조용히 무시
   }
 }
+
+// 실제 서버 왕복 없이, 예시 값으로 즉석에서 어떤 파일명이 나올지 보여준다 —
+// 토큰을 자유롭게 조합하는 게 이 기능의 핵심이라, 저장하기 전에 바로바로
+// 결과를 확인할 수 있어야 실제로 쓸만하다.
+const ARCHIVE_TEMPLATE_PREVIEW_SAMPLE = {
+  "{title}": "외모지상주의",
+  "{episode_no}": "209",
+  "{subtitle}": "209화 갓독 11",
+  "{page_count}": "37",
+  "{author}": "박태준",
+};
+
+function updateArchiveFilenameTemplatePreview() {
+  const template = document.getElementById("archive-filename-template").value;
+  const previewEl = document.getElementById("archive-filename-template-preview");
+  if (!template.trim()) {
+    previewEl.textContent = "미리보기: (비워두면 원본 zip 파일명 그대로 이동)";
+    return;
+  }
+  let rendered = template;
+  for (const [token, sample] of Object.entries(ARCHIVE_TEMPLATE_PREVIEW_SAMPLE)) {
+    rendered = rendered.split(token).join(sample);
+  }
+  previewEl.textContent = `미리보기: ${rendered}.zip`;
+}
+
+document.getElementById("archive-filename-template").addEventListener("input", updateArchiveFilenameTemplatePreview);
+
+document.querySelectorAll("#archive-filename-template-tokens .token-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const input = document.getElementById("archive-filename-template");
+    const token = btn.dataset.token;
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    input.value = input.value.slice(0, start) + token + input.value.slice(end);
+    input.focus();
+    input.selectionStart = input.selectionEnd = start + token.length;
+    updateArchiveFilenameTemplatePreview();
+  });
+});
 
 document.getElementById("btn-save-archive-settings").addEventListener("click", async () => {
   const resultEl = document.getElementById("archive-settings-save-result");
@@ -2107,6 +2149,7 @@ document.getElementById("btn-save-archive-settings").addEventListener("click", a
         default_dest_type: archiveSelectedDefaultDestType,
         conflict_policy: document.getElementById("archive-conflict-policy").value,
         on_finish_unsubscribe: document.getElementById("archive-on-finish-toggle").checked,
+        filename_template: document.getElementById("archive-filename-template").value,
       }),
     });
     invalidateArchiveCaches();

@@ -21,11 +21,12 @@
 import logging
 import os
 import shutil
+import zipfile
 from pathlib import Path, PurePosixPath
 
 from app import rclone_client, repository
 from app.file_utils import remove_forbidden_str
-from app.zipper import _LEADING_DIGITS_RE
+from app.zipper import _LEADING_DIGITS_RE, _clean_name
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +34,30 @@ _CONFLICT_POLICY_SETTING_KEY = "archive_conflict_policy"
 _DEFAULT_BASE_PATH_SETTING_KEY = "archive_default_base_path"
 _DEFAULT_DEST_TYPE_SETTING_KEY = "archive_default_dest_type"
 _ON_FINISH_UNSUBSCRIBE_SETTING_KEY = "archive_on_finish_unsubscribe"
+_FILENAME_TEMPLATE_SETTING_KEY = "archive_filename_template"
+
+
+def _parse_zip_filename_for_template(stem: str, title_name: str) -> tuple[str, str] | None:
+    """zip 파일명(확장자 제외)이 '{일련번호} {제목} {부제목}' 구조라고 가정하고
+    (회차 번호 문자열 그대로, 부제목)을 뽑는다. 회차 번호는 원래 문자열 그대로
+    반환한다(0채움 자릿수 등 원본 표기를 그대로 유지하기 위함 — 정수로 변환하지 않음).
+    제목이 파일명 구조와 안 맞으면(수동으로 넣은 파일 등) None을 반환해서, 호출부가
+    파일명 템플릿을 적용하지 않고 원본 파일명을 그대로 쓰게 한다."""
+    match = _LEADING_DIGITS_RE.match(stem)
+    if not match:
+        return None
+    episode_no = match.group(1)
+    rest = stem[match.end():].lstrip()
+
+    # zip 파일명 속 제목은 다운로드 시(remove_forbidden_str) + 압축 시(_clean_name)
+    # 두 번 치환을 거친 상태이므로, 비교 대상 제목도 같은 치환을 거쳐야 맞아떨어진다.
+    cleaned_title = _clean_name(remove_forbidden_str(title_name))
+    for candidate in (title_name, cleaned_title):
+        if rest.startswith(candidate):
+            subtitle = rest[len(candidate):].strip()
+            if subtitle:
+                return episode_no, subtitle
+    return None
 
 
 def _list_episode_files_sorted(title_dir: Path) -> list[tuple[int, Path]]:
@@ -155,18 +180,20 @@ def resolve_archive_dest(archive_root: str, title_name: str, base_path: str, *, 
     return dest
 
 
-def move_file_with_conflict_policy(src: Path, dest_dir: Path, policy: str) -> tuple[str | None, bool]:
-    """src를 dest_dir로 옮긴다. 반환값은 (실제로 저장된 파일명(성공 시) 또는 None(건너뛴 경우),
+def move_file_with_conflict_policy(src: Path, dest_dir: Path, policy: str, dest_filename: str | None = None) -> tuple[str | None, bool]:
+    """src를 dest_dir로 옮긴다. dest_filename을 주면 원본 이름 대신 그 이름으로 저장한다
+    (파일명 템플릿 적용용). 반환값은 (실제로 저장된 파일명(성공 시) 또는 None(건너뛴 경우),
     목적지에 이미 같은 이름 파일이 있어서 정책이 실제로 작동했는지 여부).
     policy: 'overwrite' | 'skip' | 'rename'"""
-    dest_path = dest_dir / src.name
+    name = dest_filename or src.name
+    dest_path = dest_dir / name
     had_conflict = dest_path.exists()
     if had_conflict:
         if policy == "skip":
             log.info("아카이빙 건너뜀 (이미 존재): %s", dest_path)
             return None, True
         elif policy == "rename":
-            stem, suffix = src.stem, src.suffix
+            stem, suffix = Path(name).stem, Path(name).suffix
             counter = 2
             while dest_path.exists():
                 dest_path = dest_dir / f"{stem} ({counter}){suffix}"
@@ -187,6 +214,52 @@ def get_default_base_path() -> str | None:
 
 def get_default_dest_type() -> str:
     return repository.get_setting(_DEFAULT_DEST_TYPE_SETTING_KEY) or "local"
+
+
+def get_filename_template() -> str:
+    """빈 문자열이면 파일명 템플릿 미사용(원본 zip 파일명 그대로 이동)을 뜻한다."""
+    return repository.get_setting(_FILENAME_TEMPLATE_SETTING_KEY) or ""
+
+
+def _count_zip_pages(zip_path: Path) -> int | None:
+    """zip 안에 든 이미지(페이지) 개수를 실제로 세서 반환한다. zip을 못 열면(손상 등)
+    None을 반환한다 — 이 경우 {page_count} 토큰이 있는 템플릿은 적용하지 않는다."""
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            return sum(1 for n in zf.namelist() if not n.endswith("/"))
+    except (zipfile.BadZipFile, OSError) as e:
+        log.warning("zip 페이지 수 계산 실패 (%s): %s", zip_path, e)
+        return None
+
+
+def render_archive_filename(
+    template: str, src: Path, title_name: str, writer_names: list[str]
+) -> str | None:
+    """템플릿에 맞춰 최종 파일명(확장자 포함)을 만든다. 템플릿이 비어있거나, 파일명
+    구조를 못 알아보거나(_parse_zip_filename_for_template), 템플릿에 {page_count}가
+    있는데 zip을 못 열면 None을 반환해서 호출부가 원본 파일명을 그대로 쓰게 한다."""
+    if not template.strip():
+        return None
+    parsed = _parse_zip_filename_for_template(src.stem, title_name)
+    if parsed is None:
+        return None
+    episode_no, subtitle = parsed
+
+    rendered = template
+    if "{page_count}" in rendered:
+        page_count = _count_zip_pages(src)
+        if page_count is None:
+            return None
+        rendered = rendered.replace("{page_count}", str(page_count))
+    rendered = rendered.replace("{title}", title_name)
+    rendered = rendered.replace("{episode_no}", episode_no)
+    rendered = rendered.replace("{subtitle}", subtitle)
+    rendered = rendered.replace("{author}", ", ".join(writer_names))
+
+    rendered = remove_forbidden_str(rendered)
+    if not rendered:
+        return None
+    return rendered + src.suffix
 
 
 def is_finish_unsubscribe_archiving_enabled() -> bool:
@@ -220,9 +293,9 @@ def _resolve_archive_dest_rclone(rclone_config_path: str, title_name: str, base_
 
 
 def _move_file_to_rclone_with_conflict_policy(
-    rclone_config_path: str, src: Path, remote: str, dest_path: str, policy: str
+    rclone_config_path: str, src: Path, remote: str, dest_path: str, policy: str, dest_filename: str | None = None
 ) -> tuple[str | None, bool]:
-    dest_name = src.name
+    dest_name = dest_filename or src.name
     had_conflict = rclone_client.file_exists(rclone_config_path, remote, dest_path, dest_name)
     if had_conflict:
         if policy == "skip":
@@ -262,6 +335,7 @@ def _archive_title(
     base_path: str, policy: str, trigger_type: str, keep_last: bool,
     dest_type: str = "local", rclone_config_path: str = "",
     progress_callback=None, conflict_log: list | None = None, failure_log: list | None = None,
+    writer_names: list[str] | None = None,
 ) -> int:
     """실제로 파일들을 옮기고 이력을 남긴다. 반환값은 옮긴 개수.
     dest_type이 'rclone'이면 로컬 shutil 대신 rclone CLI로 처리한다(Windows 마운트를
@@ -291,13 +365,17 @@ def _archive_title(
 
     force_subfolder = base_path == get_default_base_path()
     moved = 0
+    template = get_filename_template()
 
     if dest_type == "rclone":
         dest_target = _resolve_archive_dest_rclone(rclone_config_path, title_name, base_path, force_subfolder=force_subfolder)
         remote, dest_path = _parse_rclone_target(dest_target)
         for _num, src in files:
             try:
-                saved_name, had_conflict = _move_file_to_rclone_with_conflict_policy(rclone_config_path, src, remote, dest_path, policy)
+                dest_filename = render_archive_filename(template, src, title_name, writer_names or []) if template else None
+                saved_name, had_conflict = _move_file_to_rclone_with_conflict_policy(
+                    rclone_config_path, src, remote, dest_path, policy, dest_filename
+                )
                 if had_conflict and conflict_log is not None:
                     conflict_log.append((title_name, src.name, policy))
                 if saved_name is not None:
@@ -319,7 +397,8 @@ def _archive_title(
         dest_dir = resolve_archive_dest(archive_root, title_name, base_path, force_subfolder=force_subfolder)
         for _num, src in files:
             try:
-                saved_name, had_conflict = move_file_with_conflict_policy(src, dest_dir, policy)
+                dest_filename = render_archive_filename(template, src, title_name, writer_names or []) if template else None
+                saved_name, had_conflict = move_file_with_conflict_policy(src, dest_dir, policy, dest_filename)
                 if had_conflict and conflict_log is not None:
                     conflict_log.append((title_name, src.name, policy))
                 if saved_name is not None:
@@ -358,6 +437,7 @@ def run_periodic_archive(
             target.dest_base_path, policy, "periodic", keep_last=True,
             dest_type=target.dest_type, rclone_config_path=rclone_config_path,
             progress_callback=progress_callback, conflict_log=conflict_log, failure_log=failure_log,
+            writer_names=wt.writer_names,
         )
     return total
 
@@ -381,6 +461,7 @@ def manual_archive_now(
             target.dest_base_path, policy, "manual", keep_last=True,
             dest_type=target.dest_type, rclone_config_path=rclone_config_path,
             progress_callback=progress_callback,
+            writer_names=wt.writer_names,
         )
     return total
 
@@ -418,6 +499,7 @@ def process_pending_finish_archives(
             base_path, policy, "finish_unsubscribe", keep_last=False,
             dest_type=dest_type, rclone_config_path=rclone_config_path,
             progress_callback=progress_callback, conflict_log=conflict_log, failure_log=failure_log,
+            writer_names=wt.writer_names,
         )
         # 완결 전체이동은 마지막 파일도 예외 없이 옮기므로, 다 옮기고 나면 다운로드
         # 쪽 웹툰 폴더엔 아무 것도 안 남는 게 정상이다 — 파일이 하나라도 남아있으면

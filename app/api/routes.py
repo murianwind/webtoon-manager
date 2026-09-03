@@ -18,6 +18,7 @@ LAN 전용, 인증 없음. 입력값 검증 실패 시 크래시 대신 명확�
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 
 import aiohttp
@@ -1171,6 +1172,7 @@ class ArchiveSettingsOut(BaseModel):
     default_dest_type: str
     conflict_policy: str
     on_finish_unsubscribe: bool
+    filename_template: str
     rclone_available: bool
     local_available: bool
 
@@ -1180,12 +1182,25 @@ class ArchiveSettingsIn(BaseModel):
     default_dest_type: str = "local"
     conflict_policy: str
     on_finish_unsubscribe: bool
+    filename_template: str = ""
 
     @field_validator("conflict_policy")
     @classmethod
     def valid_policy(cls, v: str) -> str:
         if v not in ("overwrite", "skip", "rename"):
             raise ValueError("conflict_policy는 overwrite/skip/rename 중 하나여야 합니다.")
+        return v
+
+    @field_validator("filename_template")
+    @classmethod
+    def valid_template_tokens(cls, v: str) -> str:
+        allowed = {"{title}", "{episode_no}", "{subtitle}", "{page_count}", "{author}"}
+        # 사용자가 오타를 낸 토큰(예: {episode}처럼 잘못 쓴 것)을 그냥 글자 그대로
+        # 파일명에 남기는 것보다, 저장 시점에 바로 알려주는 게 훨씬 낫다.
+        found = re.findall(r"\{[^{}]*\}", v)
+        unknown = [tok for tok in found if tok not in allowed]
+        if unknown:
+            raise ValueError(f"알 수 없는 템플릿 토큰: {', '.join(unknown)} (사용 가능: {', '.join(sorted(allowed))})")
         return v
 
     @field_validator("default_dest_type")
@@ -1203,11 +1218,13 @@ async def get_archive_settings():
     default_dest_type = await asyncio.to_thread(archiver.get_default_dest_type)
     conflict_policy = await asyncio.to_thread(archiver.get_conflict_policy)
     on_finish = await asyncio.to_thread(archiver.is_finish_unsubscribe_archiving_enabled)
+    filename_template = await asyncio.to_thread(archiver.get_filename_template)
     return ArchiveSettingsOut(
         default_base_path=default_base_path or "",
         default_dest_type=default_dest_type,
         conflict_policy=conflict_policy,
         on_finish_unsubscribe=on_finish,
+        filename_template=filename_template,
         rclone_available=bool(settings.rclone_config_path) and Path(settings.rclone_config_path).is_file(),
         local_available=bool(settings.archive_root),
     )
@@ -1228,6 +1245,7 @@ async def set_archive_settings(payload: ArchiveSettingsIn):
     await asyncio.to_thread(
         repository.set_setting, "archive_on_finish_unsubscribe", "1" if payload.on_finish_unsubscribe else None
     )
+    await asyncio.to_thread(repository.set_setting, "archive_filename_template", payload.filename_template.strip() or None)
     return await get_archive_settings()
 
 

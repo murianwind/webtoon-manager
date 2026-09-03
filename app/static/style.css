@@ -139,6 +139,34 @@ select {
   color: var(--muted);
   margin: 6px 0 4px;
 }
+.token-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+.token-btn {
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--surface-alt, #f1f1f1);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.token-btn:hover {
+  background: var(--border);
+}
+#archive-filename-template {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+#archive-filename-template-preview {
+  margin-top: 6px;
+  font-family: monospace;
+}
 .toolbar input {
   flex: 1;
   padding: 8px 10px;
