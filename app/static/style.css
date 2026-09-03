@@ -752,4 +752,22 @@ select {
 .folder-picker-new-row {
   margin-top: 4px;
 }
+.archive-edit-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text);
+  background: var(--accent-bg, #eef6ff);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.archive-edit-banner.hidden {
+  /* .hidden 단독 규칙이 CSS 파일 순서상 이 규칙보다 앞에 있어서, 이 클래스의
+     display:flex한테 밀려 안 숨겨지는 문제가 실제로 있었다 — 이 조합
+     셀렉터로 명시적으로 다시 이기게 한다. */
+  display: none;
+}
 

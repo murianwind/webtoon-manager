@@ -1866,6 +1866,43 @@ async function renderFolderPickerContents(containerId, onSelect) {
 }
 
 let archiveSelectedTargetPath = "";
+let archiveEditingTitleId = null; // 수정 중인 대상의 title_id (null이면 신규 등록 모드)
+
+function enterArchiveTargetEditMode(target) {
+  archiveEditingTitleId = target.title_id;
+  const banner = document.getElementById("archive-target-edit-banner");
+  const bannerText = document.getElementById("archive-target-edit-banner-text");
+  const currentLocation = `${target.dest_type === "rclone" ? "☁️" : "💾"} ${target.dest_base_path}`;
+  bannerText.textContent = `"${target.title_name}" 수정 중 — 현재 위치: ${currentLocation}`;
+  banner.classList.remove("hidden");
+
+  const select = document.getElementById("archive-target-webtoon-select");
+  select.innerHTML = `<option value="${escapeHtml(target.title_id)}">${escapeHtml(target.title_name)}</option>`;
+  select.disabled = true;
+
+  document.getElementById("btn-add-archive-target").textContent = "수정 저장";
+  archiveSelectedTargetPath = "";
+  try {
+    sessionStorage.removeItem("folderPickerState:archive-target-folder-picker");
+  } catch (_) {
+    // 조용히 무시
+  }
+  renderFolderPicker("archive-target-folder-picker", (path, destType) => {
+    archiveSelectedTargetPath = path;
+    archiveSelectedTargetDestType = destType;
+  });
+}
+
+function exitArchiveTargetEditMode() {
+  archiveEditingTitleId = null;
+  document.getElementById("archive-target-edit-banner").classList.add("hidden");
+  document.getElementById("archive-target-webtoon-select").disabled = false;
+  document.getElementById("btn-add-archive-target").textContent = "등록";
+  loadArchiveTargetWebtoonOptions();
+}
+
+document.getElementById("btn-cancel-archive-edit").addEventListener("click", exitArchiveTargetEditMode);
+
 let archiveSelectedTargetDestType = "local";
 let archiveSelectedDefaultPath = "";
 let archiveSelectedDefaultDestType = "local";
@@ -1975,6 +2012,12 @@ async function loadArchiveTargetList() {
         loadArchiveTargetWebtoonOptions();
       });
       deleteBtn.className = "job-history-delete-btn";
+      const editBtn = makeButton("수정", (ev) => {
+        ev.stopPropagation();
+        enterArchiveTargetEditMode(t);
+      });
+      editBtn.className = "job-history-delete-btn";
+      summary.appendChild(editBtn);
       summary.appendChild(toggleBtn);
       summary.appendChild(deleteBtn);
       entry.appendChild(summary);
@@ -1987,7 +2030,7 @@ async function loadArchiveTargetList() {
 
 document.getElementById("btn-add-archive-target").addEventListener("click", async () => {
   const resultEl = document.getElementById("archive-target-add-result");
-  const titleId = document.getElementById("archive-target-webtoon-select").value;
+  const titleId = archiveEditingTitleId || document.getElementById("archive-target-webtoon-select").value;
   if (!titleId) return;
   if (!archiveSelectedTargetPath) {
     resultEl.textContent = "폴더를 먼저 선택하세요.";
@@ -2000,7 +2043,8 @@ document.getElementById("btn-add-archive-target").addEventListener("click", asyn
       body: JSON.stringify({ title_id: titleId, dest_base_path: archiveSelectedTargetPath, dest_type: archiveSelectedTargetDestType }),
     });
     resultEl.style.color = "";
-    resultEl.textContent = "등록했습니다.";
+    resultEl.textContent = archiveEditingTitleId ? "수정했습니다." : "등록했습니다.";
+    exitArchiveTargetEditMode();
     loadArchiveTargetList();
     loadArchiveManualSelectList();
     loadArchiveTargetWebtoonOptions();
