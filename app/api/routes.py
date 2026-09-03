@@ -83,7 +83,7 @@ def _to_out(wt) -> WebtoonOut:
         latest_episode_no=wt.latest_episode_no,
         is_paused=wt.is_paused,
         is_new=wt.is_new,
-        has_new_episode=wt.latest_episode_no > wt.last_downloaded_no > 0,
+        has_new_episode=wt.has_update,
         writer_ids=wt.writer_ids,
         writer_names=wt.writer_names,
     )
@@ -228,6 +228,11 @@ async def browse_naver_list():
     for item in items:
         seen_ids.add(item.title_id)
         tracked = existing_by_id.get(item.title_id)
+        if tracked is not None and tracked.has_update != item.has_update:
+            # 이 목록을 훑는 김에, 추적 중인 작품의 실제 네이버 up 값을 DB에
+            # 갱신해둔다 — 개별 작품 API엔 이 값이 없어서, 다른 탭(구독해제/제외됨
+            # 등)에서 항상 최신값을 보여주려면 여기서 갱신하는 방법뿐이다.
+            await asyncio.to_thread(repository.update_has_update, item.title_id, item.has_update)
         result.append(
             {
                 "title_id": item.title_id,
@@ -266,7 +271,7 @@ async def browse_naver_list():
                 "status": wt.status,
                 "genres": wt.genres,
                 "tags": wt.tags,
-                "has_new_episode": wt.latest_episode_no > wt.last_downloaded_no > 0,
+                "has_new_episode": wt.has_update,
             }
         )
 

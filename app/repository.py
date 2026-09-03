@@ -46,6 +46,7 @@ def _row_to_record(row) -> WebtoonRecord:
         latest_episode_no=row["latest_episode_no"],
         is_paused=bool(row["is_paused"]),
         is_new=bool(row["is_new"]),
+        has_update=bool(row["has_update"]),
     )
 
 
@@ -194,6 +195,18 @@ def update_is_new(title_id: str, is_new: bool) -> None:
         conn.execute(
             "UPDATE webtoons SET is_new = ?, updated_at = ? WHERE title_id = ?",
             (int(is_new), _now(), title_id),
+        )
+
+
+def update_has_update(title_id: str, has_update: bool) -> None:
+    """네이버 API의 'up'(새 회차 업데이트) 값을 그대로 저장한다. 개별 작품 상세
+    API에는 이 값이 없고 '요일별 전체목록' 조회 시에만 얻을 수 있어서, 그 목록을
+    훑을 때(브라우징 API)만 이 값이 갱신된다 — 탭마다 다르게 계산하지 않고,
+    항상 이 저장된 값을 그대로 보여주기 위함."""
+    with write_transaction() as conn:
+        conn.execute(
+            "UPDATE webtoons SET has_update = ?, updated_at = ? WHERE title_id = ?",
+            (int(has_update), _now(), title_id),
         )
 
 

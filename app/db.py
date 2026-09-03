@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS webtoons (
     latest_episode_no INTEGER NOT NULL DEFAULT 0, -- 마지막으로 확인한 네이버 최신 무료회차 no
     is_paused INTEGER NOT NULL DEFAULT 0,         -- 휴재 여부
     is_new INTEGER NOT NULL DEFAULT 0,            -- 신작 여부 (네이버 API의 'new' 필드)
+    has_update INTEGER NOT NULL DEFAULT 0,        -- UP 여부 (네이버 API의 'up' 필드, 탭과 무관하게 그대로 표시)
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -124,6 +125,7 @@ _MIGRATIONS = [
     ("webtoons", "latest_episode_no", "ALTER TABLE webtoons ADD COLUMN latest_episode_no INTEGER NOT NULL DEFAULT 0"),
     ("webtoons", "is_paused", "ALTER TABLE webtoons ADD COLUMN is_paused INTEGER NOT NULL DEFAULT 0"),
     ("webtoons", "is_new", "ALTER TABLE webtoons ADD COLUMN is_new INTEGER NOT NULL DEFAULT 0"),
+    ("webtoons", "has_update", "ALTER TABLE webtoons ADD COLUMN has_update INTEGER NOT NULL DEFAULT 0"),
     ("webtoons", "writer_names", "ALTER TABLE webtoons ADD COLUMN writer_names TEXT NOT NULL DEFAULT '[]'"),
     ("watched_authors", "platform", "ALTER TABLE watched_authors ADD COLUMN platform TEXT NOT NULL DEFAULT 'naver'"),
     ("archive_targets", "dest_type", "ALTER TABLE archive_targets ADD COLUMN dest_type TEXT NOT NULL DEFAULT 'local'"),
