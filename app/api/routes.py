@@ -1211,6 +1211,29 @@ class ArchiveSettingsIn(BaseModel):
         return v
 
 
+class PreviewFilenameIn(BaseModel):
+    title_id: str
+    template: str = ""
+
+
+class PreviewFilenameOut(BaseModel):
+    original_filename: str | None
+    rendered_filename: str | None
+    message: str
+
+
+@router.post("/archive/preview-filename", response_model=PreviewFilenameOut)
+async def preview_archive_filename(payload: PreviewFilenameIn):
+    wt = await asyncio.to_thread(repository.get, payload.title_id)
+    if wt is None:
+        raise HTTPException(status_code=404, detail="웹툰을 찾을 수 없습니다.")
+    settings = get_settings()
+    result = await asyncio.to_thread(
+        archiver.preview_filename_for_title, settings.download_root, wt.title, payload.template, wt.writer_names
+    )
+    return PreviewFilenameOut(**result)
+
+
 @router.get("/archive/settings", response_model=ArchiveSettingsOut)
 async def get_archive_settings():
     settings = get_settings()

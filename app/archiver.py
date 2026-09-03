@@ -262,6 +262,27 @@ def render_archive_filename(
     return rendered + src.suffix
 
 
+def preview_filename_for_title(download_root: str, title_name: str, template: str, writer_names: list[str]) -> dict:
+    """설정 화면의 미리보기용 — 실제 다운로드 폴더에 있는 회차 zip 파일 하나를 골라서,
+    템플릿을 적용하면 실제로 어떤 이름이 되는지 보여준다. 가장 번호가 큰(최근) 파일을
+    보여준다 — 사용자가 알아보기 쉬운 최신 회차일 가능성이 높아서."""
+    title_dir = Path(download_root) / remove_forbidden_str(title_name)
+    files = _list_episode_files_sorted(title_dir)
+    if not files:
+        return {"original_filename": None, "rendered_filename": None, "message": "다운로드 폴더에 zip 파일이 없습니다."}
+    _num, src = files[-1]
+    if not template.strip():
+        return {"original_filename": src.name, "rendered_filename": None, "message": "템플릿이 비어있어 원본 파일명 그대로 이동됩니다."}
+    rendered = render_archive_filename(template, src, title_name, writer_names)
+    if rendered is None:
+        return {
+            "original_filename": src.name,
+            "rendered_filename": None,
+            "message": "이 파일명 구조를 인식하지 못해 원본 파일명 그대로 이동됩니다.",
+        }
+    return {"original_filename": src.name, "rendered_filename": rendered, "message": "정상적으로 변환됩니다."}
+
+
 def is_finish_unsubscribe_archiving_enabled() -> bool:
     return repository.get_setting(_ON_FINISH_UNSUBSCRIBE_SETTING_KEY) == "1"
 

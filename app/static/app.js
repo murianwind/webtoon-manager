@@ -2090,6 +2090,7 @@ async function loadArchiveSettings() {
     document.getElementById("archive-on-finish-toggle").checked = data.on_finish_unsubscribe;
     document.getElementById("archive-conflict-policy").value = data.conflict_policy;
     document.getElementById("archive-filename-template").value = data.filename_template || "";
+    await loadArchiveTemplatePreviewTitleList();
     updateArchiveFilenameTemplatePreview();
     archiveSelectedDefaultPath = data.default_base_path;
     archiveSelectedDefaultDestType = data.default_dest_type;
@@ -2098,32 +2099,70 @@ async function loadArchiveSettings() {
   }
 }
 
-// 실제 서버 왕복 없이, 예시 값으로 즉석에서 어떤 파일명이 나올지 보여준다 —
-// 토큰을 자유롭게 조합하는 게 이 기능의 핵심이라, 저장하기 전에 바로바로
-// 결과를 확인할 수 있어야 실제로 쓸만하다.
-const ARCHIVE_TEMPLATE_PREVIEW_SAMPLE = {
-  "{title}": "외모지상주의",
-  "{episode_no}": "209",
-  "{subtitle}": "209화 갓독 11",
-  "{page_count}": "37",
-  "{author}": "박태준",
-};
+// 서버에 있는 실제 웹툰의 실제 zip 파일 하나로 미리보기한다 — 예시 값보다
+// 훨씬 신뢰도 높은 미리보기라서, 하드코딩된 샘플 값 방식을 대체한다.
+let archiveTemplatePreviewTitles = null;
+let archiveTemplatePreviewDebounceTimer = null;
 
-function updateArchiveFilenameTemplatePreview() {
-  const template = document.getElementById("archive-filename-template").value;
-  const previewEl = document.getElementById("archive-filename-template-preview");
-  if (!template.trim()) {
-    previewEl.textContent = "미리보기: (비워두면 원본 zip 파일명 그대로 이동)";
-    return;
+async function loadArchiveTemplatePreviewTitleList() {
+  const select = document.getElementById("archive-filename-template-preview-title");
+  try {
+    if (!archiveTemplatePreviewTitles) {
+      archiveTemplatePreviewTitles = await apiCall("/api/webtoons?status=active");
+    }
+    const previousValue = select.value;
+    select.innerHTML = "";
+    if (archiveTemplatePreviewTitles.length === 0) {
+      select.innerHTML = '<option value="">구독 중인 웹툰이 없습니다</option>';
+      return;
+    }
+    for (const wt of archiveTemplatePreviewTitles) {
+      const opt = document.createElement("option");
+      opt.value = wt.title_id;
+      opt.textContent = wt.title;
+      select.appendChild(opt);
+    }
+    if (previousValue && archiveTemplatePreviewTitles.some((wt) => wt.title_id === previousValue)) {
+      select.value = previousValue;
+    }
+  } catch (e) {
+    select.innerHTML = '<option value="">목록을 불러오지 못했습니다</option>';
   }
-  let rendered = template;
-  for (const [token, sample] of Object.entries(ARCHIVE_TEMPLATE_PREVIEW_SAMPLE)) {
-    rendered = rendered.split(token).join(sample);
-  }
-  previewEl.textContent = `미리보기: ${rendered}.zip`;
 }
 
-document.getElementById("archive-filename-template").addEventListener("input", updateArchiveFilenameTemplatePreview);
+async function updateArchiveFilenameTemplatePreview() {
+  const template = document.getElementById("archive-filename-template").value;
+  const titleId = document.getElementById("archive-filename-template-preview-title").value;
+  const previewEl = document.getElementById("archive-filename-template-preview");
+  if (!titleId) {
+    previewEl.textContent = "미리보기할 웹툰을 선택하세요.";
+    return;
+  }
+  previewEl.textContent = "확인 중...";
+  try {
+    const result = await apiCall("/api/archive/preview-filename", {
+      method: "POST",
+      body: JSON.stringify({ title_id: titleId, template }),
+    });
+    if (!result.original_filename) {
+      previewEl.textContent = result.message;
+    } else if (result.rendered_filename) {
+      previewEl.textContent = `${result.original_filename}  →  ${result.rendered_filename}`;
+    } else {
+      previewEl.textContent = `${result.original_filename} (${result.message})`;
+    }
+  } catch (e) {
+    previewEl.textContent = e.message;
+  }
+}
+
+function scheduleArchiveFilenameTemplatePreview() {
+  clearTimeout(archiveTemplatePreviewDebounceTimer);
+  archiveTemplatePreviewDebounceTimer = setTimeout(updateArchiveFilenameTemplatePreview, 400);
+}
+
+document.getElementById("archive-filename-template").addEventListener("input", scheduleArchiveFilenameTemplatePreview);
+document.getElementById("archive-filename-template-preview-title").addEventListener("change", updateArchiveFilenameTemplatePreview);
 
 document.querySelectorAll("#archive-filename-template-tokens .token-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
