@@ -2221,12 +2221,29 @@ async function loadArchiveManualSelectList() {
   }
 }
 
+document.getElementById("archive-manual-full-move-toggle").addEventListener("change", (e) => {
+  document.getElementById("archive-manual-full-move-warning").classList.toggle("hidden", !e.target.checked);
+});
+
 document.getElementById("btn-run-archive-now").addEventListener("click", async () => {
   const checked = Array.from(document.querySelectorAll("#archive-manual-select-list input:checked")).map((el) => el.value);
+  const fullMove = document.getElementById("archive-manual-full-move-toggle").checked;
+  if (fullMove) {
+    if (checked.length === 0) {
+      alert("완결 처리로 이동할 웹툰을 먼저 선택하세요.");
+      return;
+    }
+    // 체크박스 자체가 1차 경고이고, 이 확인창이 실행 직전 마지막 재확인이다 —
+    // 되돌릴 수 없는 작업(폴더 삭제까지 포함)이라 두 단계로 막는다.
+    const proceed = confirm(
+      `선택한 웹툰 ${checked.length}개를 완결 처리로 이동합니다.\n마지막 파일까지 전부 옮기고, 다운로드 폴더가 비면 삭제됩니다.\n되돌릴 수 없습니다. 계속할까요?`
+    );
+    if (!proceed) return;
+  }
   const btn = document.getElementById("btn-run-archive-now");
   btn.disabled = true;
   try {
-    await apiCall("/api/archive/run", { method: "POST", body: JSON.stringify({ title_ids: checked }) });
+    await apiCall("/api/archive/run", { method: "POST", body: JSON.stringify({ title_ids: checked, full_move: fullMove }) });
     startArchiveJobPolling();
   } catch (e) {
     btn.disabled = false;
@@ -2392,7 +2409,7 @@ async function loadArchiveHistory(page) {
       listContainer.innerHTML = "<p>기록이 없습니다.</p>";
     }
     for (const item of data.items) {
-      const triggerLabel = { periodic: "주기적", manual: "수동", finish_unsubscribe: "완결자동", bulk_move: "일괄이동" }[item.trigger_type] || item.trigger_type;
+      const triggerLabel = { periodic: "주기적", manual: "수동", manual_finish: "수동완결", finish_unsubscribe: "완결자동", bulk_move: "일괄이동" }[item.trigger_type] || item.trigger_type;
       const wrap = document.createElement("div");
       wrap.className = "job-history-entry";
 

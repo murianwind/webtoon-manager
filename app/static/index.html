@@ -353,6 +353,13 @@
     <div class="settings-card">
       <h2>아카이빙 수동 실행</h2>
       <div id="archive-manual-select-list" class="chip-container"></div>
+      <label class="checkbox-label" style="margin-top: 10px;">
+        <input type="checkbox" id="archive-manual-full-move-toggle" /> 완결 처리로 이동 (마지막 파일까지 전부 이동하고, 다운로드 폴더가 비면 삭제)
+      </label>
+      <p id="archive-manual-full-move-warning" class="hint hidden" style="color: var(--danger, #d33);">
+        ⚠️ 선택한 웹툰은 위 체크된 항목 전부 <strong>마지막 파일까지 예외 없이</strong> 이동되고, 다운로드 폴더에 아무것도 안 남으면 <strong>그 폴더 자체가 삭제</strong>됩니다.
+        아직 연재 중인 작품이어도 그대로 실행되니, 완결/보관 목적이 맞는 웹툰만 체크했는지 다시 한번 확인하세요. 되돌릴 수 없습니다.
+      </p>
       <button id="btn-run-archive-now" style="margin-top: 10px;">지금 이동</button>
       <div class="job-status-block">
         <h3>아카이빙 상태 <span id="archive-status-badge" class="badge">idle</span></h3>

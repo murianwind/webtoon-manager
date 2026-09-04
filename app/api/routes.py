@@ -1397,6 +1397,7 @@ async def create_archive_folder(payload: CreateFolderIn):
 
 class ArchiveRunIn(BaseModel):
     title_ids: list[str] = []
+    full_move: bool = False
 
 
 @router.post("/archive/run")
@@ -1415,7 +1416,7 @@ async def run_archive_now(payload: ArchiveRunIn):
             if payload.title_ids:
                 moved = await asyncio.to_thread(
                     archiver.manual_archive_now, settings.archive_root, settings.download_root, payload.title_ids, settings.rclone_config_path,
-                    lambda msg: job_status.log_line("archive", msg),
+                    lambda msg: job_status.log_line("archive", msg), payload.full_move,
                 )
                 job_status.log_line("archive", f"{moved}개 파일 이동 완료")
             else:

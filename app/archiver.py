@@ -465,10 +465,16 @@ def run_periodic_archive(
 
 def manual_archive_now(
     archive_root: str, download_root: str, title_ids: list[str], rclone_config_path: str = "",
-    progress_callback=None,
+    progress_callback=None, full_move: bool = False,
 ) -> int:
-    """수동 실행 — 지정된 것과 동일 규칙(마지막 파일 보존), 대상만 사용자가 고름."""
+    """수동 실행 — 기본은 지정된 것과 동일 규칙(마지막 파일 보존).
+    full_move=True면 완결 자동이동과 동일하게 마지막 파일까지 전부 옮기고, 다 옮긴 뒤
+    다운로드 폴더가 비면 그 폴더도 정리한다 — "완결 처리했는데 자동이동 설정을 안 켜놨던"
+    웹툰을 그때그때 수동으로 완전히 정리하고 싶을 때 쓰는 용도라, 연재 중인 웹툰에도
+    (사용자 책임 하에) 쓸 수 있게 굳이 is_finished 여부를 확인하지 않는다 — 대신 화면
+    쪽에서 체크박스 + 재확인으로 실수를 막는다."""
     policy = get_conflict_policy()
+    trigger_type = "manual_finish" if full_move else "manual"
     total = 0
     for title_id in title_ids:
         target = repository.get_archive_target(title_id)
@@ -479,11 +485,16 @@ def manual_archive_now(
             continue
         total += _archive_title(
             archive_root, download_root, title_id, wt.title,
-            target.dest_base_path, policy, "manual", keep_last=True,
+            target.dest_base_path, policy, trigger_type, keep_last=not full_move,
             dest_type=target.dest_type, rclone_config_path=rclone_config_path,
             progress_callback=progress_callback,
             writer_names=wt.writer_names,
         )
+        if full_move:
+            title_dir = Path(download_root) / remove_forbidden_str(wt.title)
+            _cleanup_empty_dirs(title_dir)
+            if progress_callback:
+                progress_callback(f"[{wt.title}] 완결 처리 — 다운로드 폴더 정리 확인")
     return total
 
 
