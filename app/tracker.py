@@ -123,7 +123,7 @@ async def backfill_missing_thumbnails(session: aiohttp.ClientSession, settings: 
             continue
         repository.update_thumbnail_url(title_id, info.thumbnail_url)
         repository.update_is_adult(title_id, info.is_adult)
-        repository.update_genres_and_tags(title_id, info.genres, info.tags)
+        repository.update_genres_and_tags(title_id, info.genres_ko, info.tags)
         repository.update_is_paused(title_id, info.is_paused)
         repository.update_is_new(title_id, info.is_new)
         filled += 1
@@ -154,7 +154,7 @@ async def enrich_one(
 
     repository.update_is_adult(title_id, info.is_adult)
     repository.update_thumbnail_url(title_id, info.thumbnail_url)
-    repository.update_genres_and_tags(title_id, info.genres, info.tags)
+    repository.update_genres_and_tags(title_id, info.genres_ko, info.tags)
     repository.update_is_paused(title_id, info.is_paused)
     repository.update_is_new(title_id, info.is_new)
     if info.writer_id_name_pairs:
@@ -222,41 +222,61 @@ async def scan_kakao_authors_for_new_titles(session: aiohttp.ClientSession, sett
     return new_titles_found
 
 
+async def _fetch_info_only(
+    session: aiohttp.ClientSession, semaphore: asyncio.Semaphore, title_id: str, settings: Settings
+) -> tuple[str, TitleInfo | None]:
+    """메타 동기화 전용 — 다른 스캔들과 달리 '같은 작가의 다른 작품' 조회는 필요
+    없어서, 그 부분만 뺀 가벼운 버전."""
+    async with semaphore:
+        try:
+            info = await naver_api.fetch_title_info(session, title_id, settings.request_timeout_seconds)
+            await asyncio.sleep(settings.delay_seconds)
+            return title_id, info
+        except Exception as e:
+            log.error("웹툰(titleId=%s) 메타 조회 중 예외 — 이 항목만 건너뜁니다: %s", title_id, e)
+            return title_id, None
+
+
 async def sync_metadata_for_all(settings) -> int:
     """
-    추적 중인(구독중/구독해제/제외됨 전부) 웹툰 폴더를 스캔해서, info.xml이나
-    cover.jpg가 없는 것만 다시 만들어준다. 폴더가 아예 없으면(다운로드한 적 없는
-    웹툰) 건너뛴다. 한 웹툰 처리 중 예외가 나도(디스크 오류, 커버 이미지 네트워크
-    실패 등) 전체가 멈추지 않고 다음 웹툰으로 넘어가야 하므로, 다른 스캔 함수들과
-    동일하게 웹툰 단위로 예외를 격리한다.
+    추적 중인(구독중/구독해제/제외됨 전부) 웹툰 폴더를 스캔해서 info.xml/cover를
+    다시 만들어준다. 폴더가 아예 없으면(다운로드한 적 없는 웹툰) 건너뛴다.
+
+    info.xml은 (커버와 달리) 있어도 매번 네이버에서 새로 받아와 덮어쓴다 — DB에
+    저장된 값만으로 만들면 글작가/그림작가/원작자처럼 DB에 아예 저장 안 하는
+    정보는 영원히 못 채우기 때문이다(예전 방식의 근본적인 한계였음). 커버 이미지는
+    용량이 있고 거의 안 바뀌므로 지금처럼 없을 때만 받는다.
+
+    한 웹툰 처리 중 예외가 나도(디스크 오류, 커버 이미지 네트워크 실패 등) 전체가
+    멈추지 않고 다음 웹툰으로 넘어가야 하므로, 다른 스캔 함수들과 동일하게 웹툰
+    단위로 예외를 격리한다.
     """
-    targets = repository.list_all()
+    targets = [wt for wt in repository.list_all() if (Path(settings.download_root) / remove_forbidden_str(wt.title)).is_dir()]
+    if not targets:
+        return 0
+
+    semaphore = asyncio.Semaphore(settings.artist_scan_concurrency)
     fixed = 0
     async with aiohttp.ClientSession() as session:
+        fetch_results = await asyncio.gather(
+            *[_fetch_info_only(session, semaphore, wt.title_id, settings) for wt in targets]
+        )
+        info_by_id = {title_id: info for title_id, info in fetch_results}
+
         for wt in targets:
             try:
-                safe_title = remove_forbidden_str(wt.title)
-                webtoon_dir = Path(settings.download_root) / safe_title
-                if not webtoon_dir.is_dir():
-                    continue
-                if not comicinfo.needs_comicinfo(webtoon_dir):
+                info = info_by_id.get(wt.title_id)
+                if info is None:
+                    job_status.log_line("metadata_sync", f"[{wt.title}] 네이버 조회 실패로 건너뜀")
                     continue
 
-                info = TitleInfo(
-                    title_id=wt.title_id,
-                    title_name=wt.title,
-                    synopsis="",
-                    is_adult=wt.is_adult,
-                    webtoon_type="webtoon",
-                    is_finished=wt.is_finished,
-                    thumbnail_url=wt.thumbnail_url,
-                    genres=wt.genres,
-                    tags=wt.tags,
-                )
+                webtoon_dir = Path(settings.download_root) / remove_forbidden_str(wt.title)
+                repository.update_genres_and_tags(wt.title_id, info.genres_ko, info.tags)
+
                 comicinfo.write_comicinfo_file(webtoon_dir, info)
-                if wt.thumbnail_url:
+                if comicinfo.needs_comicinfo(webtoon_dir) and info.thumbnail_url:
                     await comicinfo.download_cover_image(session, webtoon_dir, info, settings.request_timeout_seconds)
-                job_status.log_line("metadata_sync", f"[{wt.title}] info.xml / 커버 이미지 생성")
+                job_status.log_line("metadata_sync", f"[{wt.title}] info.xml 갱신 / 커버 이미지 확인")
                 fixed += 1
             except Exception as e:
                 log.error("메타 동기화 중 예외 (titleId=%s) — 다음 웹툰으로 진행: %s", wt.title_id, e)
@@ -345,7 +365,7 @@ async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, setting
 
         repository.update_is_adult(title_id, info.is_adult)
         repository.update_thumbnail_url(title_id, info.thumbnail_url)
-        repository.update_genres_and_tags(title_id, info.genres, info.tags)
+        repository.update_genres_and_tags(title_id, info.genres_ko, info.tags)
         repository.update_is_paused(title_id, info.is_paused)
         repository.update_is_new(title_id, info.is_new)
 

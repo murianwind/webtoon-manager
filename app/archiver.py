@@ -94,14 +94,17 @@ def _find_metadata_files(title_dir: Path) -> list[Path]:
 
 def _archive_metadata_files_local(metadata_files: list[Path], dest_dir: Path, *, keep_last: bool) -> None:
     """info.xml/커버를 로컬 목적지로 옮긴다.
-    keep_last=True(주기/수동): 원본은 남기고 복사, 목적지에 이미 있으면 건너뜀.
+    keep_last=True(주기/수동): 원본은 남기고 복사. info.xml은 작은 텍스트 파일이라
+    매번 새로 복사하는 비용이 거의 없어서 항상 덮어쓴다(오래된 정보가 보관 폴더에
+    그대로 굳어있는 걸 막기 위함) — 반면 커버 이미지는 용량이 있고 거의 안 바뀌므로
+    목적지에 이미 있으면 건너뛴다.
     keep_last=False(완결 전체이동): 원본을 옮기고, 목적지에 있어도 무조건 덮어쓴다
     (zip과 달리 충돌 정책의 영향을 받지 않음 — 사용자와 논의 확정)."""
     for src in metadata_files:
         dest_path = dest_dir / src.name
         try:
             if keep_last:
-                if dest_path.exists():
+                if src.name.startswith("cover.") and dest_path.exists():
                     continue
                 shutil.copy2(src, dest_path)
             else:
@@ -117,7 +120,7 @@ def _archive_metadata_files_rclone(
         dest_spec = f"{remote}:{dest_path}/{src.name}" if dest_path else f"{remote}:{src.name}"
         try:
             if keep_last:
-                if rclone_client.file_exists(rclone_config_path, remote, dest_path, src.name):
+                if src.name.startswith("cover.") and rclone_client.file_exists(rclone_config_path, remote, dest_path, src.name):
                     continue
                 rclone_client.copyto(rclone_config_path, str(src), dest_spec)
             else:

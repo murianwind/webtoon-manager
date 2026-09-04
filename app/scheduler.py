@@ -105,11 +105,11 @@ async def _download_new_episodes_for_one(
         last_no = folder_last_no
         repository.update_last_downloaded_no(title_id, last_no)
 
-    if comicinfo.needs_comicinfo(webtoon_dir):
-        webtoon_dir.mkdir(parents=True, exist_ok=True)
-        comicinfo.write_comicinfo_file(webtoon_dir, info)
+    webtoon_dir.mkdir(parents=True, exist_ok=True)
+    comicinfo.write_comicinfo_file(webtoon_dir, info)
+    if comicinfo.needs_comicinfo(webtoon_dir):  # 지금은 커버 유무만 확인 — 커버는 없을 때만 받음
         await comicinfo.download_cover_image(session, webtoon_dir, info, settings.request_timeout_seconds)
-        job_status.log_line("download", f"[{info.title_name}] ComicInfo.xml / 커버 이미지 생성")
+    job_status.log_line("download", f"[{info.title_name}] ComicInfo.xml 갱신 / 커버 이미지 확인")
 
     pending = [ep for ep in free_episodes if ep.episode_no > last_no]
     if not pending:

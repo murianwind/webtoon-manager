@@ -24,9 +24,11 @@ class TitleInfo:
     thumbnail_url: str
     writer_names: list[str] = field(default_factory=list)
     painter_names: list[str] = field(default_factory=list)
+    novel_origin_names: list[str] = field(default_factory=list)  # 원작(소설 등) 작가 — ComicInfo 표준엔 전용 태그가 없어서 Notes에 씀
     writer_ids: set[str] = field(default_factory=set)
     writer_id_name_pairs: list[tuple[str, str]] = field(default_factory=list)
-    genres: list[str] = field(default_factory=list)
+    genres: list[str] = field(default_factory=list)  # 네이버 내부 코드값 그대로(예: "FANTASY") — 하위 호환용, 화면 표시엔 genres_ko 사용
+    genres_ko: list[str] = field(default_factory=list)  # 같은 응답의 curationTagList에서 뽑은 한국어 이름(대응 못 찾으면 원래 코드 그대로)
     tags: list[str] = field(default_factory=list)
     age_description: str = ""
     is_paused: bool = False

@@ -35,6 +35,23 @@ _WEBTOON_CODE_TO_TYPE = {
     "BEST_CHALLENGE": "bestChallenge",
 }
 
+# 네이버 API의 genreTypes는 "FANTASY" 같은 내부 코드값이다. 이 표는 네이버 자체의
+# "webtoon/tagList/genre" API 응답(실제 HAR로 캡처해서 확인한 공식 코드-한국어
+# 대응표, 2026-09 기준)을 그대로 옮긴 것 — 추측한 값이 아니다. 여기 없는 코드가
+# 나오면(네이버가 새 장르를 추가하는 등) 원래 코드값을 그대로 남긴다.
+_GENRE_CODE_TO_KOREAN = {
+    "PURE": "로맨스",
+    "FANTASY": "판타지",
+    "ACTION": "액션",
+    "DAILY": "일상",
+    "THRILL": "스릴러",
+    "COMIC": "개그",
+    "HISTORICAL": "무협/사극",
+    "DRAMA": "드라마",
+    "SENSIBILITY": "감성",
+    "SPORTS": "스포츠",
+}
+
 
 class NaverApiError(Exception):
     """네이버 API 요청이 최종적으로 실패했을 때."""
@@ -50,6 +67,7 @@ def _parse_title_info(raw: dict, title_id: str) -> TitleInfo:
     # 채워진 적이 없었다 — 실제 API 응답을 다시 캡처해서 확인한 뒤 고쳤다.)
     writer_id_name_pairs: list[tuple[str, str]] = []
     painter_names: list[str] = []
+    novel_origin_names: list[str] = []
     writer_ids: set[str] = set()
 
     for artist in raw.get("communityArtists") or []:
@@ -63,6 +81,12 @@ def _parse_title_info(raw: dict, title_id: str) -> TitleInfo:
             writer_id_name_pairs.append((str(artist_id), artist_name))
         if "ARTIST_PAINTER" in artist_types and artist_name:
             painter_names.append(artist_name)
+        if "ARTIST_NOVEL_ORIGIN" in artist_types and artist_name:
+            # 소설 등 원작자 — ComicInfo 표준엔 전용 태그가 없어서 Notes에 별도로 적어준다.
+            novel_origin_names.append(artist_name)
+
+    genre_codes = list(gfp.get("genreTypes") or [])
+    genres_ko = [_GENRE_CODE_TO_KOREAN.get(code, code) for code in genre_codes]
 
     return TitleInfo(
         title_id=title_id,
@@ -74,9 +98,11 @@ def _parse_title_info(raw: dict, title_id: str) -> TitleInfo:
         thumbnail_url=raw.get("thumbnailUrl", ""),
         writer_names=[name for _id, name in writer_id_name_pairs if name],
         painter_names=painter_names,
+        novel_origin_names=novel_origin_names,
         writer_ids=writer_ids,
         writer_id_name_pairs=writer_id_name_pairs,
-        genres=list(gfp.get("genreTypes") or []),
+        genres=genre_codes,
+        genres_ko=genres_ko,
         tags=list(gfp.get("tags") or []),
         age_description=age.get("description", ""),
         is_paused=bool(raw.get("rest", False)),

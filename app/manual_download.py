@@ -98,11 +98,11 @@ async def download_selected(title_id: str, episode_nos: list[int], settings: Set
         safe_title = remove_forbidden_str(info.title_name)
         webtoon_dir = Path(settings.download_root) / safe_title
 
-        if needs_comicinfo(webtoon_dir):
-            webtoon_dir.mkdir(parents=True, exist_ok=True)
-            write_comicinfo_file(webtoon_dir, info)
+        webtoon_dir.mkdir(parents=True, exist_ok=True)
+        write_comicinfo_file(webtoon_dir, info)
+        if needs_comicinfo(webtoon_dir):  # 지금은 커버 유무만 확인 — 커버는 없을 때만 받음
             await download_cover_image(session, webtoon_dir, info, settings.request_timeout_seconds)
-            job_status.log_line(JOB_NAME, f"[{info.title_name}] info.xml / 커버 이미지 생성")
+        job_status.log_line(JOB_NAME, f"[{info.title_name}] info.xml 갱신 / 커버 이미지 확인")
 
         had_failure = False
         job_status.log_line(JOB_NAME, f"[{info.title_name}] {len(target_episodes)}개 회차 다운로드 시작")

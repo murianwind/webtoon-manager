@@ -28,8 +28,8 @@ _COMICINFO_TEMPLATE = """<?xml version="1.0"?>
   <Genre>{genre}</Genre>
   <Tags>{tags}</Tags>
   <LanguageISO>ko</LanguageISO>
-  <Notes></Notes>
-  <CoverArtist></CoverArtist>
+  <Notes>{notes}</Notes>
+  <CoverArtist>{cover_artist}</CoverArtist>
   <Penciller></Penciller>
   <Inker></Inker>
   <Colorist></Colorist>
@@ -52,12 +52,19 @@ _COMICINFO_TEMPLATE = """<?xml version="1.0"?>
 
 
 def build_comicinfo_xml(info: TitleInfo) -> str:
-    writer_names = ", ".join(dict.fromkeys(info.writer_names + info.painter_names))
+    writer_names = ", ".join(dict.fromkeys(info.writer_names))
+    cover_artist_names = ", ".join(dict.fromkeys(info.painter_names))
+    notes = f"원작: {', '.join(dict.fromkeys(info.novel_origin_names))}" if info.novel_origin_names else ""
+    # genres_ko가 비어있으면(과거에 만들어진 캐시 등) genres(원본 코드)로라도 대체한다 —
+    # 항상 뭐라도 나오는 게, 아무것도 안 나오는 것보다 낫다.
+    genre_display = info.genres_ko or info.genres
     return _COMICINFO_TEMPLATE.format(
         title=escape(info.title_name),
         summary=escape(info.synopsis),
         writer=escape(writer_names),
-        genre=escape(",".join(info.genres)),
+        cover_artist=escape(cover_artist_names),
+        notes=escape(notes),
+        genre=escape(",".join(genre_display)),
         tags=escape(",".join(info.tags)),
         web=escape(NAVER_SERIES_URL_TEMPLATE.format(title_id=info.title_id)),
         age_rating=escape(info.age_description),
@@ -66,12 +73,15 @@ def build_comicinfo_xml(info: TitleInfo) -> str:
 
 
 def needs_comicinfo(webtoon_dir: Path) -> bool:
-    """info.xml이나 커버 이미지 중 하나라도 없으면 True."""
+    """커버 이미지가 없으면 True (다운로드 비용이 있어서 없을 때만 다시 받음).
+    info.xml은 여기 포함하지 않는다 — 작은 텍스트 파일이라 매번 새로 쓰는 비용이
+    거의 없어서, 있든 없든 항상 최신 정보로 덮어쓰기 때문이다(write_comicinfo_file
+    호출부에서 이 함수와 별개로 매번 호출됨). 예전엔 정보가 부실하게(예: 작가 이름이
+    비어있게) 한 번 생성되면 그 상태로 영영 굳어버리는 문제가 있었는데, 그걸 막기
+    위한 설계 변경이다."""
     if not webtoon_dir.is_dir():
         return True
-    has_xml = (webtoon_dir / "info.xml").is_file()
-    has_cover = any(webtoon_dir.glob("cover.*"))
-    return not (has_xml and has_cover)
+    return not any(webtoon_dir.glob("cover.*"))
 
 
 def write_comicinfo_file(webtoon_dir: Path, info: TitleInfo) -> None:
