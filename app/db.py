@@ -1,198 +1,332 @@
 """
-SQLite 연결 관리.
+SQLite 영속 계층. 읽음 진행률, 앱 설정(검색/정렬/필터 등), 시리즈 폴더 제외 목록,
+회차 간 겹침(리캡) 캐시, 백업/복원까지 이 모듈에서만 SQL을 다룬다.
 
-id_list.txt + webtoon_state.json을 대체하는 단일 저장소. WAL 모드로 열어 동시
-읽기/쓰기 충돌을 줄이고, 쓰기 자체는 repository.py의 전역 락으로 직렬화한다
-(동시성 이슈: 스케줄러 잡과 웹 API가 동시에 같은 파일을 건드릴 수 있으므로).
+스키마 생성은 init_schema()로 앱 시작 시 한 번만 실행한다 - 예전에는 커넥션을 열 때마다
+CREATE TABLE IF NOT EXISTS를 반복 실행했는데(매 요청마다 불필요한 반복), 이제는 시작 시
+한 번만 만들고 이후에는 연결만 열고 닫는다.
 """
 
+import json
+import os
 import sqlite3
-import threading
 from contextlib import contextmanager
+from datetime import datetime
 
-from app.config import get_settings
+DB_PATH = os.environ.get("DB_PATH", "/data/progress.db")
 
-_write_lock = threading.Lock()
+# 회차의 page_index로 이 값이 저장되어 있으면 "그 회차까지 다 읽었다"는 뜻.
+# /continue 조회 시 이 값을 만나면 실제 페이지 수와 비교해 다음 화로 자동 이동시킨다.
+PAGE_FINISHED_SENTINEL = 1_000_000
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS webtoons (
-    title_id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'active',       -- active | unsubscribed | excluded
-    is_adult INTEGER NOT NULL DEFAULT 0,
-    writer_ids TEXT NOT NULL DEFAULT '[]',        -- JSON 배열
-    writer_names TEXT NOT NULL DEFAULT '[]',      -- JSON 배열 (writer_ids와 같은 순서로 대응)
-    added_source TEXT NOT NULL DEFAULT 'manual',  -- manual | artist | tag
-    last_downloaded_no INTEGER NOT NULL DEFAULT 0,
-    is_finished INTEGER NOT NULL DEFAULT 0,
-    finish_ack INTEGER NOT NULL DEFAULT 0,
-    thumbnail_url TEXT NOT NULL DEFAULT '',
-    finish_notified INTEGER NOT NULL DEFAULT 0,
-    genres TEXT NOT NULL DEFAULT '[]',            -- JSON 배열
-    tags TEXT NOT NULL DEFAULT '[]',              -- JSON 배열
-    latest_episode_no INTEGER NOT NULL DEFAULT 0, -- 마지막으로 확인한 네이버 최신 무료회차 no
-    is_paused INTEGER NOT NULL DEFAULT 0,         -- 휴재 여부
-    is_new INTEGER NOT NULL DEFAULT 0,            -- 신작 여부 (네이버 API의 'new' 필드)
-    has_update INTEGER NOT NULL DEFAULT 0,        -- UP 여부 (네이버 API의 'up' 필드, 탭과 무관하게 그대로 표시)
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT
-);
-
-CREATE TABLE IF NOT EXISTS watched_authors (
-    author_id TEXT PRIMARY KEY,
-    author_name TEXT NOT NULL DEFAULT '',
-    enabled INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS kakao_seen_titles (
-    author_name TEXT NOT NULL,
-    title_id INTEGER NOT NULL,
-    title_name TEXT NOT NULL DEFAULT '',
-    seen_at TEXT NOT NULL,
-    PRIMARY KEY (author_name, title_id)
-);
-
-CREATE TABLE IF NOT EXISTS archive_targets (
-    title_id TEXT PRIMARY KEY,
-    dest_base_path TEXT NOT NULL,
-    dest_type TEXT NOT NULL DEFAULT 'local',
-    enabled INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS archive_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title_id TEXT NOT NULL,
-    title_name TEXT NOT NULL,
-    file_name TEXT NOT NULL,
-    archived_at TEXT NOT NULL,
-    trigger_type TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_archive_history_archived_at ON archive_history(archived_at DESC);
-
-CREATE TABLE IF NOT EXISTS archive_pending_finish (
-    title_id TEXT PRIMARY KEY,
-    marked_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS watched_tags (
-    tag_id TEXT PRIMARY KEY,
-    tag_name TEXT NOT NULL DEFAULT '',
-    enabled INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS job_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_name TEXT NOT NULL,       -- discovery | download | manual | registry
-    started_at TEXT NOT NULL,
-    finished_at TEXT NOT NULL,
-    status TEXT NOT NULL,         -- success | error
-    log TEXT NOT NULL DEFAULT '[]'  -- JSON 배열 (그 실행의 로그 라인들)
-);
-CREATE INDEX IF NOT EXISTS idx_job_history_job_name ON job_history(job_name, started_at DESC);
-
-CREATE TABLE IF NOT EXISTS episode_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title_id TEXT NOT NULL,
-    title_name TEXT NOT NULL,
-    episode_no INTEGER NOT NULL,
-    subtitle TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL,            -- success | failed
-    error_msg TEXT NOT NULL DEFAULT '',
-    downloaded_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_episode_history_title ON episode_history(title_id, downloaded_at DESC);
-CREATE INDEX IF NOT EXISTS idx_episode_history_status ON episode_history(status, downloaded_at DESC);
-"""
-
-# 기존에 이미 만들어진 DB(위 스키마에 없던 컬럼이 있던 버전)를 위한 마이그레이션.
-# CREATE TABLE IF NOT EXISTS는 이미 있는 테이블의 컬럼을 추가해주지 않기 때문에 별도로 처리한다.
-_MIGRATIONS = [
-    ("webtoons", "thumbnail_url", "ALTER TABLE webtoons ADD COLUMN thumbnail_url TEXT NOT NULL DEFAULT ''"),
-    ("webtoons", "finish_notified", "ALTER TABLE webtoons ADD COLUMN finish_notified INTEGER NOT NULL DEFAULT 0"),
-    ("webtoons", "genres", "ALTER TABLE webtoons ADD COLUMN genres TEXT NOT NULL DEFAULT '[]'"),
-    ("webtoons", "tags", "ALTER TABLE webtoons ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'"),
-    ("webtoons", "latest_episode_no", "ALTER TABLE webtoons ADD COLUMN latest_episode_no INTEGER NOT NULL DEFAULT 0"),
-    ("webtoons", "is_paused", "ALTER TABLE webtoons ADD COLUMN is_paused INTEGER NOT NULL DEFAULT 0"),
-    ("webtoons", "is_new", "ALTER TABLE webtoons ADD COLUMN is_new INTEGER NOT NULL DEFAULT 0"),
-    ("webtoons", "has_update", "ALTER TABLE webtoons ADD COLUMN has_update INTEGER NOT NULL DEFAULT 0"),
-    ("webtoons", "writer_names", "ALTER TABLE webtoons ADD COLUMN writer_names TEXT NOT NULL DEFAULT '[]'"),
-    ("watched_authors", "platform", "ALTER TABLE watched_authors ADD COLUMN platform TEXT NOT NULL DEFAULT 'naver'"),
-    ("archive_targets", "dest_type", "ALTER TABLE archive_targets ADD COLUMN dest_type TEXT NOT NULL DEFAULT 'local'"),
-]
+_EXCLUDED_SERIES_SETTING_KEY = "excluded_series"
 
 
-def _apply_migrations(conn: sqlite3.Connection) -> None:
-    for table, column, alter_sql in _MIGRATIONS:
-        existing_columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-        if column not in existing_columns:
-            conn.execute(alter_sql)
-    conn.commit()
+def _utc_now_iso() -> str:
+    return datetime.utcnow().isoformat()
 
 
-def _connect() -> sqlite3.Connection:
-    settings = get_settings()
-    conn = sqlite3.connect(settings.database_path, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA foreign_keys=ON;")
-    return conn
-
-
-_connection: sqlite3.Connection | None = None
-
-
-def get_connection() -> sqlite3.Connection:
-    global _connection
-    if _connection is None:
-        _connection = _connect()
-        _connection.executescript(_SCHEMA)
-        _connection.commit()
-        _apply_migrations(_connection)
-    return _connection
+def init_schema() -> None:
+    """앱 시작 시 한 번만 호출. 테이블이 없으면 만든다."""
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS progress (
+                series_id TEXT PRIMARY KEY,
+                chapter_id TEXT NOT NULL,
+                chapter_index INTEGER NOT NULL,
+                page_index INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chapter_overlap (
+                next_chapter_id TEXT PRIMARY KEY,
+                prev_chapter_id TEXT NOT NULL,
+                skip_pages INTEGER NOT NULL,
+                computed_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS read_chapters (
+                series_id TEXT NOT NULL,
+                chapter_id TEXT NOT NULL,
+                PRIMARY KEY (series_id, chapter_id)
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 @contextmanager
-def read_lock():
-    """읽기 쿼리도 이 락으로 감싸서 실행한다. check_same_thread=False로 크로스스레드
-    접근 자체는 허용해뒀지만, 여러 스레드가 "동시에" 같은 sqlite3 Connection 객체를
-    건드리면 내부 커서 상태가 꼬여 'bad parameter or other API misuse' 에러가 실제로
-    발생했다 — 폴링이 잦은 화면(아카이빙 설정 등)에서 여러 요청이 asyncio.to_thread로
-    서로 다른 스레드에서 동시에 조회할 때 재현됨. write_transaction과 같은 락을 공유해서
-    모든 DB 접근(읽기+쓰기)을 완전히 직렬화한다 — SQLite는 로컬 파일 기반이라 이 정도
-    직렬화로 인한 성능 영향은 미미하다."""
-    with _write_lock:
-        yield get_connection()
+def db_connection():
+    """단발성 커넥션을 열고 블록이 끝나면 자동으로 닫는다.
+    init_schema()가 이미 테이블을 만들어뒀다고 가정한다."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
-def fetchone(query: str, params: tuple = ()) -> sqlite3.Row | None:
-    with read_lock() as conn:
-        return conn.execute(query, params).fetchone()
+# ---------------------------------------------------------------------------
+# 읽음 진행률
+# ---------------------------------------------------------------------------
 
 
-def fetchall(query: str, params: tuple = ()) -> list[sqlite3.Row]:
-    with read_lock() as conn:
-        return conn.execute(query, params).fetchall()
+def get_progress(series_id: str) -> dict | None:
+    with db_connection() as conn:
+        row = conn.execute(
+            "SELECT chapter_id, chapter_index, page_index FROM progress WHERE series_id = ?",
+            (series_id,),
+        ).fetchone()
+    if not row:
+        return None
+    return {"chapter_id": row[0], "chapter_index": row[1], "page_index": row[2]}
 
 
-@contextmanager
-def write_transaction():
-    """쓰기 작업은 전부 이 컨텍스트를 통해서만 수행한다 (레이스 컨디션 방지)."""
-    with _write_lock:
-        conn = get_connection()
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
+def set_progress(series_id: str, chapter_id: str, chapter_index: int, page_index: int) -> None:
+    with db_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO progress (series_id, chapter_id, chapter_index, page_index, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(series_id) DO UPDATE SET
+                chapter_id = excluded.chapter_id,
+                chapter_index = excluded.chapter_index,
+                page_index = excluded.page_index,
+                updated_at = excluded.updated_at
+            """,
+            (series_id, chapter_id, chapter_index, page_index, _utc_now_iso()),
+        )
+        conn.commit()
+
+
+def delete_progress(series_id: str) -> None:
+    with db_connection() as conn:
+        conn.execute("DELETE FROM progress WHERE series_id = ?", (series_id,))
+        conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# 회차별 명시적 읽음 기록
+#
+# "몇 번째까지 읽었다"는 인덱스 하나로 뭉뚱그리면, 나중에 빠졌던 회차가 사이사이에
+# 채워질 때 "그 시점의 경계선보다 앞이니 이미 읽은 것"이라고 잘못 취급해버리는 문제가
+# 있다 (실제로는 한 번도 안 본 회차인데도). 그래서 회차 하나하나를 chapter_id로
+# 명시적으로 기록해서, 나중에 순서가 바뀌거나 사이에 새 회차가 끼어들어도 그 회차
+# 자체의 읽음 여부는 흔들리지 않게 한다.
+# ---------------------------------------------------------------------------
+
+
+def get_read_chapter_ids(series_id: str) -> set[str]:
+    with db_connection() as conn:
+        rows = conn.execute(
+            "SELECT chapter_id FROM read_chapters WHERE series_id = ?", (series_id,)
+        ).fetchall()
+    return {row[0] for row in rows}
+
+
+def mark_chapters_read(series_id: str, chapter_ids: list[str]) -> None:
+    if not chapter_ids:
+        return
+    with db_connection() as conn:
+        conn.executemany(
+            "INSERT OR IGNORE INTO read_chapters (series_id, chapter_id) VALUES (?, ?)",
+            [(series_id, chapter_id) for chapter_id in chapter_ids],
+        )
+        conn.commit()
+
+
+def mark_chapters_unread(series_id: str, chapter_ids: list[str]) -> None:
+    if not chapter_ids:
+        return
+    with db_connection() as conn:
+        conn.executemany(
+            "DELETE FROM read_chapters WHERE series_id = ? AND chapter_id = ?",
+            [(series_id, chapter_id) for chapter_id in chapter_ids],
+        )
+        conn.commit()
+
+
+def clear_all_read_chapters(series_id: str) -> None:
+    with db_connection() as conn:
+        conn.execute("DELETE FROM read_chapters WHERE series_id = ?", (series_id,))
+        conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# 앱 설정 (검색/정렬/필터 등 기기 간 동일하게 유지할 값)
+# ---------------------------------------------------------------------------
+
+
+def get_setting(key: str, default=None):
+    with db_connection() as conn:
+        row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+    return row[0] if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with db_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_settings (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
+        conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# 시리즈 폴더 스캔 제외 목록 (플랫폼 폴더 안에 웹툰 아닌 폴더가 섞여 있을 때
+# 특정 폴더만 스캔에서 뺐다가 다시 넣을 수 있게 함. 실제 파일은 절대 건드리지 않음)
+# ---------------------------------------------------------------------------
+
+
+def get_excluded_series() -> set[tuple[str, str]]:
+    """제외된 (platform, series_name) 튜플 집합."""
+    raw = get_setting(_EXCLUDED_SERIES_SETTING_KEY)
+    if not raw:
+        return set()
+    try:
+        data = json.loads(raw)
+        return {(item["platform"], item["series"]) for item in data if "platform" in item and "series" in item}
+    except Exception:
+        return set()
+
+
+def set_excluded_series(pairs: set[tuple[str, str]]) -> None:
+    data = [{"platform": p, "series": s} for p, s in sorted(pairs)]
+    set_setting(_EXCLUDED_SERIES_SETTING_KEY, json.dumps(data, ensure_ascii=False))
+
+
+# ---------------------------------------------------------------------------
+# 회차 간 겹침(리캡) 캐시
+# ---------------------------------------------------------------------------
+
+
+def get_cached_overlap(next_chapter_id: str) -> int | None:
+    with db_connection() as conn:
+        row = conn.execute(
+            "SELECT skip_pages FROM chapter_overlap WHERE next_chapter_id = ?",
+            (next_chapter_id,),
+        ).fetchone()
+    return row[0] if row else None
+
+
+def set_cached_overlap(next_chapter_id: str, prev_chapter_id: str, skip_pages: int) -> None:
+    with db_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO chapter_overlap (next_chapter_id, prev_chapter_id, skip_pages, computed_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(next_chapter_id) DO UPDATE SET
+                prev_chapter_id = excluded.prev_chapter_id,
+                skip_pages = excluded.skip_pages,
+                computed_at = excluded.computed_at
+            """,
+            (next_chapter_id, prev_chapter_id, skip_pages, _utc_now_iso()),
+        )
+        conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# 백업 / 복원 (여러 행을 한 트랜잭션으로 다루는 벌크 작업이라 raw 커넥션을 직접 씀)
+# ---------------------------------------------------------------------------
+
+
+def export_backup_data() -> dict:
+    with db_connection() as conn:
+        progress_rows = conn.execute(
+            "SELECT series_id, chapter_id, chapter_index, page_index, updated_at FROM progress"
+        ).fetchall()
+        settings_rows = conn.execute("SELECT key, value FROM app_settings").fetchall()
+        read_rows = conn.execute("SELECT series_id, chapter_id FROM read_chapters").fetchall()
+    return {
+        "progress": [
+            {
+                "series_id": row[0],
+                "chapter_id": row[1],
+                "chapter_index": row[2],
+                "page_index": row[3],
+                "updated_at": row[4],
+            }
+            for row in progress_rows
+        ],
+        "app_settings": [{"key": row[0], "value": row[1]} for row in settings_rows],
+        "read_chapters": [{"series_id": row[0], "chapter_id": row[1]} for row in read_rows],
+    }
+
+
+def import_backup_data(progress_rows: list, settings_rows: list, read_chapter_rows: list | None = None) -> tuple[int, int, int]:
+    """기존 progress/app_settings/read_chapters를 전부 지우고 주어진 내용으로 교체.
+    반환값은 (저장된 progress 건수, 저장된 settings 건수, 저장된 read_chapters 건수)."""
+    read_chapter_rows = read_chapter_rows or []
+    progress_count = 0
+    settings_count = 0
+    read_count = 0
+    with db_connection() as conn:
+        conn.execute("DELETE FROM progress")
+        conn.execute("DELETE FROM app_settings")
+        conn.execute("DELETE FROM read_chapters")
+
+        for row in progress_rows:
+            series_id = row.get("series_id")
+            chapter_id = row.get("chapter_id")
+            if not series_id or not chapter_id:
+                continue
+            conn.execute(
+                """
+                INSERT INTO progress (series_id, chapter_id, chapter_index, page_index, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    series_id,
+                    chapter_id,
+                    int(row.get("chapter_index", 0)),
+                    int(row.get("page_index", 0)),
+                    row.get("updated_at") or _utc_now_iso(),
+                ),
+            )
+            progress_count += 1
+
+        for row in settings_rows:
+            key = row.get("key")
+            if not key:
+                continue
+            conn.execute(
+                "INSERT INTO app_settings (key, value) VALUES (?, ?)",
+                (key, row.get("value", "")),
+            )
+            settings_count += 1
+
+        for row in read_chapter_rows:
+            series_id = row.get("series_id")
+            chapter_id = row.get("chapter_id")
+            if not series_id or not chapter_id:
+                continue
+            conn.execute(
+                "INSERT OR IGNORE INTO read_chapters (series_id, chapter_id) VALUES (?, ?)",
+                (series_id, chapter_id),
+            )
+            read_count += 1
+
+        conn.commit()
+    return progress_count, settings_count, read_count
