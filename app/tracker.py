@@ -342,6 +342,28 @@ async def resync_registry(session: aiohttp.ClientSession, settings: Settings) ->
     return sum(1 for r in results if r)
 
 
+async def _add_discovered_titles(
+    session: aiohttp.ClientSession, settings: Settings, others: list[dict], enabled_author_ids: set[str]
+) -> list[tuple[str, str]]:
+    """'작가의 다른 작품' 목록에서, 아직 안 지워지고 완결도 아니고 등록된 작가 역할이
+    맞는 것만 새로 구독 추가한다. 새로 추가된 (title_id, title_name) 리스트(로그용)를 반환한다."""
+    added = []
+    for other in others:
+        other_title_id = str(other.get("titleId", ""))
+        if not other_title_id or repository.exists(other_title_id):
+            continue
+        if not _matches_enabled_writer(other, enabled_author_ids):
+            continue  # 등록 해제된 작가이거나 그림작가만 겹치는 작품은 제외
+        if await _is_other_finished(session, other, other_title_id, settings):
+            continue  # 이미 완결된 작품은 신규로 추가하지 않음
+
+        other_title_name = other.get("titleName", "")
+        repository.upsert_new(title_id=other_title_id, title=other_title_name, added_source=repository.SOURCE_ARTIST)
+        await enrich_one(session, other_title_id, settings)  # writer_ids/tags 없이 들어가는 것 방지
+        added.append((other_title_id, other_title_name))
+    return added
+
+
 async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, settings: Settings) -> None:
     """구독 중인(status=active) 모든 웹툰의 완결/휴재/장르 갱신 + 등록된 작가 신작 자동추가."""
     active_webtoons = repository.list_by_status(repository.STATUS_ACTIVE)
@@ -378,28 +400,60 @@ async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, setting
             repository.upsert_watched_author(writer_id, writer_name, enabled=True)
 
         enabled_author_ids = repository.get_enabled_author_ids()
-
-        for other in others:
-            other_title_id = str(other.get("titleId", ""))
-            if not other_title_id or repository.exists(other_title_id):
-                continue
-            if not _matches_enabled_writer(other, enabled_author_ids):
-                continue  # 등록 해제된 작가이거나 그림작가만 겹치는 작품은 제외
-            if await _is_other_finished(session, other, other_title_id, settings):
-                continue  # 이미 완결된 작품은 신규로 추가하지 않음
-
-            other_title_name = other.get("titleName", "")
-            repository.upsert_new(
-                title_id=other_title_id,
-                title=other_title_name,
-                added_source=repository.SOURCE_ARTIST,
-            )
-            await enrich_one(session, other_title_id, settings)  # writer_ids/tags 없이 들어가는 것 방지
-            new_entry_lines.append(f"- {other_title_name} (`{other_title_id}`)")
+        added = await _add_discovered_titles(session, settings, others, enabled_author_ids)
+        new_entry_lines.extend(f"- {name} (`{tid}`)" for tid, name in added)
 
     if new_entry_lines:
         message = "🆕 **작가 신작 자동 추가**\n" + "\n".join(new_entry_lines)
         await send_webhook_notification(session, settings, message)
+
+
+async def discover_titles_for_unlinked_watched_authors(session: aiohttp.ClientSession, settings: Settings) -> list[str]:
+    """등록된 작가 신작 자동추가는 원래 "구독 중인 작품을 스캔하면서 그 작가의 다른
+    작품을 같이 조회"하는 방식이라, 그 작가의 작품을 하나도 구독하고 있지 않으면
+    (오랫동안 활동이 없던 작가를 등록해둔 경우 등) 전혀 트리거되지 않는 문제가 있었다.
+
+    이 함수는 등록된 작가 전부를 대상으로 이름으로 다시 검색해서, 정확히 같은
+    author_id를 가진 작품을 하나(anchor) 찾은 뒤, 거기서부터 "다른 작품" 목록을
+    가져와 동일한 조건으로 자동 구독한다 — 구독 여부와 무관하게 항상 동작한다.
+    새로 추가된 작품의 "- 제목 (`id`)" 로그 줄 리스트를 반환한다."""
+    authors = [a for a in repository.list_watched_authors() if a.enabled]
+    if not authors:
+        return []
+
+    enabled_author_ids = repository.get_enabled_author_ids()
+    new_entry_lines: list[str] = []
+
+    for author in authors:
+        try:
+            search_results = await naver_api.search_webtoons(session, author.author_name, settings.request_timeout_seconds)
+        except Exception as e:
+            log.error("작가 재검색 중 예외 (author_id=%s): %s", author.author_id, e)
+            continue
+
+        anchor_title_id = None
+        for item in search_results:
+            if any(aid == author.author_id for aid, _name in item.author_ids_names):
+                anchor_title_id = item.title_id
+                break
+        if anchor_title_id is None:
+            continue  # 이 작가로 검색해도 작품을 못 찾음 — 이름이 바뀌었거나 활동이 뜸한 경우
+
+        try:
+            others = await naver_api.fetch_other_titles_by_artist(session, anchor_title_id, settings.request_timeout_seconds)
+        except Exception as e:
+            log.error("작가의 다른 작품 조회 중 예외 (author_id=%s): %s", author.author_id, e)
+            others = []
+
+        added = await _add_discovered_titles(session, settings, others, enabled_author_ids)
+        new_entry_lines.extend(f"- {name} (`{tid}`)" for tid, name in added)
+        await asyncio.sleep(settings.delay_seconds)
+
+    if new_entry_lines:
+        message = "🆕 **작가 신작 자동 추가 (미구독 작가)**\n" + "\n".join(new_entry_lines)
+        await send_webhook_notification(session, settings, message)
+
+    return new_entry_lines
 
 
 async def scan_curation_tags(session: aiohttp.ClientSession, settings: Settings) -> None:

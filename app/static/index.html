@@ -393,12 +393,20 @@
           <option value="rename">이름 바꿔서 저장</option>
         </select>
       </div>
+      <button id="btn-save-archive-settings">저장</button>
+      <span id="archive-settings-save-result" class="hint-inline"></span>
 
       <div class="field-group">
-        <label for="archive-filename-template">파일명 변경 템플릿 (회차 zip 파일에만 적용, 비워두면 원본 파일명 그대로)</label>
-        <p class="hint">아래 토큰 버튼을 눌러 원하는 순서로 자유롭게 조합하세요. 토큰 사이에 원하는 글자(구분자 등)를 직접 입력할 수 있습니다.
-        확장자(.zip)는 자동으로 붙습니다. 폴더 일괄 이동과 info.xml/커버 이미지에는 적용되지 않습니다(회차 개념이 없어서).
+        <label>파일명 변경 프리셋 (회차 zip 파일에만 적용, 비워두면 원본 파일명 그대로)</label>
+        <p class="hint">여러 스타일을 저장해두고, 아래 "아카이빙 대상"에서 웹툰/폴더마다 골라 적용할 수 있습니다.
+        토큰 사이에 원하는 글자(구분자 등)를 직접 입력할 수 있고, 확장자(.zip)는 자동으로 붙습니다.
+        폴더 일괄 이동과 info.xml/커버 이미지에는 적용되지 않습니다(회차 개념이 없어서).
         파일명 구조를 알아볼 수 없는 파일(수동으로 넣은 파일 등)은 이 설정과 무관하게 원본 파일명 그대로 이동됩니다.</p>
+        <div class="registry-add-row">
+          <select id="archive-preset-select"></select>
+          <button id="btn-new-preset" type="button">새 프리셋</button>
+          <button id="btn-delete-preset" type="button">삭제</button>
+        </div>
         <div id="archive-filename-template-tokens" class="token-button-row">
           <button type="button" class="token-btn" data-token="{title}">웹툰명</button>
           <button type="button" class="token-btn" data-token="{episode_no}">회차</button>
@@ -410,28 +418,54 @@
         <label class="field-label" style="margin-top: 10px;">이 웹툰의 실제 파일로 미리보기</label>
         <select id="archive-filename-template-preview-title"></select>
         <p id="archive-filename-template-preview" class="hint-inline"></p>
+        <button id="btn-save-preset" style="margin-top: 8px;">이 프리셋 저장</button>
+        <span id="archive-preset-save-result" class="hint-inline"></span>
       </div>
-
-      <button id="btn-save-archive-settings">저장</button>
-      <span id="archive-settings-save-result" class="hint-inline"></span>
     </div>
 
     <div class="settings-card">
-      <h2>아카이빙 대상 웹툰</h2>
-      <p class="hint">지정한 웹툰은 정해진 주기마다(마지막 회차는 남기고) 아래 그릇 폴더로 옮겨집니다.
-      여러 웹툰이 같은 그릇 폴더를 고르면 자동으로 웹툰별 폴더로 나뉘고, 하나만 쓰면 그릇 폴더 바로 밑에 쌓입니다.</p>
-      <label class="field-label">1. 웹툰 선택</label>
+      <h2>아카이빙 대상</h2>
+      <p class="hint">지정한 대상은 정해진 주기마다(마지막 회차는 남기고) 아래 그릇 폴더로 옮겨집니다. 웹툰은 다운로드 폴더에서,
+      폴더는 지정한 원본 경로에서 가져옵니다. 여러 대상이 같은 그릇 폴더를 고르면 자동으로 대상별 폴더로 나뉘고,
+      하나만 쓰면 그릇 폴더 바로 밑에 쌓입니다.</p>
+
+      <div class="archive-target-type-tabs">
+        <button type="button" class="archive-target-type-tab active" data-type="webtoon">웹툰으로 등록</button>
+        <button type="button" class="archive-target-type-tab" data-type="folder">폴더로 등록</button>
+      </div>
+
       <div id="archive-target-edit-banner" class="hidden archive-edit-banner">
         <span id="archive-target-edit-banner-text"></span>
         <button id="btn-cancel-archive-edit">취소</button>
       </div>
-      <div class="registry-add-row">
-        <select id="archive-target-webtoon-select"></select>
+
+      <div id="archive-target-webtoon-panel">
+        <label class="field-label">1. 웹툰 선택</label>
+        <div class="registry-add-row">
+          <select id="archive-target-webtoon-select"></select>
+        </div>
+        <label class="field-label">2. 보관할 폴더 선택</label>
+        <div id="archive-target-folder-picker"></div>
+        <button id="btn-add-archive-target" style="margin-top: 8px;">등록</button>
+        <span id="archive-target-add-result" class="hint-inline"></span>
       </div>
-      <label class="field-label">2. 보관할 폴더 선택</label>
-      <div id="archive-target-folder-picker"></div>
-      <button id="btn-add-archive-target" style="margin-top: 8px;">등록</button>
-      <span id="archive-target-add-result" class="hint-inline"></span>
+
+      <div id="archive-target-folder-panel" class="hidden">
+        <label class="field-label">이름 (비우면 원본 폴더명 자동 사용)</label>
+        <input id="archive-folder-target-display-name" type="text" placeholder="예: 여신강림" />
+        <label class="field-label" style="margin-top: 10px;">1. 원본 폴더 선택</label>
+        <div id="archive-folder-target-source-picker"></div>
+        <label class="field-label" style="margin-top: 10px;">2. 보관할 폴더 선택</label>
+        <div id="archive-folder-target-dest-picker"></div>
+        <button id="btn-add-folder-archive-target" style="margin-top: 8px;">등록</button>
+        <span id="archive-folder-target-add-result" class="hint-inline"></span>
+      </div>
+
+      <div id="archive-target-bulk-bar" class="hidden archive-target-bulk-bar">
+        <span id="archive-target-bulk-count"></span>
+        <select id="archive-target-bulk-preset-select"></select>
+        <button id="btn-apply-preset-to-selected">적용</button>
+      </div>
       <div id="archive-target-list" class="job-history-list job-history-list-compact" style="margin-top: 14px;"></div>
     </div>
 

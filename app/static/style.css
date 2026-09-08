@@ -156,6 +156,57 @@ select {
 .token-btn:hover {
   background: var(--border);
 }
+.archive-target-type-tabs {
+  display: flex;
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius);
+  width: fit-content;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.archive-target-type-tab {
+  padding: 7px 16px;
+  font-size: 13px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.archive-target-type-tab + .archive-target-type-tab {
+  border-left: 0.5px solid var(--border);
+}
+.archive-target-type-tab.active {
+  background: var(--surface-alt, #f1f1f1);
+  color: var(--text);
+  font-weight: 600;
+}
+.archive-target-bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-accent-muted, #eef4ff);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  margin-top: 10px;
+}
+.archive-target-bulk-bar select {
+  flex: 1;
+  max-width: 200px;
+}
+.archive-target-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.archive-target-preset-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-alt, #f1f1f1);
+  color: var(--muted);
+  white-space: nowrap;
+}
 #archive-filename-template {
   width: 100%;
   padding: 8px 10px;

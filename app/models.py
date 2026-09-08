@@ -110,3 +110,15 @@ class ArchiveTarget:
     dest_base_path: str
     enabled: bool
     dest_type: str = "local"
+    source_type: str = "webtoon"  # webtoon | folder
+    source_dest_type: str = "local"  # folder 대상의 원본 위치 종류
+    source_path: str = ""  # folder 대상의 원본 경로
+    display_name: str = ""  # folder 대상의 표시 이름 (비우면 원본 폴더명 사용)
+    filename_template_preset_id: int | None = None  # None이면 "기본(전역)" 프리셋 사용
+
+
+@dataclass
+class FilenameTemplatePreset:
+    id: int
+    name: str
+    template: str

@@ -539,6 +539,15 @@ async def _run_discovery_job_impl() -> None:
             job_status.log_line("discovery", f"작가 기반 신작 스캔 오류: {e}")
 
         try:
+            job_status.log_line("discovery", "미구독 작가 신작 스캔 시작")
+            added = await tracker.discover_titles_for_unlinked_watched_authors(session, settings)
+            job_status.log_line("discovery", f"미구독 작가 신작 스캔 완료 ({len(added)}건 추가)")
+        except Exception as e:
+            had_error = True
+            log.error("미구독 작가 신작 스캔 중 예외: %s", e)
+            job_status.log_line("discovery", f"미구독 작가 신작 스캔 오류: {e}")
+
+        try:
             job_status.log_line("discovery", "태그 기반 신작 스캔 시작")
             await tracker.scan_curation_tags(session, settings)
             job_status.log_line("discovery", "태그 기반 신작 스캔 완료")

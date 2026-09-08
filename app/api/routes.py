@@ -1084,6 +1084,11 @@ class ArchiveTargetOut(BaseModel):
     dest_type: str
     enabled: bool
     folder_had_existing_files: bool = False
+    source_type: str = "webtoon"
+    source_dest_type: str = "local"
+    source_path: str = ""
+    filename_template_preset_id: int | None = None
+    filename_template_preset_name: str | None = None  # None이면 "기본(전역)"
 
 
 class ArchiveTargetIn(BaseModel):
@@ -1099,14 +1104,49 @@ class ArchiveTargetIn(BaseModel):
         return v
 
 
+class FolderArchiveTargetIn(BaseModel):
+    display_name: str = ""  # 비우면 원본 폴더명 자동 사용
+    source_dest_type: str = "local"
+    source_path: str
+    dest_base_path: str
+    dest_type: str = "local"
+
+    @field_validator("source_dest_type", "dest_type")
+    @classmethod
+    def valid_type(cls, v: str) -> str:
+        if v not in ("local", "rclone"):
+            raise ValueError("local/rclone 중 하나여야 합니다.")
+        return v
+
+
+class ApplyPresetIn(BaseModel):
+    target_ids: list[str]
+    preset_id: int | None = None  # None이면 "기본(전역)"으로 되돌림
+
+
 def _archive_target_to_out(target) -> ArchiveTargetOut:
-    wt = repository.get(target.title_id)
+    if target.source_type == "folder":
+        title_name = target.display_name or archiver._derive_folder_display_name(
+            target.source_dest_type, target.source_path
+        )
+    else:
+        wt = repository.get(target.title_id)
+        title_name = wt.title if wt else target.title_id
+    preset_name = None
+    if target.filename_template_preset_id is not None:
+        preset = repository.get_filename_template_preset(target.filename_template_preset_id)
+        preset_name = preset.name if preset else None
     return ArchiveTargetOut(
         title_id=target.title_id,
-        title_name=wt.title if wt else target.title_id,
+        title_name=title_name,
         dest_base_path=target.dest_base_path,
         dest_type=target.dest_type,
         enabled=target.enabled,
+        source_type=target.source_type,
+        source_dest_type=target.source_dest_type,
+        source_path=target.source_path,
+        filename_template_preset_id=target.filename_template_preset_id,
+        filename_template_preset_name=preset_name,
     )
 
 
@@ -1143,6 +1183,55 @@ async def add_archive_target(payload: ArchiveTargetIn):
     return out
 
 
+@router.post("/archive/folder-targets", response_model=ArchiveTargetOut)
+async def add_folder_archive_target(payload: FolderArchiveTargetIn):
+    """웹툰 레코드가 없는 폴더(카카오웹툰 등)를 아카이빙 대상으로 등록한다."""
+    settings = get_settings()
+    if payload.source_dest_type == "rclone" and not (
+        settings.rclone_config_path and Path(settings.rclone_config_path).is_file()
+    ):
+        raise HTTPException(status_code=400, detail="rclone 설정 파일이 등록되어 있지 않습니다.")
+    if payload.dest_type == "rclone" and not (
+        settings.rclone_config_path and Path(settings.rclone_config_path).is_file()
+    ):
+        raise HTTPException(status_code=400, detail="rclone 설정 파일이 등록되어 있지 않습니다.")
+    if payload.dest_type == "local" and not settings.archive_root:
+        raise HTTPException(status_code=400, detail="로컬 아카이빙 경로(ARCHIVE_ROOT)가 설정되어 있지 않습니다.")
+
+    target_id = await asyncio.to_thread(
+        repository.create_folder_archive_target,
+        payload.display_name, payload.source_dest_type, payload.source_path,
+        payload.dest_base_path, payload.dest_type,
+    )
+    target = await asyncio.to_thread(repository.get_archive_target, target_id)
+    return _archive_target_to_out(target)
+
+
+@router.post("/archive/folder-targets/{target_id}", response_model=ArchiveTargetOut)
+async def update_folder_archive_target(target_id: str, payload: FolderArchiveTargetIn):
+    existing = await asyncio.to_thread(repository.get_archive_target, target_id)
+    if existing is None or existing.source_type != "folder":
+        raise HTTPException(status_code=404, detail="등록된 폴더 대상이 아닙니다.")
+    await asyncio.to_thread(
+        repository.update_folder_archive_target,
+        target_id, payload.display_name, payload.source_dest_type, payload.source_path,
+        payload.dest_base_path, payload.dest_type,
+    )
+    target = await asyncio.to_thread(repository.get_archive_target, target_id)
+    return _archive_target_to_out(target)
+
+
+@router.post("/archive/targets/apply-preset")
+async def apply_filename_preset_to_targets(payload: ApplyPresetIn):
+    if payload.preset_id is not None:
+        preset = await asyncio.to_thread(repository.get_filename_template_preset, payload.preset_id)
+        if preset is None:
+            raise HTTPException(status_code=404, detail="존재하지 않는 프리셋입니다.")
+    for target_id in payload.target_ids:
+        await asyncio.to_thread(repository.set_archive_target_filename_preset, target_id, payload.preset_id)
+    return {"status": "applied", "count": len(payload.target_ids)}
+
+
 @router.post("/archive/targets/{title_id}/enable", response_model=ArchiveTargetOut)
 async def enable_archive_target(title_id: str):
     await asyncio.to_thread(repository.set_archive_target_enabled, title_id, True)
@@ -1164,6 +1253,56 @@ async def disable_archive_target(title_id: str):
 @router.delete("/archive/targets/{title_id}")
 async def remove_archive_target(title_id: str):
     await asyncio.to_thread(repository.delete_archive_target, title_id)
+    return {"status": "deleted"}
+
+
+class FilenamePresetOut(BaseModel):
+    id: int
+    name: str
+    template: str
+
+
+class FilenamePresetIn(BaseModel):
+    name: str
+    template: str = ""
+
+    @field_validator("template")
+    @classmethod
+    def valid_template_tokens(cls, v: str) -> str:
+        allowed = {"{title}", "{episode_no}", "{subtitle}", "{page_count}", "{author}"}
+        found = re.findall(r"\{[^{}]*\}", v)
+        unknown = [tok for tok in found if tok not in allowed]
+        if unknown:
+            raise ValueError(f"알 수 없는 템플릿 토큰: {', '.join(unknown)} (사용 가능: {', '.join(sorted(allowed))})")
+        return v
+
+
+@router.get("/archive/presets", response_model=list[FilenamePresetOut])
+async def list_filename_presets():
+    presets = await asyncio.to_thread(repository.list_filename_template_presets)
+    return [FilenamePresetOut(id=p.id, name=p.name, template=p.template) for p in presets]
+
+
+@router.post("/archive/presets", response_model=FilenamePresetOut)
+async def create_filename_preset(payload: FilenamePresetIn):
+    if not payload.name.strip():
+        raise HTTPException(status_code=400, detail="프리셋 이름을 입력하세요.")
+    preset_id = await asyncio.to_thread(repository.create_filename_template_preset, payload.name.strip(), payload.template)
+    return FilenamePresetOut(id=preset_id, name=payload.name.strip(), template=payload.template)
+
+
+@router.post("/archive/presets/{preset_id}", response_model=FilenamePresetOut)
+async def update_filename_preset(preset_id: int, payload: FilenamePresetIn):
+    existing = await asyncio.to_thread(repository.get_filename_template_preset, preset_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="존재하지 않는 프리셋입니다.")
+    await asyncio.to_thread(repository.update_filename_template_preset, preset_id, payload.name.strip(), payload.template)
+    return FilenamePresetOut(id=preset_id, name=payload.name.strip(), template=payload.template)
+
+
+@router.delete("/archive/presets/{preset_id}")
+async def delete_filename_preset(preset_id: int):
+    await asyncio.to_thread(repository.delete_filename_template_preset, preset_id)
     return {"status": "deleted"}
 
 

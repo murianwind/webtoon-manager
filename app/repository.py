@@ -10,7 +10,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from app.db import fetchall, fetchone, read_lock, write_transaction
-from app.models import ArchiveTarget, WatchedAuthor, WatchedTag, WebtoonRecord
+from app.models import ArchiveTarget, FilenameTemplatePreset, WatchedAuthor, WatchedTag, WebtoonRecord
 
 STATUS_ACTIVE = "active"
 STATUS_UNSUBSCRIBED = "unsubscribed"
@@ -343,32 +343,33 @@ def add_seen_kakao_title(author_name: str, title_id: int, title_name: str) -> No
         )
 
 
-# ── archive_targets (아카이빙 대상 웹툰 + 목적지 그릇 폴더) ──────────────
+# ── archive_targets (아카이빙 대상 웹툰/폴더 + 목적지 그릇 폴더) ──────────────
+
+def _row_to_archive_target(r) -> ArchiveTarget:
+    return ArchiveTarget(
+        title_id=r["title_id"], dest_base_path=r["dest_base_path"], enabled=bool(r["enabled"]),
+        dest_type=r["dest_type"], source_type=r["source_type"], source_dest_type=r["source_dest_type"],
+        source_path=r["source_path"], display_name=r["display_name"],
+        filename_template_preset_id=r["filename_template_preset_id"],
+    )
+
 
 def list_archive_targets() -> list[ArchiveTarget]:
     """최근 등록한 게 위로 오도록 정렬한다 — 예전엔 title_id(작품 고유번호) 순이라
     등록 순서와 무관하게 뒤죽박죽으로 보였다."""
     rows = fetchall("SELECT * FROM archive_targets ORDER BY created_at DESC")
-    return [
-        ArchiveTarget(
-            title_id=r["title_id"], dest_base_path=r["dest_base_path"], enabled=bool(r["enabled"]),
-            dest_type=r["dest_type"],
-        )
-        for r in rows
-    ]
+    return [_row_to_archive_target(r) for r in rows]
 
 
 def get_archive_target(title_id: str) -> ArchiveTarget | None:
     row = fetchone("SELECT * FROM archive_targets WHERE title_id = ?", (title_id,))
     if row is None:
         return None
-    return ArchiveTarget(
-        title_id=row["title_id"], dest_base_path=row["dest_base_path"], enabled=bool(row["enabled"]),
-        dest_type=row["dest_type"],
-    )
+    return _row_to_archive_target(row)
 
 
 def upsert_archive_target(title_id: str, dest_base_path: str, enabled: bool = True, dest_type: str = "local") -> None:
+    """웹툰 대상 등록/수정 — source_type은 항상 'webtoon'."""
     now = _now()
     with write_transaction() as conn:
         existing = conn.execute("SELECT 1 FROM archive_targets WHERE title_id = ?", (title_id,)).fetchone()
@@ -379,10 +380,41 @@ def upsert_archive_target(title_id: str, dest_base_path: str, enabled: bool = Tr
             )
         else:
             conn.execute(
-                "INSERT INTO archive_targets (title_id, dest_base_path, dest_type, enabled, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO archive_targets (title_id, dest_base_path, dest_type, enabled, source_type, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, 'webtoon', ?, ?)",
                 (title_id, dest_base_path, dest_type, int(enabled), now, now),
             )
+
+
+def create_folder_archive_target(
+    display_name: str, source_dest_type: str, source_path: str, dest_base_path: str, dest_type: str = "local",
+    enabled: bool = True,
+) -> str:
+    """폴더-폴더 대상 등록 (카카오웹툰처럼 웹툰 레코드가 없는 폴더용). 새로 생성한
+    합성 id(title_id 자리)를 반환한다."""
+    import uuid
+
+    target_id = f"folder_{uuid.uuid4().hex[:12]}"
+    now = _now()
+    with write_transaction() as conn:
+        conn.execute(
+            "INSERT INTO archive_targets "
+            "(title_id, dest_base_path, dest_type, enabled, source_type, source_dest_type, source_path, display_name, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, 'folder', ?, ?, ?, ?, ?)",
+            (target_id, dest_base_path, dest_type, int(enabled), source_dest_type, source_path, display_name, now, now),
+        )
+    return target_id
+
+
+def update_folder_archive_target(
+    target_id: str, display_name: str, source_dest_type: str, source_path: str, dest_base_path: str, dest_type: str
+) -> None:
+    with write_transaction() as conn:
+        conn.execute(
+            "UPDATE archive_targets SET display_name = ?, source_dest_type = ?, source_path = ?, "
+            "dest_base_path = ?, dest_type = ?, updated_at = ? WHERE title_id = ? AND source_type = 'folder'",
+            (display_name, source_dest_type, source_path, dest_base_path, dest_type, _now(), target_id),
+        )
 
 
 def set_archive_target_enabled(title_id: str, enabled: bool) -> None:
@@ -393,9 +425,59 @@ def set_archive_target_enabled(title_id: str, enabled: bool) -> None:
         )
 
 
+def set_archive_target_filename_preset(title_id: str, preset_id: int | None) -> None:
+    with write_transaction() as conn:
+        conn.execute(
+            "UPDATE archive_targets SET filename_template_preset_id = ?, updated_at = ? WHERE title_id = ?",
+            (preset_id, _now(), title_id),
+        )
+
+
 def delete_archive_target(title_id: str) -> None:
     with write_transaction() as conn:
         conn.execute("DELETE FROM archive_targets WHERE title_id = ?", (title_id,))
+
+
+# ── filename_template_presets (파일명 변경 템플릿 프리셋) ──────────────────
+
+def list_filename_template_presets() -> list[FilenameTemplatePreset]:
+    rows = fetchall("SELECT * FROM filename_template_presets ORDER BY created_at ASC")
+    return [FilenameTemplatePreset(id=r["id"], name=r["name"], template=r["template"]) for r in rows]
+
+
+def get_filename_template_preset(preset_id: int) -> FilenameTemplatePreset | None:
+    row = fetchone("SELECT * FROM filename_template_presets WHERE id = ?", (preset_id,))
+    if row is None:
+        return None
+    return FilenameTemplatePreset(id=row["id"], name=row["name"], template=row["template"])
+
+
+def create_filename_template_preset(name: str, template: str) -> int:
+    now = _now()
+    with write_transaction() as conn:
+        cursor = conn.execute(
+            "INSERT INTO filename_template_presets (name, template, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            (name, template, now, now),
+        )
+        return cursor.lastrowid
+
+
+def update_filename_template_preset(preset_id: int, name: str, template: str) -> None:
+    with write_transaction() as conn:
+        conn.execute(
+            "UPDATE filename_template_presets SET name = ?, template = ?, updated_at = ? WHERE id = ?",
+            (name, template, _now(), preset_id),
+        )
+
+
+def delete_filename_template_preset(preset_id: int) -> None:
+    """이 프리셋을 쓰던 대상들은 삭제 후 자동으로 '기본(전역)'으로 돌아간다(NULL로)."""
+    with write_transaction() as conn:
+        conn.execute(
+            "UPDATE archive_targets SET filename_template_preset_id = NULL WHERE filename_template_preset_id = ?",
+            (preset_id,),
+        )
+        conn.execute("DELETE FROM filename_template_presets WHERE id = ?", (preset_id,))
 
 
 def count_archive_targets_with_base_path(dest_base_path: str, dest_type: str = "local") -> int:

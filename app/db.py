@@ -60,10 +60,23 @@ CREATE TABLE IF NOT EXISTS kakao_seen_titles (
 );
 
 CREATE TABLE IF NOT EXISTS archive_targets (
-    title_id TEXT PRIMARY KEY,
+    title_id TEXT PRIMARY KEY,   -- 웹툰 대상: 실제 title_id / 폴더 대상: "folder_"로 시작하는 합성 id
     dest_base_path TEXT NOT NULL,
     dest_type TEXT NOT NULL DEFAULT 'local',
     enabled INTEGER NOT NULL DEFAULT 1,
+    source_type TEXT NOT NULL DEFAULT 'webtoon',  -- webtoon | folder
+    source_dest_type TEXT NOT NULL DEFAULT 'local',  -- folder 대상의 원본 위치: local | rclone
+    source_path TEXT NOT NULL DEFAULT '',            -- folder 대상의 원본 경로
+    display_name TEXT NOT NULL DEFAULT '',           -- folder 대상의 표시 이름 (비우면 원본 폴더명 사용)
+    filename_template_preset_id INTEGER,             -- NULL이면 "기본(전역)" 프리셋 사용
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS filename_template_presets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    template TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -129,6 +142,11 @@ _MIGRATIONS = [
     ("webtoons", "writer_names", "ALTER TABLE webtoons ADD COLUMN writer_names TEXT NOT NULL DEFAULT '[]'"),
     ("watched_authors", "platform", "ALTER TABLE watched_authors ADD COLUMN platform TEXT NOT NULL DEFAULT 'naver'"),
     ("archive_targets", "dest_type", "ALTER TABLE archive_targets ADD COLUMN dest_type TEXT NOT NULL DEFAULT 'local'"),
+    ("archive_targets", "source_type", "ALTER TABLE archive_targets ADD COLUMN source_type TEXT NOT NULL DEFAULT 'webtoon'"),
+    ("archive_targets", "source_dest_type", "ALTER TABLE archive_targets ADD COLUMN source_dest_type TEXT NOT NULL DEFAULT 'local'"),
+    ("archive_targets", "source_path", "ALTER TABLE archive_targets ADD COLUMN source_path TEXT NOT NULL DEFAULT ''"),
+    ("archive_targets", "display_name", "ALTER TABLE archive_targets ADD COLUMN display_name TEXT NOT NULL DEFAULT ''"),
+    ("archive_targets", "filename_template_preset_id", "ALTER TABLE archive_targets ADD COLUMN filename_template_preset_id INTEGER"),
 ]
 
 

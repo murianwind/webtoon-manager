@@ -399,7 +399,11 @@ function renderSubscriptionTab(status) {
   const badgeFilter = document.getElementById(`${status}-badge-filter`).value;
 
   let rows = subscriptionCache[status] || [];
-  if (query) rows = rows.filter((w) => w.title.toLowerCase().includes(query));
+  if (query) {
+    rows = rows.filter(
+      (w) => w.title.toLowerCase().includes(query) || (w.writer_names || []).some((n) => n.toLowerCase().includes(query))
+    );
+  }
   if (authorFilter) rows = rows.filter((w) => (w.writer_ids || []).includes(authorFilter));
   if (tagFilter) rows = rows.filter((w) => (w.tags || []).includes(tagFilter));
   if (badgeFilter === "new") rows = rows.filter((w) => w.is_new);
@@ -1893,8 +1897,35 @@ async function renderFolderPickerContents(containerId, onSelect) {
 
 let archiveSelectedTargetPath = "";
 let archiveEditingTitleId = null; // 수정 중인 대상의 title_id (null이면 신규 등록 모드)
+let archiveEditingFolderTargetId = null; // 수정 중인 폴더 대상의 id (null이면 신규 등록 모드)
 
 function enterArchiveTargetEditMode(target) {
+  if (target.source_type === "folder") {
+    setArchiveTargetTypeTab("folder");
+    archiveEditingFolderTargetId = target.title_id;
+    document.getElementById("archive-folder-target-display-name").value = target.title_name;
+    document.getElementById("btn-add-folder-archive-target").textContent = "수정 저장";
+    archiveSelectedFolderTargetSourcePath = target.source_path;
+    archiveSelectedFolderTargetSourceType = target.source_dest_type;
+    archiveSelectedFolderTargetDestPath = target.dest_base_path;
+    archiveSelectedFolderTargetDestType = target.dest_type;
+    renderFolderPicker(
+      "archive-folder-target-source-picker",
+      (path, destType) => {
+        archiveSelectedFolderTargetSourcePath = path;
+        archiveSelectedFolderTargetSourceType = destType;
+      },
+      "",
+      { skipExistingCheck: true }
+    );
+    renderFolderPicker("archive-folder-target-dest-picker", (path, destType) => {
+      archiveSelectedFolderTargetDestPath = path;
+      archiveSelectedFolderTargetDestType = destType;
+    });
+    return;
+  }
+
+  setArchiveTargetTypeTab("webtoon");
   archiveEditingTitleId = target.title_id;
   const banner = document.getElementById("archive-target-edit-banner");
   const bannerText = document.getElementById("archive-target-edit-banner-text");
@@ -1927,7 +1958,26 @@ function exitArchiveTargetEditMode() {
   loadArchiveTargetWebtoonOptions();
 }
 
-document.getElementById("btn-cancel-archive-edit").addEventListener("click", exitArchiveTargetEditMode);
+function exitFolderArchiveTargetEditMode() {
+  archiveEditingFolderTargetId = null;
+  document.getElementById("archive-folder-target-display-name").value = "";
+  document.getElementById("btn-add-folder-archive-target").textContent = "등록";
+}
+
+document.getElementById("btn-cancel-archive-edit").addEventListener("click", () => {
+  exitArchiveTargetEditMode();
+  exitFolderArchiveTargetEditMode();
+});
+
+function setArchiveTargetTypeTab(type) {
+  document.querySelectorAll(".archive-target-type-tab").forEach((btn) => btn.classList.toggle("active", btn.dataset.type === type));
+  document.getElementById("archive-target-webtoon-panel").classList.toggle("hidden", type !== "webtoon");
+  document.getElementById("archive-target-folder-panel").classList.toggle("hidden", type !== "folder");
+}
+
+document.querySelectorAll(".archive-target-type-tab").forEach((btn) => {
+  btn.addEventListener("click", () => setArchiveTargetTypeTab(btn.dataset.type));
+});
 
 let archiveSelectedTargetDestType = "local";
 let archiveSelectedDefaultPath = "";
@@ -1936,6 +1986,11 @@ let archiveSelectedBulkSourcePath = "";
 let archiveSelectedBulkSourceType = "local";
 let archiveSelectedBulkDestPath = "";
 let archiveSelectedBulkDestType = "local";
+let archiveSelectedFolderTargetSourcePath = "";
+let archiveSelectedFolderTargetSourceType = "local";
+let archiveSelectedFolderTargetDestPath = "";
+let archiveSelectedFolderTargetDestType = "local";
+let archiveTargetSelectedIds = new Set();
 
 async function loadArchivePage() {
   invalidateArchiveCaches(); // 탭을 새로 열 때마다 최신값을 다시 받아오게 캐시 초기화
@@ -1957,6 +2012,19 @@ async function loadArchivePage() {
   renderFolderPicker("archive-default-folder-picker", (path, destType) => {
     archiveSelectedDefaultPath = path;
     archiveSelectedDefaultDestType = destType;
+  });
+  renderFolderPicker(
+    "archive-folder-target-source-picker",
+    (path, destType) => {
+      archiveSelectedFolderTargetSourcePath = path;
+      archiveSelectedFolderTargetSourceType = destType;
+    },
+    "",
+    { skipExistingCheck: true }
+  );
+  renderFolderPicker("archive-folder-target-dest-picker", (path, destType) => {
+    archiveSelectedFolderTargetDestPath = path;
+    archiveSelectedFolderTargetDestType = destType;
   });
   // 일괄 이동은 "이미 파일이 있는 폴더"를 다루는 게 목적이므로, 대상 지정용
   // 선택기와 달리 "이미 파일 있음" 확인 절차를 건너뛴다(skipExistingCheck).
@@ -1980,6 +2048,7 @@ async function loadArchivePage() {
     "",
     { skipExistingCheck: true }
   );
+  await loadFilenamePresets();
   await loadArchiveTargetList();
   await loadArchiveSettings();
   await resumeBulkMoveStatusIfRunning(); // 탭을 나갔다 들어와도 실행 중이던 일괄이동을 이어서 보여줌
@@ -2009,6 +2078,138 @@ async function loadArchiveTargetWebtoonOptions() {
   }
 }
 
+// ── 파일명 변경 프리셋 ────────────────────────────────────
+let filenamePresetsCache = [];
+
+async function loadFilenamePresets() {
+  try {
+    filenamePresetsCache = await apiCall("/api/archive/presets");
+  } catch (e) {
+    filenamePresetsCache = [];
+  }
+  const editSelect = document.getElementById("archive-preset-select");
+  const bulkSelect = document.getElementById("archive-target-bulk-preset-select");
+  const prevValue = editSelect.value;
+  editSelect.innerHTML = '<option value="">기본 (전역)</option>';
+  bulkSelect.innerHTML = '<option value="">기본 (전역)</option>';
+  for (const p of filenamePresetsCache) {
+    const opt1 = document.createElement("option");
+    opt1.value = p.id;
+    opt1.textContent = p.name;
+    editSelect.appendChild(opt1);
+    const opt2 = document.createElement("option");
+    opt2.value = p.id;
+    opt2.textContent = p.name;
+    bulkSelect.appendChild(opt2);
+  }
+  if (prevValue && [...editSelect.options].some((o) => o.value === prevValue)) {
+    editSelect.value = prevValue;
+  }
+}
+
+let archiveGlobalFilenameTemplate = "";
+
+function loadPresetIntoEditor(presetId) {
+  if (!presetId) {
+    document.getElementById("archive-filename-template").value = archiveGlobalFilenameTemplate;
+    updateArchiveFilenameTemplatePreview();
+    return;
+  }
+  const preset = filenamePresetsCache.find((p) => String(p.id) === String(presetId));
+  document.getElementById("archive-filename-template").value = preset ? preset.template : "";
+  updateArchiveFilenameTemplatePreview();
+}
+
+document.getElementById("archive-preset-select").addEventListener("change", (e) => loadPresetIntoEditor(e.target.value));
+
+document.getElementById("btn-new-preset").addEventListener("click", async () => {
+  const name = prompt("새 프리셋 이름을 입력하세요:");
+  if (!name || !name.trim()) return;
+  try {
+    const created = await apiCall("/api/archive/presets", { method: "POST", body: JSON.stringify({ name: name.trim(), template: "" }) });
+    await loadFilenamePresets();
+    document.getElementById("archive-preset-select").value = created.id;
+    loadPresetIntoEditor(created.id);
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
+document.getElementById("btn-delete-preset").addEventListener("click", async () => {
+  const presetId = document.getElementById("archive-preset-select").value;
+  if (!presetId) {
+    alert("삭제할 프리셋을 선택하세요 (기본 값은 삭제할 수 없습니다).");
+    return;
+  }
+  if (!confirm("이 프리셋을 삭제할까요? 이 프리셋을 쓰던 대상들은 기본(전역) 값으로 돌아갑니다.")) return;
+  try {
+    await apiCall(`/api/archive/presets/${presetId}`, { method: "DELETE" });
+    await loadFilenamePresets();
+    loadPresetIntoEditor("");
+    loadArchiveTargetList();
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
+document.getElementById("btn-save-preset").addEventListener("click", async () => {
+  const resultEl = document.getElementById("archive-preset-save-result");
+  const presetId = document.getElementById("archive-preset-select").value;
+  const template = document.getElementById("archive-filename-template").value;
+  resultEl.textContent = "";
+  try {
+    if (presetId) {
+      const preset = filenamePresetsCache.find((p) => String(p.id) === String(presetId));
+      await apiCall(`/api/archive/presets/${presetId}`, { method: "POST", body: JSON.stringify({ name: preset.name, template }) });
+    } else {
+      // "기본(전역)" 편집 중 저장 -> 전역 설정에 반영 (기존 저장 방식 그대로)
+      await apiCall("/api/archive/settings", {
+        method: "POST",
+        body: JSON.stringify({
+          default_base_path: archiveSelectedDefaultPath || "",
+          default_dest_type: archiveSelectedDefaultDestType,
+          conflict_policy: document.getElementById("archive-conflict-policy").value,
+          on_finish_unsubscribe: document.getElementById("archive-on-finish-toggle").checked,
+          filename_template: template,
+        }),
+      });
+      archiveGlobalFilenameTemplate = template;
+      invalidateArchiveCaches();
+    }
+    await loadFilenamePresets();
+    document.getElementById("archive-preset-select").value = presetId;
+    resultEl.style.color = "";
+    resultEl.textContent = "저장했습니다.";
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+});
+
+// ── 아카이빙 대상 목록 (웹툰 + 폴더) ────────────────────────
+
+function updateArchiveTargetBulkBar() {
+  const bar = document.getElementById("archive-target-bulk-bar");
+  const count = archiveTargetSelectedIds.size;
+  bar.classList.toggle("hidden", count === 0);
+  document.getElementById("archive-target-bulk-count").textContent = `${count}개 선택됨`;
+}
+
+document.getElementById("btn-apply-preset-to-selected").addEventListener("click", async () => {
+  const presetValue = document.getElementById("archive-target-bulk-preset-select").value;
+  const presetId = presetValue ? Number(presetValue) : null;
+  try {
+    await apiCall("/api/archive/targets/apply-preset", {
+      method: "POST",
+      body: JSON.stringify({ target_ids: [...archiveTargetSelectedIds], preset_id: presetId }),
+    });
+    archiveTargetSelectedIds = new Set();
+    updateArchiveTargetBulkBar();
+    loadArchiveTargetList();
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
 async function loadArchiveTargetList() {
   const container = document.getElementById("archive-target-list");
   try {
@@ -2016,18 +2217,50 @@ async function loadArchiveTargetList() {
     container.innerHTML = "";
     if (targets.length === 0) {
       container.innerHTML = '<p class="chip-empty-message">지정된 아카이빙 대상이 없습니다.</p>';
+      updateArchiveTargetBulkBar();
       return;
     }
     for (const t of targets) {
       const entry = document.createElement("div");
       entry.className = "job-history-entry";
       const summary = document.createElement("div");
-      summary.className = "job-history-summary";
-      summary.innerHTML = `
-        <span class="job-history-name">${escapeHtml(t.title_name)}</span>
-        <span class="job-history-time">${t.dest_type === "rclone" ? "☁️ " : "💾 "}${escapeHtml(t.dest_base_path)}</span>
-        <span class="badge">${t.enabled ? "사용중" : "꺼짐"}</span>
-      `;
+      summary.className = "job-history-summary archive-target-row";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = archiveTargetSelectedIds.has(t.title_id);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) archiveTargetSelectedIds.add(t.title_id);
+        else archiveTargetSelectedIds.delete(t.title_id);
+        updateArchiveTargetBulkBar();
+      });
+      summary.appendChild(checkbox);
+
+      const typeIcon = document.createElement("span");
+      typeIcon.textContent = t.source_type === "folder" ? "📁" : "📖";
+      summary.appendChild(typeIcon);
+
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "job-history-name";
+      nameSpan.textContent = t.title_name;
+      summary.appendChild(nameSpan);
+
+      const locationSpan = document.createElement("span");
+      locationSpan.className = "job-history-time";
+      const sourceLabel = t.source_type === "folder" ? `${t.source_dest_type === "rclone" ? "☁️" : "💾"} ${t.source_path} → ` : "";
+      locationSpan.textContent = `${sourceLabel}${t.dest_type === "rclone" ? "☁️ " : "💾 "}${t.dest_base_path}`;
+      summary.appendChild(locationSpan);
+
+      const presetBadge = document.createElement("span");
+      presetBadge.className = "archive-target-preset-badge";
+      presetBadge.textContent = t.filename_template_preset_name || "기본";
+      summary.appendChild(presetBadge);
+
+      const statusBadge = document.createElement("span");
+      statusBadge.className = "badge";
+      statusBadge.textContent = t.enabled ? "사용중" : "꺼짐";
+      summary.appendChild(statusBadge);
+
       const toggleBtn = makeButton(t.enabled ? "끄기" : "켜기", async (ev) => {
         ev.stopPropagation();
         await apiCall(`/api/archive/targets/${encodeURIComponent(t.title_id)}/${t.enabled ? "disable" : "enable"}`, { method: "POST" });
@@ -2039,6 +2272,7 @@ async function loadArchiveTargetList() {
       const deleteBtn = makeButton("삭제", async (ev) => {
         ev.stopPropagation();
         await apiCall(`/api/archive/targets/${encodeURIComponent(t.title_id)}`, { method: "DELETE" });
+        archiveTargetSelectedIds.delete(t.title_id);
         loadArchiveTargetList();
         loadArchiveManualSelectList();
         loadArchiveTargetWebtoonOptions();
@@ -2055,6 +2289,7 @@ async function loadArchiveTargetList() {
       entry.appendChild(summary);
       container.appendChild(entry);
     }
+    updateArchiveTargetBulkBar();
   } catch (e) {
     container.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
   }
@@ -2085,12 +2320,48 @@ document.getElementById("btn-add-archive-target").addEventListener("click", asyn
   }
 });
 
+document.getElementById("btn-add-folder-archive-target").addEventListener("click", async () => {
+  const resultEl = document.getElementById("archive-folder-target-add-result");
+  if (!archiveSelectedFolderTargetSourcePath) {
+    resultEl.textContent = "원본 폴더를 먼저 선택하세요.";
+    return;
+  }
+  if (!archiveSelectedFolderTargetDestPath) {
+    resultEl.textContent = "보관할 폴더를 먼저 선택하세요.";
+    return;
+  }
+  resultEl.textContent = "";
+  const payload = {
+    display_name: document.getElementById("archive-folder-target-display-name").value.trim(),
+    source_dest_type: archiveSelectedFolderTargetSourceType,
+    source_path: archiveSelectedFolderTargetSourcePath,
+    dest_base_path: archiveSelectedFolderTargetDestPath,
+    dest_type: archiveSelectedFolderTargetDestType,
+  };
+  try {
+    if (archiveEditingFolderTargetId) {
+      await apiCall(`/api/archive/folder-targets/${archiveEditingFolderTargetId}`, { method: "POST", body: JSON.stringify(payload) });
+      resultEl.textContent = "수정했습니다.";
+    } else {
+      await apiCall("/api/archive/folder-targets", { method: "POST", body: JSON.stringify(payload) });
+      resultEl.textContent = "등록했습니다.";
+    }
+    resultEl.style.color = "";
+    exitFolderArchiveTargetEditMode();
+    loadArchiveTargetList();
+    loadArchiveManualSelectList();
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+});
+
 async function loadArchiveSettings() {
   try {
     const data = await getArchiveSettingsCached();
     document.getElementById("archive-on-finish-toggle").checked = data.on_finish_unsubscribe;
     document.getElementById("archive-conflict-policy").value = data.conflict_policy;
-    document.getElementById("archive-filename-template").value = data.filename_template || "";
+    archiveGlobalFilenameTemplate = data.filename_template || "";
+    document.getElementById("archive-filename-template").value = archiveGlobalFilenameTemplate;
     await loadArchiveTemplatePreviewTitleList();
     updateArchiveFilenameTemplatePreview();
     archiveSelectedDefaultPath = data.default_base_path;
@@ -2189,7 +2460,7 @@ document.getElementById("btn-save-archive-settings").addEventListener("click", a
         default_dest_type: archiveSelectedDefaultDestType,
         conflict_policy: document.getElementById("archive-conflict-policy").value,
         on_finish_unsubscribe: document.getElementById("archive-on-finish-toggle").checked,
-        filename_template: document.getElementById("archive-filename-template").value,
+        filename_template: archiveGlobalFilenameTemplate,
       }),
     });
     invalidateArchiveCaches();

@@ -142,3 +142,26 @@ def rmdirs_if_empty(config_path: str, remote: str, path: str) -> None:
         _run(config_path, ["rmdirs", target])
     except RcloneError as e:
         log.warning("빈 폴더 정리 실패 (무시하고 계속): %s: %s", target, e)
+
+
+def list_top_level_files(config_path: str, remote: str, path: str) -> list[str]:
+    """remote:path 바로 밑의 파일 이름만 나열한다(하위 폴더 재귀 안 함, 디렉터리 제외).
+    폴더 대상 아카이빙에서 회차 zip 목록을 훑을 때 쓴다."""
+    target = f"{remote}:{path}" if path else f"{remote}:"
+    try:
+        output = _run(config_path, ["lsjson", target, "--files-only"])
+    except RcloneError as e:
+        raise RcloneError(f"'{target}' 목록을 읽을 수 없습니다: {e}")
+    entries = json.loads(output)
+    return [e["Name"] for e in entries]
+
+
+def read_small_text_file(config_path: str, remote: str, path: str, file_name: str) -> str | None:
+    """remote 위의 작은 텍스트 파일(info.xml 등) 내용을 읽어온다. 없거나 실패하면 None —
+    카카오 웹툰 여부를 확인하려고 info.xml 하나를 볼 때처럼, 전체 다운로드 없이
+    가볍게 내용만 확인하고 싶을 때 쓴다."""
+    target = f"{remote}:{path}/{file_name}" if path else f"{remote}:{file_name}"
+    try:
+        return _run(config_path, ["cat", target])
+    except RcloneError:
+        return None
