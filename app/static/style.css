@@ -207,7 +207,7 @@ select {
   color: var(--muted);
   white-space: nowrap;
 }
-#archive-filename-template {
+.text-input-full {
   width: 100%;
   padding: 8px 10px;
   border: 1px solid var(--border);

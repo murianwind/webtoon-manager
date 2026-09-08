@@ -1363,10 +1363,17 @@ class PreviewFilenameOut(BaseModel):
 
 @router.post("/archive/preview-filename", response_model=PreviewFilenameOut)
 async def preview_archive_filename(payload: PreviewFilenameIn):
+    settings = get_settings()
+    target = await asyncio.to_thread(repository.get_archive_target, payload.title_id)
+    if target is not None and target.source_type == "folder":
+        result = await asyncio.to_thread(
+            archiver.preview_filename_for_folder_target, settings.archive_root, settings.rclone_config_path, target, payload.template
+        )
+        return PreviewFilenameOut(**result)
+
     wt = await asyncio.to_thread(repository.get, payload.title_id)
     if wt is None:
         raise HTTPException(status_code=404, detail="웹툰을 찾을 수 없습니다.")
-    settings = get_settings()
     result = await asyncio.to_thread(
         archiver.preview_filename_for_title, settings.download_root, wt.title, payload.template, wt.writer_names
     )

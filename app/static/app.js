@@ -2350,6 +2350,7 @@ document.getElementById("btn-add-folder-archive-target").addEventListener("click
     exitFolderArchiveTargetEditMode();
     loadArchiveTargetList();
     loadArchiveManualSelectList();
+    loadArchiveTemplatePreviewTitleList();
   } catch (e) {
     resultEl.textContent = e.message;
   }
@@ -2371,30 +2372,37 @@ async function loadArchiveSettings() {
   }
 }
 
-// 서버에 있는 실제 웹툰의 실제 zip 파일 하나로 미리보기한다 — 예시 값보다
+// 서버에 있는 실제 웹툰/폴더 대상의 실제 zip 파일 하나로 미리보기한다 — 예시 값보다
 // 훨씬 신뢰도 높은 미리보기라서, 하드코딩된 샘플 값 방식을 대체한다.
-let archiveTemplatePreviewTitles = null;
 let archiveTemplatePreviewDebounceTimer = null;
 
 async function loadArchiveTemplatePreviewTitleList() {
   const select = document.getElementById("archive-filename-template-preview-title");
   try {
-    if (!archiveTemplatePreviewTitles) {
-      archiveTemplatePreviewTitles = await apiCall("/api/webtoons?status=active");
-    }
+    const [webtoons, targets] = await Promise.all([
+      apiCall("/api/webtoons?status=active"),
+      apiCall("/api/archive/targets"),
+    ]);
+    const folderTargets = targets.filter((t) => t.source_type === "folder");
     const previousValue = select.value;
     select.innerHTML = "";
-    if (archiveTemplatePreviewTitles.length === 0) {
-      select.innerHTML = '<option value="">구독 중인 웹툰이 없습니다</option>';
+    if (webtoons.length === 0 && folderTargets.length === 0) {
+      select.innerHTML = '<option value="">미리볼 대상이 없습니다</option>';
       return;
     }
-    for (const wt of archiveTemplatePreviewTitles) {
+    for (const wt of webtoons) {
       const opt = document.createElement("option");
       opt.value = wt.title_id;
       opt.textContent = wt.title;
       select.appendChild(opt);
     }
-    if (previousValue && archiveTemplatePreviewTitles.some((wt) => wt.title_id === previousValue)) {
+    for (const t of folderTargets) {
+      const opt = document.createElement("option");
+      opt.value = t.title_id;
+      opt.textContent = `📁 ${t.title_name}`;
+      select.appendChild(opt);
+    }
+    if (previousValue && [...select.options].some((o) => o.value === previousValue)) {
       select.value = previousValue;
     }
   } catch (e) {
