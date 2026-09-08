@@ -2076,6 +2076,7 @@ async function loadArchivePage() {
       archiveSelectedBulkSourcePath = path;
       archiveSelectedBulkSourceType = destType;
       archiveSelectedBulkSourceLocalRoot = localRoot || "archive";
+      updateBulkMovePresetPreview();
     },
     "",
     { skipExistingCheck: true, localRoots: ["archive", "download"] }
@@ -2681,6 +2682,43 @@ async function resumeBulkMoveStatusIfRunning() {
     // 조용히 무시 — 탭 진입 자체를 막을 정도는 아님
   }
 }
+
+async function updateBulkMovePresetPreview() {
+  const previewEl = document.getElementById("bulk-move-preset-preview");
+  const presetId = document.getElementById("bulk-move-preset-select").value;
+  if (!presetId) {
+    previewEl.textContent = "";
+    return;
+  }
+  if (!archiveSelectedBulkSourcePath) {
+    previewEl.textContent = "미리보기하려면 원본 폴더를 먼저 선택하세요.";
+    return;
+  }
+  const preset = filenamePresetsCache.find((p) => String(p.id) === String(presetId));
+  previewEl.textContent = "확인 중...";
+  try {
+    const payload =
+      archiveSelectedBulkSourceType === "local"
+        ? {
+            source_type: "folder", source_dest_type: "local",
+            source_local_root: archiveSelectedBulkSourceLocalRoot, source_path: archiveSelectedBulkSourcePath,
+            template: preset.template,
+          }
+        : { source_type: "folder", source_dest_type: "rclone", source_path: archiveSelectedBulkSourcePath, template: preset.template };
+    const result = await apiCall("/api/archive/preview-filename", { method: "POST", body: JSON.stringify(payload) });
+    if (!result.original_filename) {
+      previewEl.textContent = result.message;
+    } else if (result.rendered_filename) {
+      previewEl.textContent = `미리보기: ${result.original_filename}  →  ${result.rendered_filename}`;
+    } else {
+      previewEl.textContent = `${result.original_filename} (${result.message})`;
+    }
+  } catch (e) {
+    previewEl.textContent = e.message;
+  }
+}
+
+document.getElementById("bulk-move-preset-select").addEventListener("change", updateBulkMovePresetPreview);
 
 document.getElementById("btn-run-bulk-move").addEventListener("click", async () => {
   const resultEl = document.getElementById("bulk-move-result");

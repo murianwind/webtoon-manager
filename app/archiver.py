@@ -336,9 +336,11 @@ def preview_filename_for_title(download_root: str, title_name: str, template: st
 
 
 def preview_filename_for_folder(
-    archive_root: str, rclone_config_path: str, source_dest_type: str, source_path: str, template: str
+    local_root: str, rclone_config_path: str, source_dest_type: str, source_path: str, template: str
 ) -> dict:
-    """임의의 폴더(ARCHIVE_ROOT 밑, 등록된 대상 여부와 무관) 기준 미리보기.
+    """임의의 폴더(로컬이면 local_root 밑, 등록된 대상 여부와 무관) 기준 미리보기.
+    local_root는 호출부가 정해서 넘긴다(ARCHIVE_ROOT 또는 DOWNLOAD_ROOT일 수 있음 —
+    폴더 일괄 이동이 두 루트를 다 지원하므로).
     원본이 로컬이면 웹툰 미리보기와 동일하게 실제 템플릿 적용 결과를 보여준다.
     원본이 rclone이면, 파일명 자체에 페이지수가 있는 구조(카카오식)라면 zip을
     안 열어도 되니 그대로 적용하고, 페이지수를 zip에서 직접 세야 하는 구조(네이버식
@@ -369,7 +371,7 @@ def preview_filename_for_folder(
             }
         return {"original_filename": original, "rendered_filename": rendered, "message": "정상적으로 변환됩니다."}
 
-    src_dir = _local_archive_path(archive_root, source_path)
+    src_dir = _local_archive_path(local_root, source_path)
     files = _list_episode_files_sorted(src_dir)
     if not files:
         return {"original_filename": None, "rendered_filename": None, "message": "이 폴더에 zip 파일이 없습니다."}
