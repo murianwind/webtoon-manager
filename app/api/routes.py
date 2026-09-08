@@ -1653,6 +1653,7 @@ class BulkMoveIn(BaseModel):
     dest_type: str = "local"
     dest_path: str
     dest_local_root: str = "archive"
+    filename_template_preset_id: int | None = None  # None이면 파일명을 안 건드리고 그대로 이동
 
     @field_validator("source_type", "dest_type")
     @classmethod
@@ -1687,6 +1688,13 @@ async def bulk_move(payload: BulkMoveIn):
     if payload.dest_type == "local" and not dest_local_root:
         raise HTTPException(status_code=400, detail="선택한 목적지 로컬 경로가 설정되어 있지 않습니다.")
 
+    filename_template = ""
+    if payload.filename_template_preset_id is not None:
+        preset = await asyncio.to_thread(repository.get_filename_template_preset, payload.filename_template_preset_id)
+        if preset is None:
+            raise HTTPException(status_code=404, detail="존재하지 않는 프리셋입니다.")
+        filename_template = preset.template
+
     job_status.start("bulk_move")
 
     async def _run():
@@ -1696,7 +1704,7 @@ async def bulk_move(payload: BulkMoveIn):
                 source_local_root, dest_local_root, settings.rclone_config_path,
                 payload.source_type, payload.source_path,
                 payload.dest_type, payload.dest_path,
-                lambda msg: job_status.log_line("bulk_move", msg),
+                lambda msg: job_status.log_line("bulk_move", msg), filename_template,
             )
             # 이력은 이제 bulk_move_folder 안에서 파일마다 한 줄씩 직접 남긴다
             # (주기/수동/완결 이동과 동일한 단위) — 여기서 요약 한 줄을 따로 더

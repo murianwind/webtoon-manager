@@ -2130,10 +2130,14 @@ async function loadFilenamePresets() {
     filenamePresetsCache = [];
   }
   const editSelect = document.getElementById("archive-preset-select");
-  const bulkSelect = document.getElementById("archive-target-bulk-preset-select");
+  const bulkApplySelect = document.getElementById("archive-target-bulk-preset-select");
+  const bulkMoveSelect = document.getElementById("bulk-move-preset-select");
   const prevValue = editSelect.value;
   editSelect.innerHTML = '<option value="">기본 (전역)</option>';
-  bulkSelect.innerHTML = '<option value="">기본 (전역)</option>';
+  bulkApplySelect.innerHTML = '<option value="">기본 (전역)</option>';
+  // 일괄 이동은 "웹툰/폴더 대상"과 달리 전역 기본값을 상속하는 개념이 없다 —
+  // 애초에 회차/웹툰 개념이 없는 임의 폴더 이동이라, 안 고르면 그냥 원본 그대로다.
+  bulkMoveSelect.innerHTML = '<option value="">선택 안 함 (원본 파일명 그대로)</option>';
   for (const p of filenamePresetsCache) {
     const opt1 = document.createElement("option");
     opt1.value = p.id;
@@ -2142,7 +2146,11 @@ async function loadFilenamePresets() {
     const opt2 = document.createElement("option");
     opt2.value = p.id;
     opt2.textContent = p.name;
-    bulkSelect.appendChild(opt2);
+    bulkApplySelect.appendChild(opt2);
+    const opt3 = document.createElement("option");
+    opt3.value = p.id;
+    opt3.textContent = p.name;
+    bulkMoveSelect.appendChild(opt3);
   }
   if (prevValue && [...editSelect.options].some((o) => o.value === prevValue)) {
     editSelect.value = prevValue;
@@ -2693,6 +2701,9 @@ document.getElementById("btn-run-bulk-move").addEventListener("click", async () 
         dest_type: archiveSelectedBulkDestType,
         dest_path: archiveSelectedBulkDestPath,
         dest_local_root: archiveSelectedBulkDestLocalRoot,
+        filename_template_preset_id: document.getElementById("bulk-move-preset-select").value
+          ? Number(document.getElementById("bulk-move-preset-select").value)
+          : null,
       }),
     });
     // 파일 개수가 많으면 수 분 걸릴 수 있어서, 응답을 기다리지 않고 바로

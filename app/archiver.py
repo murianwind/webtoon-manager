@@ -1008,7 +1008,7 @@ def bulk_move_folder(
     source_local_root: str, dest_local_root: str, rclone_config_path: str,
     source_type: str, source_path: str,
     dest_type: str, dest_path: str,
-    progress_callback=None,
+    progress_callback=None, filename_template: str = "",
 ) -> int:
     """1회성 폴더→폴더 전체 이동 (아카이빙 대상 지정 규칙과 무관, 백업 정리용).
     로컬-로컬/로컬-원격/원격-로컬/원격-원격 네 조합을 전부 지원한다.
@@ -1020,6 +1020,13 @@ def bulk_move_folder(
     — 호출부가 정해서 넘긴다. 이미 완결됐는데 구독 안 해서 자동 아카이빙 대상엔
     못 올리는 웹툰처럼, 다운로드 폴더에 있는 걸 그대로 보관 폴더로 옮기고 싶을 때
     DOWNLOAD_ROOT를 원본으로 쓸 수 있게 하기 위함). rclone 쪽이면 안 쓰인다.
+
+    filename_template(선택): 비워두면(기본) 파일명을 안 건드리고 그대로 옮긴다.
+    지정하면 파일명 변경 프리셋과 동일한 방식(render_archive_filename)으로 각
+    파일의 이름을 바꿔서 옮긴다 — {title}은 그 파일이 하위 폴더 안에 있으면 그
+    바로 위 폴더명을, 최상위에 바로 있으면 원본 폴더 자체의 이름을 쓴다. 파일명
+    구조를 인식 못 하면(카카오식/네이버식 둘 다 아니면) 그 파일만 원본 이름
+    그대로 옮긴다 — 일부 인식 안 되는 파일이 있다고 전체가 실패하지 않는다.
 
     progress_callback(선택): 파일 하나 처리할 때마다 사람이 읽을 진행 메시지
     문자열 하나를 넘겨서 호출한다. archiver.py는 이 메시지를 어디에 기록할지
@@ -1050,7 +1057,18 @@ def bulk_move_folder(
     moved = 0
     for index, rel_path in enumerate(rel_files, start=1):
         try:
-            final_rel = _bulk_move_resolve_final_rel(policy, dest_type, dest_ctx, rel_path, rclone_config_path)
+            desired_rel_path = rel_path
+            if filename_template.strip():
+                rel = PurePosixPath(rel_path)
+                title_candidate = rel.parent.name if str(rel.parent) != "." else _derive_folder_display_name(source_type, source_path)
+                zip_path_for_page_count = (src_ctx / rel_path) if source_type == "local" else None
+                rendered = render_archive_filename(
+                    filename_template, rel.name, title_candidate, [], zip_path_for_page_count=zip_path_for_page_count
+                )
+                if rendered is not None:
+                    desired_rel_path = str(rel.parent / rendered) if str(rel.parent) != "." else rendered
+
+            final_rel = _bulk_move_resolve_final_rel(policy, dest_type, dest_ctx, desired_rel_path, rclone_config_path)
             if final_rel is None:
                 log.info("일괄 이동 건너뜀 (이미 존재): %s", rel_path)
                 if progress_callback:
@@ -1063,7 +1081,7 @@ def bulk_move_folder(
             moved += 1
             repository.add_archive_history("-", batch_label, final_rel, "bulk_move")
             if progress_callback:
-                progress_callback(f"[{index}/{total}] 이동 완료: {rel_path}")
+                progress_callback(f"[{index}/{total}] 이동 완료: {final_rel}")
         except Exception as e:
             log.error("일괄 이동 중 개별 파일 실패, 건너뜀 (%s): %s", rel_path, e)
             if progress_callback:

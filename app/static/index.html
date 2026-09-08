@@ -400,7 +400,7 @@
         <label>파일명 변경 프리셋 (회차 zip 파일에만 적용, 비워두면 원본 파일명 그대로)</label>
         <p class="hint">여러 스타일을 저장해두고, 아래 "아카이빙 대상"에서 웹툰/폴더마다 골라 적용할 수 있습니다.
         토큰 사이에 원하는 글자(구분자 등)를 직접 입력할 수 있고, 확장자(.zip)는 자동으로 붙습니다.
-        폴더 일괄 이동과 info.xml/커버 이미지에는 적용되지 않습니다(회차 개념이 없어서).
+        폴더 일괄 이동에서는 프리셋을 선택했을 때만 적용됩니다(아래 "폴더 일괄 이동" 카드에서 고를 수 있습니다). info.xml/커버 이미지에는 적용되지 않습니다(회차 개념이 없어서).
         파일명 구조를 알아볼 수 없는 파일(수동으로 넣은 파일 등)은 이 설정과 무관하게 원본 파일명 그대로 이동됩니다.</p>
         <div class="registry-add-row">
           <select id="archive-preset-select"></select>
@@ -491,6 +491,8 @@
       <div id="bulk-move-source-picker"></div>
       <label class="field-label">목적지 폴더</label>
       <div id="bulk-move-dest-picker"></div>
+      <label class="field-label">파일명 변경 프리셋 (선택 안 하면 원본 파일명 그대로 이동)</label>
+      <select id="bulk-move-preset-select"></select>
       <button id="btn-run-bulk-move" style="margin-top: 8px;">지금 이동</button>
       <span id="bulk-move-result" class="hint-inline"></span>
       <div class="job-status-block">
