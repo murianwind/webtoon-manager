@@ -1005,7 +1005,7 @@ def _compose_kakao_cover_to_temp_file(content_id: str) -> str | None:
 
 
 def bulk_move_folder(
-    archive_root: str, rclone_config_path: str,
+    source_local_root: str, dest_local_root: str, rclone_config_path: str,
     source_type: str, source_path: str,
     dest_type: str, dest_path: str,
     progress_callback=None,
@@ -1015,12 +1015,18 @@ def bulk_move_folder(
     항상 '파일' 단위로 옮기며(폴더 자체를 통째로 옮기지 않음), 옮긴 뒤 원본 쪽에
     파일이 하나도 안 남은 빈 폴더는 정리한다.
 
+    source_local_root/dest_local_root: source_type/dest_type이 "local"일 때 그
+    경로가 기준으로 삼는 실제 루트 폴더(ARCHIVE_ROOT 또는 DOWNLOAD_ROOT일 수 있음
+    — 호출부가 정해서 넘긴다. 이미 완결됐는데 구독 안 해서 자동 아카이빙 대상엔
+    못 올리는 웹툰처럼, 다운로드 폴더에 있는 걸 그대로 보관 폴더로 옮기고 싶을 때
+    DOWNLOAD_ROOT를 원본으로 쓸 수 있게 하기 위함). rclone 쪽이면 안 쓰인다.
+
     progress_callback(선택): 파일 하나 처리할 때마다 사람이 읽을 진행 메시지
     문자열 하나를 넘겨서 호출한다. archiver.py는 이 메시지를 어디에 기록할지
     (화면 표시용 job_status 등) 전혀 모른다 — 호출부(routes.py)가 원하는 대로
     쓰도록 콜백으로만 분리해서, 이 모듈이 웹/잡 상태 계층에 의존하지 않게 한다."""
     policy = get_conflict_policy()
-    rel_files, src_ctx = _bulk_move_collect_source_files(source_type, archive_root, rclone_config_path, source_path)
+    rel_files, src_ctx = _bulk_move_collect_source_files(source_type, source_local_root, rclone_config_path, source_path)
     total = len(rel_files)
     if progress_callback:
         progress_callback(f"이동할 파일 {total}개 확인, 시작합니다")
@@ -1031,7 +1037,7 @@ def bulk_move_folder(
     batch_label = f"{source_path} → {dest_path}"
 
     if dest_type == "local":
-        dest_ctx = _local_archive_path(archive_root, dest_path)
+        dest_ctx = _local_archive_path(dest_local_root, dest_path)
         dest_ctx.mkdir(parents=True, exist_ok=True)
     else:
         remote, base_path = _parse_rclone_target(dest_path)

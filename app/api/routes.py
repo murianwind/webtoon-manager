@@ -1490,17 +1490,22 @@ async def create_rclone_folder(payload: CreateRcloneFolderIn):
 
 
 @router.get("/archive/folders")
-async def list_archive_folders(path: str = ""):
-    """ARCHIVE_ROOT 기준 하위 폴더 목록을 보여준다 — 폴더 찾아보기 UI용.
-    각 폴더가 이미 파일을 갖고 있어서 선택 불가능한지도 같이 알려준다.
+async def list_archive_folders(path: str = "", local_root: str = "archive"):
+    """ARCHIVE_ROOT(기본) 또는 DOWNLOAD_ROOT(local_root="download") 기준 하위 폴더
+    목록을 보여준다 — 폴더 찾아보기 UI용. 각 폴더가 이미 파일을 갖고 있어서
+    선택 불가능한지도 같이 알려준다.
 
     rclone 마운트 같은 특수 폴더는 존재는 하는데 목록조회(iterdir)나 종류 확인(is_dir)
     자체가 예외를 던지는 경우가 실제로 있어서, 항목 하나하나 개별 예외 처리를 한다 —
     문제있는 항목 하나 때문에 폴더 찾아보기 전체가 500으로 죽으면 안 되기 때문."""
+    if local_root not in ("archive", "download"):
+        raise HTTPException(status_code=400, detail="local_root는 archive 또는 download여야 합니다.")
     settings = get_settings()
-    if not settings.archive_root:
-        raise HTTPException(status_code=400, detail="로컬 아카이빙 경로(ARCHIVE_ROOT)가 설정되어 있지 않습니다.")
-    root = Path(settings.archive_root).resolve()
+    root_dir = settings.archive_root if local_root == "archive" else settings.download_root
+    if not root_dir:
+        detail = "로컬 아카이빙 경로(ARCHIVE_ROOT)" if local_root == "archive" else "다운로드 경로(DOWNLOAD_ROOT)"
+        raise HTTPException(status_code=400, detail=f"{detail}가 설정되어 있지 않습니다.")
+    root = Path(root_dir).resolve()
     target = (root / path).resolve()
     if root != target and root not in target.parents:
         raise HTTPException(status_code=400, detail="잘못된 경로입니다.")
@@ -1532,14 +1537,24 @@ async def list_archive_folders(path: str = ""):
 
 class CreateFolderIn(BaseModel):
     path: str
+    root: str = "archive"  # "archive"(ARCHIVE_ROOT) | "download"(DOWNLOAD_ROOT)
+
+    @field_validator("root")
+    @classmethod
+    def root_must_be_known(cls, v: str) -> str:
+        if v not in ("archive", "download"):
+            raise ValueError("root는 archive 또는 download여야 합니다.")
+        return v
 
 
 @router.post("/archive/folders")
 async def create_archive_folder(payload: CreateFolderIn):
     settings = get_settings()
-    if not settings.archive_root:
-        raise HTTPException(status_code=400, detail="로컬 아카이빙 경로(ARCHIVE_ROOT)가 설정되어 있지 않습니다.")
-    root = Path(settings.archive_root).resolve()
+    root_dir = settings.archive_root if payload.root == "archive" else settings.download_root
+    if not root_dir:
+        detail = "로컬 아카이빙 경로(ARCHIVE_ROOT)" if payload.root == "archive" else "다운로드 경로(DOWNLOAD_ROOT)"
+        raise HTTPException(status_code=400, detail=f"{detail}가 설정되어 있지 않습니다.")
+    root = Path(root_dir).resolve()
     target = (root / payload.path).resolve()
     if root != target and root not in target.parents:
         raise HTTPException(status_code=400, detail="잘못된 경로입니다.")
@@ -1633,15 +1648,24 @@ async def set_archive_history_retention_days(payload: RetentionDaysIn):
 
 class BulkMoveIn(BaseModel):
     source_type: str = "local"  # "local" | "rclone"
-    source_path: str            # local: ARCHIVE_ROOT 기준 상대경로 / rclone: "remote:path"
+    source_path: str            # local: 아래 source_local_root 기준 상대경로 / rclone: "remote:path"
+    source_local_root: str = "archive"  # local일 때만: "archive"(ARCHIVE_ROOT) | "download"(DOWNLOAD_ROOT)
     dest_type: str = "local"
     dest_path: str
+    dest_local_root: str = "archive"
 
     @field_validator("source_type", "dest_type")
     @classmethod
     def type_must_be_known(cls, v: str) -> str:
         if v not in ("local", "rclone"):
             raise ValueError("source_type/dest_type은 local 또는 rclone이어야 합니다.")
+        return v
+
+    @field_validator("source_local_root", "dest_local_root")
+    @classmethod
+    def local_root_must_be_known(cls, v: str) -> str:
+        if v not in ("archive", "download"):
+            raise ValueError("source_local_root/dest_local_root는 archive 또는 download여야 합니다.")
         return v
 
 
@@ -1656,6 +1680,12 @@ async def bulk_move(payload: BulkMoveIn):
         settings.rclone_config_path and Path(settings.rclone_config_path).is_file()
     ):
         raise HTTPException(status_code=400, detail="rclone 설정 파일이 등록되어 있지 않습니다.")
+    source_local_root = settings.archive_root if payload.source_local_root == "archive" else settings.download_root
+    dest_local_root = settings.archive_root if payload.dest_local_root == "archive" else settings.download_root
+    if payload.source_type == "local" and not source_local_root:
+        raise HTTPException(status_code=400, detail="선택한 원본 로컬 경로가 설정되어 있지 않습니다.")
+    if payload.dest_type == "local" and not dest_local_root:
+        raise HTTPException(status_code=400, detail="선택한 목적지 로컬 경로가 설정되어 있지 않습니다.")
 
     job_status.start("bulk_move")
 
@@ -1663,7 +1693,7 @@ async def bulk_move(payload: BulkMoveIn):
         try:
             moved = await asyncio.to_thread(
                 archiver.bulk_move_folder,
-                settings.archive_root, settings.rclone_config_path,
+                source_local_root, dest_local_root, settings.rclone_config_path,
                 payload.source_type, payload.source_path,
                 payload.dest_type, payload.dest_path,
                 lambda msg: job_status.log_line("bulk_move", msg),

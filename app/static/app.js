@@ -1607,6 +1607,10 @@ async function renderFolderPicker(containerId, onSelect, initialPath, options) {
   // 있는 폴더"를 다루는 게 목적인 선택기용. 아카이빙 대상 지정용 선택기는
   // 이 옵션을 안 주면 기존처럼 확인 절차를 그대로 거친다.
   const skipExistingCheck = !!(options && options.skipExistingCheck);
+  // options.localRoots: ["archive","download"]처럼 주면, 로컬 모드일 때 이 중
+  // 어느 루트(ARCHIVE_ROOT/DOWNLOAD_ROOT) 기준으로 찾아볼지 전환 버튼이 뜬다.
+  // 안 주면(기존 모든 선택기) 항상 ARCHIVE_ROOT 하나만 쓰는 예전 동작 그대로다.
+  const localRoots = (options && options.localRoots) || ["archive"];
 
   // sessionStorage는 이 브라우저 탭 안에서만 살아있고, 탭을 닫으면(다른 브라우저
   // 탭으로 이동하는 것과는 다름) 자동으로 사라진다 — 그래서 같은 탭 안에서 다른
@@ -1614,10 +1618,12 @@ async function renderFolderPicker(containerId, onSelect, initialPath, options) {
   // 열었을 때는 자연히 초기화된다.
   const saved = loadSavedFolderPickerState(containerId);
   if (saved) {
-    // skipExistingCheck는 화면 탐색 상태가 아니라 "이 선택기가 애초에 어떻게
-    // 동작해야 하는지"를 정하는 호출자 쪽 설정이므로, 저장된 탐색 상태를
+    // skipExistingCheck/localRoots는 화면 탐색 상태가 아니라 "이 선택기가 애초에
+    // 어떻게 동작해야 하는지"를 정하는 호출자 쪽 설정이므로, 저장된 탐색 상태를
     // 복원하더라도 매번 호출 시점 값으로 다시 맞춘다(상태 저장/복원 대상이 아님).
     saved.skipExistingCheck = skipExistingCheck;
+    saved.localRoots = localRoots;
+    if (!saved.localRoot) saved.localRoot = localRoots[0];
     archiveFolderPickerState[containerId] = saved;
     renderFolderPickerContents(containerId, onSelect);
     return;
@@ -1635,18 +1641,20 @@ async function renderFolderPicker(containerId, onSelect, initialPath, options) {
   } catch (e) {
     // 조용히 무시하고 기본값(local)으로 진행 — 아래에서 다시 확인하고 에러 표시함
   }
-  archiveFolderPickerState[containerId] = { mode: startMode, path: initialPath || "", remote: "", skipExistingCheck };
+  archiveFolderPickerState[containerId] = {
+    mode: startMode, path: initialPath || "", remote: "", skipExistingCheck, localRoots, localRoot: localRoots[0],
+  };
   renderFolderPickerContents(containerId, onSelect);
 }
 
-let _folderListCache = {}; // "local|rclone:remote:path" -> {folders, current_path_selectable}
+let _folderListCache = {}; // "local:root:path" 또는 "rclone:remote:path" -> {folders, current_path_selectable}
 
-function _folderListCacheKey(isRclone, remote, path) {
-  return `${isRclone ? "rclone" : "local"}:${remote || ""}:${path}`;
+function _folderListCacheKey(isRclone, remoteOrRoot, path) {
+  return `${isRclone ? "rclone" : "local"}:${remoteOrRoot || ""}:${path}`;
 }
 
-function _invalidateFolderListCache(isRclone, remote, path) {
-  delete _folderListCache[_folderListCacheKey(isRclone, remote, path)];
+function _invalidateFolderListCache(isRclone, remoteOrRoot, path) {
+  delete _folderListCache[_folderListCacheKey(isRclone, remoteOrRoot, path)];
 }
 
 async function renderFolderPickerContents(containerId, onSelect) {
@@ -1677,11 +1685,17 @@ async function renderFolderPickerContents(containerId, onSelect) {
     const modeRow = document.createElement("div");
     modeRow.className = "folder-picker-mode-row";
     const localBtn = makeButton("로컬 폴더", () => {
-      archiveFolderPickerState[containerId] = { mode: "local", path: "", remote: "", skipExistingCheck: state.skipExistingCheck };
+      archiveFolderPickerState[containerId] = {
+        mode: "local", path: "", remote: "", skipExistingCheck: state.skipExistingCheck,
+        localRoots: state.localRoots, localRoot: state.localRoots[0],
+      };
       renderFolderPickerContents(containerId, onSelect);
     });
     const rcloneBtn = makeButton("rclone 원격", () => {
-      archiveFolderPickerState[containerId] = { mode: "rclone", path: "", remote: "", skipExistingCheck: state.skipExistingCheck };
+      archiveFolderPickerState[containerId] = {
+        mode: "rclone", path: "", remote: "", skipExistingCheck: state.skipExistingCheck,
+        localRoots: state.localRoots, localRoot: state.localRoots[0],
+      };
       renderFolderPickerContents(containerId, onSelect);
     });
     if (state.mode === "local") localBtn.disabled = true;
@@ -1689,6 +1703,24 @@ async function renderFolderPickerContents(containerId, onSelect) {
     modeRow.appendChild(localBtn);
     modeRow.appendChild(rcloneBtn);
     container.appendChild(modeRow);
+  }
+
+  // localRoots가 2개 이상이면(예: 일괄 이동에서 ARCHIVE_ROOT/DOWNLOAD_ROOT 둘 다
+  // 고를 수 있는 경우), 로컬 모드일 때만 어느 루트를 기준으로 찾아볼지 전환 버튼을 보여준다.
+  const localRootLabels = { archive: "보관 폴더(ARCHIVE_ROOT)", download: "다운로드 폴더(DOWNLOAD_ROOT)" };
+  if (state.mode === "local" && state.localRoots.length > 1) {
+    const rootRow = document.createElement("div");
+    rootRow.className = "folder-picker-mode-row";
+    for (const rootName of state.localRoots) {
+      const btn = makeButton(localRootLabels[rootName] || rootName, () => {
+        state.localRoot = rootName;
+        state.path = ""; // 루트가 바뀌면 경로 기준이 달라지므로 처음부터 다시 찾아봄
+        renderFolderPickerContents(containerId, onSelect);
+      });
+      if (state.localRoot === rootName) btn.disabled = true;
+      rootRow.appendChild(btn);
+    }
+    container.appendChild(rootRow);
   }
 
   const listArea = document.createElement("div");
@@ -1705,7 +1737,10 @@ async function renderFolderPickerContents(containerId, onSelect) {
 
   const backToStartBtn = () =>
     makeButton("⬅ 처음으로 돌아가기", () => {
-      archiveFolderPickerState[containerId] = { mode: state.mode, path: "", remote: "", skipExistingCheck: state.skipExistingCheck };
+      archiveFolderPickerState[containerId] = {
+        mode: state.mode, path: "", remote: "", skipExistingCheck: state.skipExistingCheck,
+        localRoots: state.localRoots, localRoot: state.localRoot,
+      };
       renderFolderPickerContents(containerId, onSelect);
     });
 
@@ -1731,7 +1766,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
 
     const isRclone = state.mode === "rclone";
     const currentPath = state.path || "";
-    const cacheKey = _folderListCacheKey(isRclone, state.remote, currentPath);
+    const cacheKey = _folderListCacheKey(isRclone, isRclone ? state.remote : state.localRoot, currentPath);
 
     let data = _folderListCache[cacheKey];
     if (!data) {
@@ -1751,7 +1786,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
 
       const url = isRclone
         ? `/api/archive/rclone/folders?remote=${encodeURIComponent(state.remote)}&path=${encodeURIComponent(currentPath)}`
-        : `/api/archive/folders?path=${encodeURIComponent(currentPath)}`;
+        : `/api/archive/folders?path=${encodeURIComponent(currentPath)}&local_root=${encodeURIComponent(state.localRoot)}`;
       data = await apiCall(url, { signal: controller.signal });
       _folderListCache[cacheKey] = data;
     }
@@ -1783,7 +1818,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
 
     function selectAndShow(value, destType, label) {
       state.selectedLabel = label;
-      onSelect(value, destType);
+      onSelect(value, destType, destType === "local" ? state.localRoot : undefined);
       // 방금 고른 걸 화면에서도 바로 보이게 다시 그린다 — 예전엔 onSelect를
       // 호출만 하고 화면엔 아무 표시가 없어서, 실제로 선택이 됐는지 눈으로
       //확인할 방법이 없었다.
@@ -1863,9 +1898,9 @@ async function renderFolderPickerContents(containerId, onSelect) {
       if (isRclone) {
         await apiCall("/api/archive/rclone/folders", { method: "POST", body: JSON.stringify({ remote: state.remote, path: newPath }) });
       } else {
-        await apiCall("/api/archive/folders", { method: "POST", body: JSON.stringify({ path: newPath }) });
+        await apiCall("/api/archive/folders", { method: "POST", body: JSON.stringify({ path: newPath, root: state.localRoot }) });
       }
-      _invalidateFolderListCache(isRclone, state.remote, currentPath); // 새 폴더가 생겼으니 이 경로는 다시 조회해야 함
+      _invalidateFolderListCache(isRclone, isRclone ? state.remote : state.localRoot, currentPath); // 새 폴더가 생겼으니 이 경로는 다시 조회해야 함
       // 예전엔 만들자마자 그 폴더 안으로 들어가버려서, 그 폴더 자체를 고르려면
       // 다시 상위로 나와야 하는 불편함이 있었다 — 생성 후에도 같은 위치(상위
       // 목록)에 그대로 머물러서, 방금 만든 폴더를 목록에서 바로 선택할 수 있게 한다.
@@ -1984,8 +2019,10 @@ let archiveSelectedDefaultPath = "";
 let archiveSelectedDefaultDestType = "local";
 let archiveSelectedBulkSourcePath = "";
 let archiveSelectedBulkSourceType = "local";
+let archiveSelectedBulkSourceLocalRoot = "archive";
 let archiveSelectedBulkDestPath = "";
 let archiveSelectedBulkDestType = "local";
+let archiveSelectedBulkDestLocalRoot = "archive";
 let archiveSelectedFolderTargetSourcePath = "";
 let archiveSelectedFolderTargetSourceType = "local";
 let archiveSelectedFolderTargetDestPath = "";
@@ -2029,24 +2066,29 @@ async function loadArchivePage() {
   // 일괄 이동은 "이미 파일이 있는 폴더"를 다루는 게 목적이므로, 대상 지정용
   // 선택기와 달리 "이미 파일 있음" 확인 절차를 건너뛴다(skipExistingCheck).
   // 원본/목적지가 로컬/원격 어느 조합이든(로컬-로컬, 로컬-원격, 원격-로컬,
-  // 원격-원격) 지원해야 하므로 destType도 각각 따로 기억해둔다.
+  // 원격-원격) 지원해야 하므로 destType/localRoot도 각각 따로 기억해둔다.
+  // localRoots: ["archive","download"] — 이미 완결됐는데 구독 안 해서 자동
+  // 아카이빙 대상엔 못 올리는 웹툰처럼, 다운로드 폴더에 있는 걸 그대로 보관
+  // 폴더로 옮기고 싶을 때 DOWNLOAD_ROOT도 원본으로 고를 수 있게 하기 위함.
   renderFolderPicker(
     "bulk-move-source-picker",
-    (path, destType) => {
+    (path, destType, localRoot) => {
       archiveSelectedBulkSourcePath = path;
       archiveSelectedBulkSourceType = destType;
+      archiveSelectedBulkSourceLocalRoot = localRoot || "archive";
     },
     "",
-    { skipExistingCheck: true }
+    { skipExistingCheck: true, localRoots: ["archive", "download"] }
   );
   renderFolderPicker(
     "bulk-move-dest-picker",
-    (path, destType) => {
+    (path, destType, localRoot) => {
       archiveSelectedBulkDestPath = path;
       archiveSelectedBulkDestType = destType;
+      archiveSelectedBulkDestLocalRoot = localRoot || "archive";
     },
     "",
-    { skipExistingCheck: true }
+    { skipExistingCheck: true, localRoots: ["archive", "download"] }
   );
   await loadFilenamePresets();
   await loadArchiveTargetList();
@@ -2647,8 +2689,10 @@ document.getElementById("btn-run-bulk-move").addEventListener("click", async () 
       body: JSON.stringify({
         source_type: archiveSelectedBulkSourceType,
         source_path: archiveSelectedBulkSourcePath,
+        source_local_root: archiveSelectedBulkSourceLocalRoot,
         dest_type: archiveSelectedBulkDestType,
         dest_path: archiveSelectedBulkDestPath,
+        dest_local_root: archiveSelectedBulkDestLocalRoot,
       }),
     });
     // 파일 개수가 많으면 수 분 걸릴 수 있어서, 응답을 기다리지 않고 바로
