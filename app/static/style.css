@@ -164,7 +164,8 @@ select {
   overflow: hidden;
   margin-bottom: 14px;
 }
-.archive-target-type-tab {
+.archive-target-type-tab,
+.archive-preview-type-tab {
   padding: 7px 16px;
   font-size: 13px;
   border: none;
@@ -173,10 +174,12 @@ select {
   color: var(--muted);
   cursor: pointer;
 }
-.archive-target-type-tab + .archive-target-type-tab {
+.archive-target-type-tab + .archive-target-type-tab,
+.archive-preview-type-tab + .archive-preview-type-tab {
   border-left: 0.5px solid var(--border);
 }
-.archive-target-type-tab.active {
+.archive-target-type-tab.active,
+.archive-preview-type-tab.active {
   background: var(--surface-alt, #f1f1f1);
   color: var(--text);
   font-weight: 600;

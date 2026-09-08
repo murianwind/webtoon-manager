@@ -1351,8 +1351,11 @@ class ArchiveSettingsIn(BaseModel):
 
 
 class PreviewFilenameIn(BaseModel):
-    title_id: str
+    title_id: str = ""  # 웹툰 미리보기용 (source_type="webtoon"일 때)
     template: str = ""
+    source_type: str = "webtoon"  # webtoon | folder
+    source_dest_type: str = "local"  # source_type="folder"일 때: local | rclone
+    source_path: str = ""  # source_type="folder"일 때: ARCHIVE_ROOT 기준 경로 또는 "remote:path"
 
 
 class PreviewFilenameOut(BaseModel):
@@ -1364,10 +1367,13 @@ class PreviewFilenameOut(BaseModel):
 @router.post("/archive/preview-filename", response_model=PreviewFilenameOut)
 async def preview_archive_filename(payload: PreviewFilenameIn):
     settings = get_settings()
-    target = await asyncio.to_thread(repository.get_archive_target, payload.title_id)
-    if target is not None and target.source_type == "folder":
+    if payload.source_type == "folder":
+        if not payload.source_path:
+            raise HTTPException(status_code=400, detail="미리볼 폴더를 먼저 선택하세요.")
         result = await asyncio.to_thread(
-            archiver.preview_filename_for_folder_target, settings.archive_root, settings.rclone_config_path, target, payload.template
+            archiver.preview_filename_for_folder,
+            settings.archive_root, settings.rclone_config_path,
+            payload.source_dest_type, payload.source_path, payload.template,
         )
         return PreviewFilenameOut(**result)
 

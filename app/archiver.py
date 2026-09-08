@@ -299,33 +299,36 @@ def preview_filename_for_title(download_root: str, title_name: str, template: st
     return {"original_filename": src.name, "rendered_filename": rendered, "message": "정상적으로 변환됩니다."}
 
 
-def preview_filename_for_folder_target(archive_root: str, rclone_config_path: str, target, template: str) -> dict:
-    """폴더 대상용 미리보기. 원본이 로컬이면 웹툰 미리보기와 동일하게 실제 템플릿
-    적용 결과를 보여준다. 원본이 rclone이면 실제 아카이빙 때도 템플릿을 적용하지
-    않으므로(zip 내용을 안 받아서 {page_count}를 셀 수 없어서), 그 사실을 그대로
-    안내하고 원본 파일명만 보여준다 — 실제 동작과 다른 미리보기를 보여주지 않기 위함."""
-    display_name = target.display_name or _derive_folder_display_name(target.source_dest_type, target.source_path)
+def preview_filename_for_folder(
+    archive_root: str, rclone_config_path: str, source_dest_type: str, source_path: str, template: str
+) -> dict:
+    """임의의 폴더(ARCHIVE_ROOT 밑, 등록된 대상 여부와 무관) 기준 미리보기.
+    원본이 로컬이면 웹툰 미리보기와 동일하게 실제 템플릿 적용 결과를 보여준다.
+    원본이 rclone이면 실제 아카이빙 때도 템플릿을 적용하지 않으므로(zip 내용을
+    안 받아서 {page_count}를 셀 수 없어서), 그 사실을 그대로 안내하고 원본
+    파일명만 보여준다 — 실제 동작과 다른 미리보기를 보여주지 않기 위함."""
+    display_name = _derive_folder_display_name(source_dest_type, source_path)
 
-    if target.source_dest_type == "rclone":
+    if source_dest_type == "rclone":
         try:
-            remote, path = _parse_rclone_target(target.source_path)
+            remote, path = _parse_rclone_target(source_path)
             names = rclone_client.list_top_level_files(rclone_config_path, remote, path)
         except Exception as e:
             return {"original_filename": None, "rendered_filename": None, "message": f"원본 원격 폴더 목록을 읽을 수 없습니다: {e}"}
         zip_names = [n for n in names if n.endswith(".zip") and _LEADING_DIGITS_RE.match(n)]
         if not zip_names:
-            return {"original_filename": None, "rendered_filename": None, "message": "원본 폴더에 zip 파일이 없습니다."}
+            return {"original_filename": None, "rendered_filename": None, "message": "이 폴더에 zip 파일이 없습니다."}
         zip_names.sort(key=lambda n: int(_LEADING_DIGITS_RE.match(n).group(1)))
         return {
             "original_filename": zip_names[-1],
             "rendered_filename": None,
-            "message": "이 대상은 원격(rclone) 원본이라 파일명 템플릿이 적용되지 않고 원본 파일명 그대로 이동됩니다.",
+            "message": "이 폴더는 원격(rclone)이라 파일명 템플릿이 적용되지 않고 원본 파일명 그대로 이동됩니다.",
         }
 
-    src_dir = _local_archive_path(archive_root, target.source_path)
+    src_dir = _local_archive_path(archive_root, source_path)
     files = _list_episode_files_sorted(src_dir)
     if not files:
-        return {"original_filename": None, "rendered_filename": None, "message": "원본 폴더에 zip 파일이 없습니다."}
+        return {"original_filename": None, "rendered_filename": None, "message": "이 폴더에 zip 파일이 없습니다."}
     _num, src = files[-1]
     if not template.strip():
         return {"original_filename": src.name, "rendered_filename": None, "message": "템플릿이 비어있어 원본 파일명 그대로 이동됩니다."}

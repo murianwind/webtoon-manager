@@ -2364,6 +2364,16 @@ async function loadArchiveSettings() {
     archiveGlobalFilenameTemplate = data.filename_template || "";
     document.getElementById("archive-filename-template").value = archiveGlobalFilenameTemplate;
     await loadArchiveTemplatePreviewTitleList();
+    renderFolderPicker(
+      "archive-filename-template-preview-folder-picker",
+      (path, destType) => {
+        archivePreviewFolderPath = path;
+        archivePreviewFolderDestType = destType;
+        updateArchiveFilenameTemplatePreview();
+      },
+      "",
+      { skipExistingCheck: true }
+    );
     updateArchiveFilenameTemplatePreview();
     archiveSelectedDefaultPath = data.default_base_path;
     archiveSelectedDefaultDestType = data.default_dest_type;
@@ -2379,27 +2389,17 @@ let archiveTemplatePreviewDebounceTimer = null;
 async function loadArchiveTemplatePreviewTitleList() {
   const select = document.getElementById("archive-filename-template-preview-title");
   try {
-    const [webtoons, targets] = await Promise.all([
-      apiCall("/api/webtoons?status=active"),
-      apiCall("/api/archive/targets"),
-    ]);
-    const folderTargets = targets.filter((t) => t.source_type === "folder");
+    const webtoons = await apiCall("/api/webtoons?status=active");
     const previousValue = select.value;
     select.innerHTML = "";
-    if (webtoons.length === 0 && folderTargets.length === 0) {
-      select.innerHTML = '<option value="">미리볼 대상이 없습니다</option>';
+    if (webtoons.length === 0) {
+      select.innerHTML = '<option value="">구독 중인 웹툰이 없습니다</option>';
       return;
     }
     for (const wt of webtoons) {
       const opt = document.createElement("option");
       opt.value = wt.title_id;
       opt.textContent = wt.title;
-      select.appendChild(opt);
-    }
-    for (const t of folderTargets) {
-      const opt = document.createElement("option");
-      opt.value = t.title_id;
-      opt.textContent = `📁 ${t.title_name}`;
       select.appendChild(opt);
     }
     if (previousValue && [...select.options].some((o) => o.value === previousValue)) {
@@ -2410,20 +2410,41 @@ async function loadArchiveTemplatePreviewTitleList() {
   }
 }
 
+let archivePreviewType = "webtoon";
+let archivePreviewFolderPath = "";
+let archivePreviewFolderDestType = "local";
+
+document.querySelectorAll(".archive-preview-type-tab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    archivePreviewType = btn.dataset.type;
+    document.querySelectorAll(".archive-preview-type-tab").forEach((b) => b.classList.toggle("active", b === btn));
+    document.getElementById("archive-filename-template-preview-title").classList.toggle("hidden", archivePreviewType !== "webtoon");
+    document.getElementById("archive-filename-template-preview-folder-picker").classList.toggle("hidden", archivePreviewType !== "folder");
+    updateArchiveFilenameTemplatePreview();
+  });
+});
+
 async function updateArchiveFilenameTemplatePreview() {
   const template = document.getElementById("archive-filename-template").value;
-  const titleId = document.getElementById("archive-filename-template-preview-title").value;
   const previewEl = document.getElementById("archive-filename-template-preview");
-  if (!titleId) {
-    previewEl.textContent = "미리보기할 웹툰을 선택하세요.";
-    return;
+  let payload;
+  if (archivePreviewType === "folder") {
+    if (!archivePreviewFolderPath) {
+      previewEl.textContent = "미리보기할 폴더를 선택하세요.";
+      return;
+    }
+    payload = { source_type: "folder", source_dest_type: archivePreviewFolderDestType, source_path: archivePreviewFolderPath, template };
+  } else {
+    const titleId = document.getElementById("archive-filename-template-preview-title").value;
+    if (!titleId) {
+      previewEl.textContent = "미리보기할 웹툰을 선택하세요.";
+      return;
+    }
+    payload = { source_type: "webtoon", title_id: titleId, template };
   }
   previewEl.textContent = "확인 중...";
   try {
-    const result = await apiCall("/api/archive/preview-filename", {
-      method: "POST",
-      body: JSON.stringify({ title_id: titleId, template }),
-    });
+    const result = await apiCall("/api/archive/preview-filename", { method: "POST", body: JSON.stringify(payload) });
     if (!result.original_filename) {
       previewEl.textContent = result.message;
     } else if (result.rendered_filename) {
