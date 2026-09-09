@@ -1083,7 +1083,6 @@ class ArchiveTargetOut(BaseModel):
     dest_base_path: str
     dest_type: str
     enabled: bool
-    folder_had_existing_files: bool = False
     source_type: str = "webtoon"
     source_dest_type: str = "local"
     source_path: str = ""
@@ -1162,25 +1161,18 @@ async def add_archive_target(payload: ArchiveTargetIn):
     if payload.dest_type == "rclone":
         if not (settings.rclone_config_path and Path(settings.rclone_config_path).is_file()):
             raise HTTPException(status_code=400, detail="rclone 설정 파일이 등록되어 있지 않습니다.")
-        selectable = await asyncio.to_thread(
-            archiver.is_folder_selectable_as_dest_rclone, settings.rclone_config_path, payload.dest_base_path
-        )
     else:
         if not settings.archive_root:
             raise HTTPException(status_code=400, detail="로컬 아카이빙 경로(ARCHIVE_ROOT)가 설정되어 있지 않습니다.")
-        selectable = await asyncio.to_thread(
-            archiver.is_folder_selectable_as_dest, settings.archive_root, payload.dest_base_path
-        )
-    # 이미 파일이 있는 폴더도 이제는 허용한다 — 대신 응답에 경고 플래그를 담아서
-    # 프론트엔드가 사용자에게 주의를 주게 한다 (전에는 여기서 막았었음).
+    # 이미 파일이 있는 폴더도 허용한다 — "이미 파일이 있습니다" 경고는 프론트엔드의
+    # 폴더 선택기 단계(/archive/folder-check)에서 이미 보여주고 확인받으므로,
+    # 여기서는 그 경고를 다시 검사하지 않는다(등록 자체는 항상 그대로 진행).
 
     await asyncio.to_thread(
         repository.upsert_archive_target, payload.title_id, payload.dest_base_path, True, payload.dest_type
     )
     target = await asyncio.to_thread(repository.get_archive_target, payload.title_id)
-    out = _archive_target_to_out(target)
-    out.folder_had_existing_files = not selectable
-    return out
+    return _archive_target_to_out(target)
 
 
 @router.post("/archive/folder-targets", response_model=ArchiveTargetOut)

@@ -456,6 +456,19 @@ def _move_file_to_rclone_with_conflict_policy(
     return dest_name, had_conflict
 
 
+def _move_episode_file(
+    dest_type: str, src: Path, dest_filename: str | None, policy: str,
+    rclone_config_path: str, remote: str, rclone_dest_path: str, local_dest_dir: Path | None,
+) -> tuple[str | None, bool]:
+    """dest_type에 따라 로컬/rclone 이동 함수 중 맞는 쪽으로 그대로 위임한다.
+    _archive_title이 로컬/rclone 분기마다 완전히 같은 반복문을 두 번 쓰지 않도록
+    뽑아낸 것 — 실제 이동 규칙(충돌 정책 등)은 각 함수에 그대로 있고, 여기선
+    아무 로직도 새로 추가하지 않는다(순수 위임)."""
+    if dest_type == "rclone":
+        return _move_file_to_rclone_with_conflict_policy(rclone_config_path, src, remote, rclone_dest_path, policy, dest_filename)
+    return move_file_with_conflict_policy(src, local_dest_dir, policy, dest_filename)
+
+
 def _archive_title(
     archive_root: str, download_root: str, title_id: str, title_name: str,
     base_path: str, policy: str, trigger_type: str, keep_last: bool,
@@ -501,58 +514,43 @@ def _archive_title(
         return 0
 
     force_subfolder = base_path == get_default_base_path()
-    moved = 0
     template = _get_effective_filename_template(filename_template_preset_id)
 
+    remote, rclone_dest_path, local_dest_dir = "", "", None
     if dest_type == "rclone":
         dest_target = _resolve_archive_dest_rclone(rclone_config_path, title_name, base_path, force_subfolder=force_subfolder)
-        remote, dest_path = _parse_rclone_target(dest_target)
-        for _num, src in files:
-            try:
-                dest_filename = render_archive_filename(template, src.name, title_name, writer_names or [], zip_path_for_page_count=src) if template else None
-                saved_name, had_conflict = _move_file_to_rclone_with_conflict_policy(
-                    rclone_config_path, src, remote, dest_path, policy, dest_filename
-                )
-                if had_conflict and conflict_log is not None:
-                    conflict_log.append((title_name, src.name, policy))
-                if saved_name is not None:
-                    repository.add_archive_history(title_id, title_name, saved_name, trigger_type)
-                    moved += 1
-                    if progress_callback:
-                        progress_callback(f"[{title_name}] 이동 완료: {saved_name}")
-                elif progress_callback:
-                    progress_callback(f"[{title_name}] 건너뜀(이미 존재): {src.name}")
-            except Exception as e:
-                log.error("rclone 아카이빙 이동 실패 (%s): %s", src, e)
-                if progress_callback:
-                    progress_callback(f"[{title_name}] 이동 실패: {src.name} — {e}")
-                if failure_log is not None:
-                    failure_log.append((title_name, src.name, str(e)))
-        if metadata_files:
-            _archive_metadata_files_rclone(rclone_config_path, metadata_files, remote, dest_path, keep_last=keep_last)
+        remote, rclone_dest_path = _parse_rclone_target(dest_target)
     else:
-        dest_dir = resolve_archive_dest(archive_root, title_name, base_path, force_subfolder=force_subfolder)
-        for _num, src in files:
-            try:
-                dest_filename = render_archive_filename(template, src.name, title_name, writer_names or [], zip_path_for_page_count=src) if template else None
-                saved_name, had_conflict = move_file_with_conflict_policy(src, dest_dir, policy, dest_filename)
-                if had_conflict and conflict_log is not None:
-                    conflict_log.append((title_name, src.name, policy))
-                if saved_name is not None:
-                    repository.add_archive_history(title_id, title_name, saved_name, trigger_type)
-                    moved += 1
-                    if progress_callback:
-                        progress_callback(f"[{title_name}] 이동 완료: {saved_name}")
-                elif progress_callback:
-                    progress_callback(f"[{title_name}] 건너뜀(이미 존재): {src.name}")
-            except Exception as e:
-                log.error("아카이빙 이동 실패 (%s): %s", src, e)
+        local_dest_dir = resolve_archive_dest(archive_root, title_name, base_path, force_subfolder=force_subfolder)
+
+    moved = 0
+    for _num, src in files:
+        try:
+            dest_filename = render_archive_filename(template, src.name, title_name, writer_names or [], zip_path_for_page_count=src) if template else None
+            saved_name, had_conflict = _move_episode_file(
+                dest_type, src, dest_filename, policy, rclone_config_path, remote, rclone_dest_path, local_dest_dir
+            )
+            if had_conflict and conflict_log is not None:
+                conflict_log.append((title_name, src.name, policy))
+            if saved_name is not None:
+                repository.add_archive_history(title_id, title_name, saved_name, trigger_type)
+                moved += 1
                 if progress_callback:
-                    progress_callback(f"[{title_name}] 이동 실패: {src.name} — {e}")
-                if failure_log is not None:
-                    failure_log.append((title_name, src.name, str(e)))
-        if metadata_files:
-            _archive_metadata_files_local(metadata_files, dest_dir, keep_last=keep_last)
+                    progress_callback(f"[{title_name}] 이동 완료: {saved_name}")
+            elif progress_callback:
+                progress_callback(f"[{title_name}] 건너뜀(이미 존재): {src.name}")
+        except Exception as e:
+            log.error("아카이빙 이동 실패 (%s): %s", src, e)
+            if progress_callback:
+                progress_callback(f"[{title_name}] 이동 실패: {src.name} — {e}")
+            if failure_log is not None:
+                failure_log.append((title_name, src.name, str(e)))
+
+    if metadata_files:
+        if dest_type == "rclone":
+            _archive_metadata_files_rclone(rclone_config_path, metadata_files, remote, rclone_dest_path, keep_last=keep_last)
+        else:
+            _archive_metadata_files_local(metadata_files, local_dest_dir, keep_last=keep_last)
     return moved
 
 
