@@ -197,6 +197,15 @@ async def scan_kakao_authors_for_new_titles(session: aiohttp.ClientSession, sett
         already_seen = repository.get_seen_kakao_title_ids(author.author_name)
         is_first_scan = len(already_seen) == 0
 
+        if is_first_scan and results:
+            # "0건 발견"이라고만 나오면 "기준선만 저장했다"와 "진짜로 신작이 없다"를
+            # 구분할 수 없어서 헷갈린다는 문제가 실제로 있었다 — 이번이 처음 등록한
+            # 작가의 첫 스캔이라는 걸 명시적으로 남긴다.
+            job_status.log_line(
+                "discovery",
+                f"[카카오/{author.author_name}] 처음 등록된 작가라 기존 작품 {len(results)}개를 기준선으로만 저장했습니다 (알림 없음, 다음 스캔부터 진짜 신작만 알림)",
+            )
+
         for item in results:
             if item["title_id"] in already_seen:
                 continue

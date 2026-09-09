@@ -232,8 +232,8 @@ select {
 /* 네이버 전체목록: 카드 그리드 */
 .webtoon-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
 }
 .webtoon-card {
   background: var(--card);
@@ -255,34 +255,36 @@ select {
   background: #eee;
 }
 .webtoon-card-body {
-  padding: 10px 12px 4px;
+  padding: 7px 9px 3px;
   flex: 1;
 }
 .webtoon-card-title {
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 600;
-  margin-bottom: 4px;
+  margin-bottom: 3px;
 }
 .webtoon-card-meta {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 .webtoon-card-actions {
   display: flex;
-  gap: 6px;
-  padding: 8px 12px 12px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 9px 9px;
 }
-.webtoon-card-actions button { flex: 1; font-size: 12px; padding: 6px 8px; }
+.webtoon-card-actions button { font-size: 11px; padding: 4px 6px; }
 .webtoon-card-actions .icon-btn {
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--muted);
+  align-self: center;
 }
 .webtoon-card-actions .icon-btn:hover {
   color: var(--accent);
@@ -549,7 +551,6 @@ select {
 }
 
 .webtoon-grid.small {
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   margin-bottom: 16px;
 }
 
