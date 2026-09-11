@@ -75,6 +75,19 @@ select {
   font-weight: 600;
 }
 
+/* 검색창 등 툴바: 스크롤해도 상단 탭 밑에 붙어서 항상 보이게 고정.
+   .main-tabs가 top:0에 고정돼 있으니, 그 실제 높이(패딩+글자+테두리 ≈ 41px)만큼
+   아래에서 시작해야 겹치지 않는다 — 화면이 좁아져서 탭이 두 줄로 감싸지면
+   약간 어긋날 수 있지만, 이 앱은 주로 넓은 화면에서 쓰이므로 우선순위가 낮다.*/
+.toolbar-sticky {
+  position: sticky;
+  top: 41px;
+  background: var(--bg);
+  z-index: 15;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
 .page.hidden { display: none; }
 .hidden { display: none; }
 

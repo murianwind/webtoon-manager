@@ -1657,6 +1657,17 @@ function _invalidateFolderListCache(isRclone, remoteOrRoot, path) {
   delete _folderListCache[_folderListCacheKey(isRclone, remoteOrRoot, path)];
 }
 
+function _invalidateAllRcloneCacheForRemote(remote) {
+  // 원격 서비스에서 직접(이 앱 밖에서) 폴더를 새로 만들면, 캐시에 남아있는 예전
+  // 목록 때문에 "이 원격 사용"을 다시 눌러도 새 폴더가 안 보이는 문제가 실제로
+  // 있었다 — 원격을 다시 고를 때는 그 원격에 대한 캐시를 전부 지워서 항상
+  // 새로 조회하게 한다.
+  const prefix = `rclone:${remote}:`;
+  for (const key of Object.keys(_folderListCache)) {
+    if (key.startsWith(prefix)) delete _folderListCache[key];
+  }
+}
+
 async function renderFolderPickerContents(containerId, onSelect) {
   const container = document.getElementById(containerId);
   const state = archiveFolderPickerState[containerId];
@@ -1756,6 +1767,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
       select.innerHTML = remotesData.remotes.map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join("");
       const chooseBtn = makeButton("이 원격 사용", () => {
         state.remote = select.value;
+        _invalidateAllRcloneCacheForRemote(state.remote);
         renderFolderPickerContents(containerId, onSelect);
       });
       remoteRow.appendChild(select);

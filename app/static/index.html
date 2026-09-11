@@ -25,7 +25,7 @@
 
   <!-- 네이버 전체 목록 -->
   <section id="page-naver-list" class="page">
-    <div class="toolbar">
+    <div class="toolbar toolbar-sticky">
       <input id="naver-list-search" type="text" placeholder="제목/저자로 검색" />
       <select id="naver-list-filter-status">
         <option value="all">전체</option>
@@ -46,8 +46,8 @@
 
   <!-- 구독해제 -->
   <section id="page-unsubscribed" class="page hidden">
-    <div class="toolbar">
-      <input id="unsubscribed-search" type="text" placeholder="제목으로 검색" />
+    <div class="toolbar toolbar-sticky">
+      <input id="unsubscribed-search" type="text" placeholder="제목/저자로 검색" />
       <select id="unsubscribed-author-filter"><option value="">작가 전체</option></select>
       <select id="unsubscribed-tag-filter"><option value="">태그 전체</option></select>
       <select id="unsubscribed-badge-filter">
@@ -62,8 +62,8 @@
 
   <!-- 제외됨 -->
   <section id="page-excluded" class="page hidden">
-    <div class="toolbar">
-      <input id="excluded-search" type="text" placeholder="제목으로 검색" />
+    <div class="toolbar toolbar-sticky">
+      <input id="excluded-search" type="text" placeholder="제목/저자로 검색" />
       <select id="excluded-author-filter"><option value="">작가 전체</option></select>
       <select id="excluded-tag-filter"><option value="">태그 전체</option></select>
       <select id="excluded-badge-filter">
