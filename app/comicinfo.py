@@ -50,6 +50,17 @@ _COMICINFO_TEMPLATE = """<?xml version="1.0"?>
 </ComicInfo>
 """
 
+# 네이버/카카오가 같은 등급을 서로 다른 이름("전체연령가" vs "전체이용가")으로
+# 부르는 경우가 있어서, info.xml에서는 하나로 통일한다. 여기 없는 값(15세 이용가
+# 등)은 원래 문구를 그대로 쓴다.
+_AGE_RATING_NORMALIZE = {
+    "전체연령가": "전체이용가",
+}
+
+
+def _normalize_age_rating(age_description: str) -> str:
+    return _AGE_RATING_NORMALIZE.get(age_description, age_description)
+
 
 def build_comicinfo_xml(info: TitleInfo) -> str:
     writer_names = ", ".join(dict.fromkeys(info.writer_names))
@@ -67,7 +78,7 @@ def build_comicinfo_xml(info: TitleInfo) -> str:
         genre=escape(",".join(genre_display)),
         tags=escape(",".join(info.tags)),
         web=escape(NAVER_SERIES_URL_TEMPLATE.format(title_id=info.title_id)),
-        age_rating=escape(info.age_description),
+        age_rating=escape(_normalize_age_rating(info.age_description)),
         series_status="완결" if info.is_finished else "연재",
     )
 
