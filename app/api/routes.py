@@ -1648,6 +1648,7 @@ class BulkMoveIn(BaseModel):
     dest_path: str
     dest_local_root: str = "archive"
     filename_template_preset_id: int | None = None  # None이면 파일명을 안 건드리고 그대로 이동
+    regenerate_kakao_cover: bool = False  # 켜면 원본이 카카오웹툰이면(info.xml 판단) 표지를 새로 합성
 
     @field_validator("source_type", "dest_type")
     @classmethod
@@ -1699,6 +1700,7 @@ async def bulk_move(payload: BulkMoveIn):
                 payload.source_type, payload.source_path,
                 payload.dest_type, payload.dest_path,
                 lambda msg: job_status.log_line("bulk_move", msg), filename_template,
+                payload.regenerate_kakao_cover,
             )
             # 이력은 이제 bulk_move_folder 안에서 파일마다 한 줄씩 직접 남긴다
             # (주기/수동/완결 이동과 동일한 단위) — 여기서 요약 한 줄을 따로 더

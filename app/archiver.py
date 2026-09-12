@@ -1009,6 +1009,7 @@ def bulk_move_folder(
     source_type: str, source_path: str,
     dest_type: str, dest_path: str,
     progress_callback=None, filename_template: str = "",
+    regenerate_kakao_cover: bool = False,
 ) -> int:
     """1회성 폴더→폴더 전체 이동 (아카이빙 대상 지정 규칙과 무관, 백업 정리용).
     로컬-로컬/로컬-원격/원격-로컬/원격-원격 네 조합을 전부 지원한다.
@@ -1028,11 +1029,40 @@ def bulk_move_folder(
     구조를 인식 못 하면(카카오식/네이버식 둘 다 아니면) 그 파일만 원본 이름
     그대로 옮긴다 — 일부 인식 안 되는 파일이 있다고 전체가 실패하지 않는다.
 
+    regenerate_kakao_cover(선택, 기본 꺼짐): 켜면 원본 폴더가 카카오웹툰이면
+    (info.xml의 <Web> 태그로 판단) 표지를 최신 합성 방식으로 새로 만들어서 옮긴다
+    — 아카이빙 대상(완결 처리)과 같은 로직이지만, 일괄 이동은 "완결/주기" 구분이
+    없는 1회성 이동이라 매번 강제로 하지 않고 옵션으로만 켤 수 있게 했다.
+
     progress_callback(선택): 파일 하나 처리할 때마다 사람이 읽을 진행 메시지
     문자열 하나를 넘겨서 호출한다. archiver.py는 이 메시지를 어디에 기록할지
     (화면 표시용 job_status 등) 전혀 모른다 — 호출부(routes.py)가 원하는 대로
     쓰도록 콜백으로만 분리해서, 이 모듈이 웹/잡 상태 계층에 의존하지 않게 한다."""
     policy = get_conflict_policy()
+
+    # 카카오 표지 갱신: 로컬 원본은 목록을 모으기 전에 그 자리에서 바로 새 cover.jpg로
+    # 바꿔치기해두면, 아래 목록 조회에 자연스럽게 새 파일로 잡힌다(원본 폴더 안의
+    # 파일을 실제로 바꾸는 것이므로 별도 처리가 필요 없음). 원격 원본은 폴더 전체를
+    # 내려받을 수 없으니, info.xml만 가볍게 읽어 판별한 뒤 합성 결과를 임시 파일로만
+    # 만들어두고, 아래 반복문에서 원본 cover.*를 이 파일로 교체해서 옮긴다.
+    kakao_cover_temp_path = None
+    if regenerate_kakao_cover:
+        try:
+            if source_type == "local":
+                local_src_dir = _local_archive_path(source_local_root, source_path)
+                if kakao_cover.refresh_kakao_cover_if_applicable(local_src_dir) and progress_callback:
+                    progress_callback("카카오 표지 갱신함")
+            else:
+                remote, path = _parse_rclone_target(source_path)
+                xml_text = rclone_client.read_small_text_file(rclone_config_path, remote, path, "info.xml")
+                content_id = kakao_cover.parse_kakao_web_url(_extract_web_url_from_xml_text(xml_text) or "")
+                if content_id:
+                    kakao_cover_temp_path = _compose_kakao_cover_to_temp_file(content_id)
+                    if kakao_cover_temp_path and progress_callback:
+                        progress_callback("카카오 표지 갱신함")
+        except Exception as e:
+            log.warning("일괄 이동 중 카카오 표지 갱신 실패 (무시하고 계속): %s", e)
+
     rel_files, src_ctx = _bulk_move_collect_source_files(source_type, source_local_root, rclone_config_path, source_path)
     total = len(rel_files)
     if progress_callback:
@@ -1055,11 +1085,34 @@ def bulk_move_folder(
         dest_ctx = (remote, base_path)
 
     moved = 0
+    cover_replaced = False
     for index, rel_path in enumerate(rel_files, start=1):
         try:
+            rel = PurePosixPath(rel_path)
+            if kakao_cover_temp_path and not cover_replaced and rel.name.lower().startswith("cover."):
+                dest_cover_rel = str(rel.parent / "cover.jpg") if str(rel.parent) != "." else "cover.jpg"
+                final_rel = _bulk_move_resolve_final_rel(policy, dest_type, dest_ctx, dest_cover_rel, rclone_config_path)
+                if final_rel is not None:
+                    dest_spec = _generic_file_spec(dest_type, dest_ctx, final_rel)
+                    if dest_type == "local":
+                        Path(dest_spec).parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(kakao_cover_temp_path, dest_spec)
+                    else:
+                        rclone_client.copyto(rclone_config_path, kakao_cover_temp_path, dest_spec)
+                    remote_src, base_src = src_ctx
+                    del_dir = f"{base_src}/{rel.parent}" if str(rel.parent) != "." else base_src
+                    rclone_client.delete_file(rclone_config_path, remote_src, del_dir, rel.name)
+                    Path(kakao_cover_temp_path).unlink(missing_ok=True)
+                    kakao_cover_temp_path = None
+                    cover_replaced = True
+                    moved += 1
+                    repository.add_archive_history("-", batch_label, final_rel, "bulk_move")
+                    if progress_callback:
+                        progress_callback(f"[{index}/{total}] 이동 완료(표지 갱신): {final_rel}")
+                    continue
+
             desired_rel_path = rel_path
             if filename_template.strip():
-                rel = PurePosixPath(rel_path)
                 title_candidate = rel.parent.name if str(rel.parent) != "." else _derive_folder_display_name(source_type, source_path)
                 zip_path_for_page_count = (src_ctx / rel_path) if source_type == "local" else None
                 rendered = render_archive_filename(
@@ -1086,6 +1139,9 @@ def bulk_move_folder(
             log.error("일괄 이동 중 개별 파일 실패, 건너뜀 (%s): %s", rel_path, e)
             if progress_callback:
                 progress_callback(f"[{index}/{total}] 실패(건너뜀): {rel_path} — {e}")
+
+    if kakao_cover_temp_path:
+        Path(kakao_cover_temp_path).unlink(missing_ok=True)
 
     if progress_callback:
         progress_callback("원본 쪽 빈 폴더 정리 중")

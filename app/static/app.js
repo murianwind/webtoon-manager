@@ -2754,6 +2754,7 @@ document.getElementById("btn-run-bulk-move").addEventListener("click", async () 
         filename_template_preset_id: document.getElementById("bulk-move-preset-select").value
           ? Number(document.getElementById("bulk-move-preset-select").value)
           : null,
+        regenerate_kakao_cover: document.getElementById("bulk-move-kakao-cover-toggle").checked,
       }),
     });
     // 파일 개수가 많으면 수 분 걸릴 수 있어서, 응답을 기다리지 않고 바로

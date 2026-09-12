@@ -165,3 +165,10 @@ def read_small_text_file(config_path: str, remote: str, path: str, file_name: st
         return _run(config_path, ["cat", target])
     except RcloneError:
         return None
+
+
+def delete_file(config_path: str, remote: str, path: str, file_name: str) -> None:
+    """remote 위의 파일 하나를 지운다 — 카카오 표지를 새로 합성해서 다른 파일로
+    교체할 때, 원본 표지 파일을 지우는 용도로 쓴다."""
+    target = f"{remote}:{path}/{file_name}" if path else f"{remote}:{file_name}"
+    _run(config_path, ["deletefile", target])
