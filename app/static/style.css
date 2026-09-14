@@ -756,6 +756,28 @@ select {
 }
 
 /* 아카이빙 폴더 선택기 */
+.folder-picker-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+}
+.folder-picker-summary-text {
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-picker-collapse-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  margin-bottom: 10px;
+}
 .folder-picker-mode-row {
   display: flex;
   gap: 6px;

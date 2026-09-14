@@ -1624,6 +1624,10 @@ async function renderFolderPicker(containerId, onSelect, initialPath, options) {
     saved.skipExistingCheck = skipExistingCheck;
     saved.localRoots = localRoots;
     if (!saved.localRoot) saved.localRoot = localRoots[0];
+    // 폴더 목록은 항상 접힌 채로 시작한다 — 화면에 폴더 선택기가 여러 개 쌓이면
+    // 전부 펼쳐진 채로 나와서 공간을 너무 많이 차지한다는 문제가 실제로 있었다.
+    // 이미 골라둔 게 있으면 그 요약("선택됨: ...")만 보이고, 눌러야 펼쳐진다.
+    saved.expanded = false;
     archiveFolderPickerState[containerId] = saved;
     renderFolderPickerContents(containerId, onSelect);
     return;
@@ -1643,6 +1647,7 @@ async function renderFolderPicker(containerId, onSelect, initialPath, options) {
   }
   archiveFolderPickerState[containerId] = {
     mode: startMode, path: initialPath || "", remote: "", skipExistingCheck, localRoots, localRoot: localRoots[0],
+    expanded: false,
   };
   renderFolderPickerContents(containerId, onSelect);
 }
@@ -1672,6 +1677,27 @@ async function renderFolderPickerContents(containerId, onSelect) {
   const container = document.getElementById(containerId);
   const state = archiveFolderPickerState[containerId];
   saveFolderPickerState(containerId);
+
+  if (!state.expanded) {
+    // 접힌 상태 — 지금 뭐가 골라져 있는지 한 줄로만 보여주고, 실제 폴더 목록은
+    // 눌러야 나온다. 폴더 선택기가 여러 개 세로로 쌓인 화면에서 전부 펼쳐진
+    // 채로 나오면 스크롤이 끔찍하게 길어진다는 문제가 실제로 있었다.
+    container.innerHTML = "";
+    const summary = document.createElement("div");
+    summary.className = "folder-picker-summary";
+    const label = document.createElement("span");
+    label.className = "folder-picker-summary-text";
+    label.textContent = state.selectedLabel ? `선택됨: ${state.selectedLabel}` : "폴더를 선택하지 않았습니다.";
+    const expandBtn = makeButton(state.selectedLabel ? "변경" : "폴더 선택하기", () => {
+      state.expanded = true;
+      renderFolderPickerContents(containerId, onSelect);
+    });
+    summary.appendChild(label);
+    summary.appendChild(expandBtn);
+    container.appendChild(summary);
+    return;
+  }
+
   // 폴더를 선택하면 목록 전체를 다시 그리는데, 그때마다 스크롤이 맨 위로
   // 돌아가버리면 방금 고른 게 지금 보이는 위치에서 벗어나 있을 수 있어서
   // "선택이 제대로 됐는지" 눈으로 바로 확인하기 어려웠다 — 다시 그리기 전의
@@ -1688,6 +1714,13 @@ async function renderFolderPickerContents(containerId, onSelect) {
   }
   container.innerHTML = "";
 
+  const collapseBtn = makeButton("▲ 접기", () => {
+    state.expanded = false;
+    renderFolderPickerContents(containerId, onSelect);
+  });
+  collapseBtn.className = "folder-picker-collapse-btn";
+  container.appendChild(collapseBtn);
+
   // 모드 전환 버튼은 이 함수 안에서 무슨 일이 있어도(목록 조회가 실패하더라도)
   // 항상 살아있어야 한다 — 로컬이 미설정이라 목록 조회가 실패해도, 최소한
   // rclone으로 바꿀 방법은 남아있어야 하기 때문 (실제로 이게 막혀서 오도가도
@@ -1698,14 +1731,14 @@ async function renderFolderPickerContents(containerId, onSelect) {
     const localBtn = makeButton("로컬 폴더", () => {
       archiveFolderPickerState[containerId] = {
         mode: "local", path: "", remote: "", skipExistingCheck: state.skipExistingCheck,
-        localRoots: state.localRoots, localRoot: state.localRoots[0],
+        localRoots: state.localRoots, localRoot: state.localRoots[0], expanded: true,
       };
       renderFolderPickerContents(containerId, onSelect);
     });
     const rcloneBtn = makeButton("rclone 원격", () => {
       archiveFolderPickerState[containerId] = {
         mode: "rclone", path: "", remote: "", skipExistingCheck: state.skipExistingCheck,
-        localRoots: state.localRoots, localRoot: state.localRoots[0],
+        localRoots: state.localRoots, localRoot: state.localRoots[0], expanded: true,
       };
       renderFolderPickerContents(containerId, onSelect);
     });
@@ -1750,7 +1783,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
     makeButton("⬅ 처음으로 돌아가기", () => {
       archiveFolderPickerState[containerId] = {
         mode: state.mode, path: "", remote: "", skipExistingCheck: state.skipExistingCheck,
-        localRoots: state.localRoots, localRoot: state.localRoot,
+        localRoots: state.localRoots, localRoot: state.localRoot, expanded: true,
       };
       renderFolderPickerContents(containerId, onSelect);
     });
@@ -1830,6 +1863,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
 
     function selectAndShow(value, destType, label) {
       state.selectedLabel = label;
+      state.expanded = false; // 골랐으면 접어서 공간을 돌려준다 — 선택 요약은 접힌 화면에 그대로 보임
       onSelect(value, destType, destType === "local" ? state.localRoot : undefined);
       // 방금 고른 걸 화면에서도 바로 보이게 다시 그린다 — 예전엔 onSelect를
       // 호출만 하고 화면엔 아무 표시가 없어서, 실제로 선택이 됐는지 눈으로
@@ -1907,17 +1941,28 @@ async function renderFolderPickerContents(containerId, onSelect) {
       const name = newFolderInput.value.trim();
       if (!name) return;
       const newPath = currentPath ? `${currentPath}/${name}` : name;
-      if (isRclone) {
-        await apiCall("/api/archive/rclone/folders", { method: "POST", body: JSON.stringify({ remote: state.remote, path: newPath }) });
-      } else {
-        await apiCall("/api/archive/folders", { method: "POST", body: JSON.stringify({ path: newPath, root: state.localRoot }) });
+      const originalText = newFolderBtn.textContent;
+      newFolderBtn.textContent = "만드는 중...";
+      newFolderBtn.disabled = true;
+      newFolderInput.disabled = true;
+      try {
+        if (isRclone) {
+          await apiCall("/api/archive/rclone/folders", { method: "POST", body: JSON.stringify({ remote: state.remote, path: newPath }) });
+        } else {
+          await apiCall("/api/archive/folders", { method: "POST", body: JSON.stringify({ path: newPath, root: state.localRoot }) });
+        }
+        _invalidateFolderListCache(isRclone, isRclone ? state.remote : state.localRoot, currentPath); // 새 폴더가 생겼으니 이 경로는 다시 조회해야 함
+        // 예전엔 만들자마자 그 폴더 안으로 들어가버려서, 그 폴더 자체를 고르려면
+        // 다시 상위로 나와야 하는 불편함이 있었다 — 생성 후에도 같은 위치(상위
+        // 목록)에 그대로 머물러서, 방금 만든 폴더를 목록에서 바로 선택할 수 있게 한다.
+        newFolderInput.value = "";
+        renderFolderPickerContents(containerId, onSelect);
+      } catch (e) {
+        newFolderBtn.textContent = originalText;
+        newFolderBtn.disabled = false;
+        newFolderInput.disabled = false;
+        alert(e.message);
       }
-      _invalidateFolderListCache(isRclone, isRclone ? state.remote : state.localRoot, currentPath); // 새 폴더가 생겼으니 이 경로는 다시 조회해야 함
-      // 예전엔 만들자마자 그 폴더 안으로 들어가버려서, 그 폴더 자체를 고르려면
-      // 다시 상위로 나와야 하는 불편함이 있었다 — 생성 후에도 같은 위치(상위
-      // 목록)에 그대로 머물러서, 방금 만든 폴더를 목록에서 바로 선택할 수 있게 한다.
-      newFolderInput.value = "";
-      renderFolderPickerContents(containerId, onSelect);
     });
     newFolderRow.appendChild(newFolderInput);
     newFolderRow.appendChild(newFolderBtn);
