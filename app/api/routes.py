@@ -1094,6 +1094,7 @@ class ArchiveTargetIn(BaseModel):
     title_id: str
     dest_base_path: str
     dest_type: str = "local"
+    filename_template_preset_id: int | None = None  # 등록 시점에 바로 프리셋을 지정하고 싶을 때(선택)
 
     @field_validator("dest_type")
     @classmethod
@@ -1109,6 +1110,7 @@ class FolderArchiveTargetIn(BaseModel):
     source_path: str
     dest_base_path: str
     dest_type: str = "local"
+    filename_template_preset_id: int | None = None  # 등록 시점에 바로 프리셋을 지정하고 싶을 때(선택)
 
     @field_validator("source_dest_type", "dest_type")
     @classmethod
@@ -1168,9 +1170,16 @@ async def add_archive_target(payload: ArchiveTargetIn):
     # 폴더 선택기 단계(/archive/folder-check)에서 이미 보여주고 확인받으므로,
     # 여기서는 그 경고를 다시 검사하지 않는다(등록 자체는 항상 그대로 진행).
 
+    if payload.filename_template_preset_id is not None:
+        preset = await asyncio.to_thread(repository.get_filename_template_preset, payload.filename_template_preset_id)
+        if preset is None:
+            raise HTTPException(status_code=404, detail="존재하지 않는 프리셋입니다.")
+
     await asyncio.to_thread(
         repository.upsert_archive_target, payload.title_id, payload.dest_base_path, True, payload.dest_type
     )
+    if payload.filename_template_preset_id is not None:
+        await asyncio.to_thread(repository.set_archive_target_filename_preset, payload.title_id, payload.filename_template_preset_id)
     target = await asyncio.to_thread(repository.get_archive_target, payload.title_id)
     return _archive_target_to_out(target)
 
@@ -1189,12 +1198,18 @@ async def add_folder_archive_target(payload: FolderArchiveTargetIn):
         raise HTTPException(status_code=400, detail="rclone 설정 파일이 등록되어 있지 않습니다.")
     if payload.dest_type == "local" and not settings.archive_root:
         raise HTTPException(status_code=400, detail="로컬 아카이빙 경로(ARCHIVE_ROOT)가 설정되어 있지 않습니다.")
+    if payload.filename_template_preset_id is not None:
+        preset = await asyncio.to_thread(repository.get_filename_template_preset, payload.filename_template_preset_id)
+        if preset is None:
+            raise HTTPException(status_code=404, detail="존재하지 않는 프리셋입니다.")
 
     target_id = await asyncio.to_thread(
         repository.create_folder_archive_target,
         payload.display_name, payload.source_dest_type, payload.source_path,
         payload.dest_base_path, payload.dest_type,
     )
+    if payload.filename_template_preset_id is not None:
+        await asyncio.to_thread(repository.set_archive_target_filename_preset, target_id, payload.filename_template_preset_id)
     target = await asyncio.to_thread(repository.get_archive_target, target_id)
     return _archive_target_to_out(target)
 

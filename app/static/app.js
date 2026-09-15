@@ -1647,7 +1647,7 @@ async function renderFolderPicker(containerId, onSelect, initialPath, options) {
   }
   archiveFolderPickerState[containerId] = {
     mode: startMode, path: initialPath || "", remote: "", skipExistingCheck, localRoots, localRoot: localRoots[0],
-    expanded: false,
+    expanded: false, modeConfirmed: false, rootConfirmed: false,
   };
   renderFolderPickerContents(containerId, onSelect);
 }
@@ -1725,13 +1725,20 @@ async function renderFolderPickerContents(containerId, onSelect) {
   // 항상 살아있어야 한다 — 로컬이 미설정이라 목록 조회가 실패해도, 최소한
   // rclone으로 바꿀 방법은 남아있어야 하기 때문 (실제로 이게 막혀서 오도가도
   // 못하는 문제가 있었다).
-  if (archiveSettings.rclone_available && archiveSettings.local_available) {
+  //
+  // 로컬 폴더/rclone 원격 -> (로컬이면) 보관 폴더/다운로드 폴더 -> 실제 폴더 목록,
+  // 이 순서로 한 단계씩만 펼쳐서 보여준다 — 처음부터 다 펼쳐놓으면 아직 고르지도
+  // 않은 다음 단계 UI(그리고 곧바로 시작되는 목록 조회 API 호출)까지 화면을
+  // 차지해서 공간도 낭비되고, 뭘 먼저 눌러야 하는지도 헷갈린다는 문제가 있었다.
+  const needsModeChoice = archiveSettings.rclone_available && archiveSettings.local_available;
+  if (needsModeChoice) {
     const modeRow = document.createElement("div");
     modeRow.className = "folder-picker-mode-row";
     const localBtn = makeButton("로컬 폴더", () => {
       archiveFolderPickerState[containerId] = {
         mode: "local", path: "", remote: "", skipExistingCheck: state.skipExistingCheck,
         localRoots: state.localRoots, localRoot: state.localRoots[0], expanded: true,
+        modeConfirmed: true, rootConfirmed: false,
       };
       renderFolderPickerContents(containerId, onSelect);
     });
@@ -1739,32 +1746,41 @@ async function renderFolderPickerContents(containerId, onSelect) {
       archiveFolderPickerState[containerId] = {
         mode: "rclone", path: "", remote: "", skipExistingCheck: state.skipExistingCheck,
         localRoots: state.localRoots, localRoot: state.localRoots[0], expanded: true,
+        modeConfirmed: true, rootConfirmed: false,
       };
       renderFolderPickerContents(containerId, onSelect);
     });
-    if (state.mode === "local") localBtn.disabled = true;
-    if (state.mode === "rclone") rcloneBtn.disabled = true;
+    if (state.mode === "local" && state.modeConfirmed) localBtn.disabled = true;
+    if (state.mode === "rclone" && state.modeConfirmed) rcloneBtn.disabled = true;
     modeRow.appendChild(localBtn);
     modeRow.appendChild(rcloneBtn);
     container.appendChild(modeRow);
+  }
+  if (needsModeChoice && !state.modeConfirmed) {
+    return; // 로컬/rclone을 아직 안 골랐으면 그 다음 단계는 아직 안 보여줌
   }
 
   // localRoots가 2개 이상이면(예: 일괄 이동에서 ARCHIVE_ROOT/DOWNLOAD_ROOT 둘 다
   // 고를 수 있는 경우), 로컬 모드일 때만 어느 루트를 기준으로 찾아볼지 전환 버튼을 보여준다.
   const localRootLabels = { archive: "보관 폴더(ARCHIVE_ROOT)", download: "다운로드 폴더(DOWNLOAD_ROOT)" };
-  if (state.mode === "local" && state.localRoots.length > 1) {
+  const needsRootChoice = state.mode === "local" && state.localRoots.length > 1;
+  if (needsRootChoice) {
     const rootRow = document.createElement("div");
     rootRow.className = "folder-picker-mode-row";
     for (const rootName of state.localRoots) {
       const btn = makeButton(localRootLabels[rootName] || rootName, () => {
         state.localRoot = rootName;
         state.path = ""; // 루트가 바뀌면 경로 기준이 달라지므로 처음부터 다시 찾아봄
+        state.rootConfirmed = true;
         renderFolderPickerContents(containerId, onSelect);
       });
-      if (state.localRoot === rootName) btn.disabled = true;
+      if (state.localRoot === rootName && state.rootConfirmed) btn.disabled = true;
       rootRow.appendChild(btn);
     }
     container.appendChild(rootRow);
+  }
+  if (needsRootChoice && !state.rootConfirmed) {
+    return; // 보관/다운로드 폴더를 아직 안 골랐으면 실제 폴더 목록은 아직 안 보여줌
   }
 
   const listArea = document.createElement("div");
@@ -1784,6 +1800,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
       archiveFolderPickerState[containerId] = {
         mode: state.mode, path: "", remote: "", skipExistingCheck: state.skipExistingCheck,
         localRoots: state.localRoots, localRoot: state.localRoot, expanded: true,
+        modeConfirmed: state.modeConfirmed, rootConfirmed: state.rootConfirmed,
       };
       renderFolderPickerContents(containerId, onSelect);
     });
@@ -2187,32 +2204,28 @@ async function loadFilenamePresets() {
   } catch (e) {
     filenamePresetsCache = [];
   }
-  const editSelect = document.getElementById("archive-preset-select");
-  const bulkApplySelect = document.getElementById("archive-target-bulk-preset-select");
-  const bulkMoveSelect = document.getElementById("bulk-move-preset-select");
-  const prevValue = editSelect.value;
-  editSelect.innerHTML = '<option value="">기본 (전역)</option>';
-  bulkApplySelect.innerHTML = '<option value="">기본 (전역)</option>';
+
+  function fillPresetSelect(select, defaultLabel) {
+    const prevValue = select.value;
+    select.innerHTML = `<option value="">${defaultLabel}</option>`;
+    for (const p of filenamePresetsCache) {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.name;
+      select.appendChild(opt);
+    }
+    if (prevValue && [...select.options].some((o) => o.value === prevValue)) {
+      select.value = prevValue;
+    }
+  }
+
+  fillPresetSelect(document.getElementById("archive-preset-select"), "기본 (전역)");
+  fillPresetSelect(document.getElementById("archive-target-bulk-preset-select"), "기본 (전역)");
+  fillPresetSelect(document.getElementById("archive-target-webtoon-preset-select"), "기본 (전역)");
+  fillPresetSelect(document.getElementById("archive-folder-target-preset-select"), "기본 (전역)");
   // 일괄 이동은 "웹툰/폴더 대상"과 달리 전역 기본값을 상속하는 개념이 없다 —
   // 애초에 회차/웹툰 개념이 없는 임의 폴더 이동이라, 안 고르면 그냥 원본 그대로다.
-  bulkMoveSelect.innerHTML = '<option value="">선택 안 함 (원본 파일명 그대로)</option>';
-  for (const p of filenamePresetsCache) {
-    const opt1 = document.createElement("option");
-    opt1.value = p.id;
-    opt1.textContent = p.name;
-    editSelect.appendChild(opt1);
-    const opt2 = document.createElement("option");
-    opt2.value = p.id;
-    opt2.textContent = p.name;
-    bulkApplySelect.appendChild(opt2);
-    const opt3 = document.createElement("option");
-    opt3.value = p.id;
-    opt3.textContent = p.name;
-    bulkMoveSelect.appendChild(opt3);
-  }
-  if (prevValue && [...editSelect.options].some((o) => o.value === prevValue)) {
-    editSelect.value = prevValue;
-  }
+  fillPresetSelect(document.getElementById("bulk-move-preset-select"), "선택 안 함 (원본 파일명 그대로)");
 }
 
 let archiveGlobalFilenameTemplate = "";
@@ -2412,10 +2425,14 @@ document.getElementById("btn-add-archive-target").addEventListener("click", asyn
     return;
   }
   resultEl.textContent = "";
+  const presetValue = document.getElementById("archive-target-webtoon-preset-select").value;
   try {
     await apiCall("/api/archive/targets", {
       method: "POST",
-      body: JSON.stringify({ title_id: titleId, dest_base_path: archiveSelectedTargetPath, dest_type: archiveSelectedTargetDestType }),
+      body: JSON.stringify({
+        title_id: titleId, dest_base_path: archiveSelectedTargetPath, dest_type: archiveSelectedTargetDestType,
+        filename_template_preset_id: presetValue ? Number(presetValue) : null,
+      }),
     });
     resultEl.style.color = "";
     resultEl.textContent = archiveEditingTitleId ? "수정했습니다." : "등록했습니다.";
@@ -2439,12 +2456,14 @@ document.getElementById("btn-add-folder-archive-target").addEventListener("click
     return;
   }
   resultEl.textContent = "";
+  const presetValue = document.getElementById("archive-folder-target-preset-select").value;
   const payload = {
     display_name: document.getElementById("archive-folder-target-display-name").value.trim(),
     source_dest_type: archiveSelectedFolderTargetSourceType,
     source_path: archiveSelectedFolderTargetSourcePath,
     dest_base_path: archiveSelectedFolderTargetDestPath,
     dest_type: archiveSelectedFolderTargetDestType,
+    filename_template_preset_id: presetValue ? Number(presetValue) : null,
   };
   try {
     if (archiveEditingFolderTargetId) {

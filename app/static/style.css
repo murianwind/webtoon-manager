@@ -201,10 +201,10 @@ select {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: var(--bg-accent-muted, #eef4ff);
-  border-radius: var(--radius);
-  padding: 8px 12px;
+  padding: 8px 0;
   margin-top: 10px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 .archive-target-bulk-bar select {
   flex: 1;
