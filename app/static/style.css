@@ -89,7 +89,11 @@ select {
 }
 
 .page.hidden { display: none; }
-.hidden { display: none; }
+/* 이 클래스는 "무조건 숨김"이 목적이라, 다른 곳에서 같은 우선순위로 display를
+   지정하는 규칙이 스타일시트 뒤쪽에 있으면(CSS 캐스케이드상 나중 규칙이 이겨서)
+   .hidden을 붙여도 실제로는 안 숨겨지는 문제가 실제로 있었다 — 항상 이기도록
+   !important를 붙인다. */
+.hidden { display: none !important; }
 
 .toolbar {
   display: flex;
@@ -205,6 +209,7 @@ select {
   margin-top: 10px;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
+  font-size: 13px;
 }
 .archive-target-bulk-bar select {
   flex: 1;

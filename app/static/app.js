@@ -1624,10 +1624,11 @@ async function renderFolderPicker(containerId, onSelect, initialPath, options) {
     saved.skipExistingCheck = skipExistingCheck;
     saved.localRoots = localRoots;
     if (!saved.localRoot) saved.localRoot = localRoots[0];
-    // 폴더 목록은 항상 접힌 채로 시작한다 — 화면에 폴더 선택기가 여러 개 쌓이면
-    // 전부 펼쳐진 채로 나와서 공간을 너무 많이 차지한다는 문제가 실제로 있었다.
-    // 이미 골라둔 게 있으면 그 요약("선택됨: ...")만 보이고, 눌러야 펼쳐진다.
-    saved.expanded = false;
+    // 아직 고른 게 없으면 펼친 채로 시작해서 로컬/rclone부터 바로 보이게 한다 —
+    // "폴더 선택하기"를 한 번 더 눌러야 하는 건 클릭 한 번을 그냥 낭비하는
+    // 것뿐이라는 지적이 있었다. 이미 골라둔 게 있을 때만 접어서 "선택됨: ..."
+    // 요약만 보여주고, 공간을 아낀다.
+    saved.expanded = !saved.selectedLabel;
     archiveFolderPickerState[containerId] = saved;
     renderFolderPickerContents(containerId, onSelect);
     return;
@@ -1647,7 +1648,7 @@ async function renderFolderPicker(containerId, onSelect, initialPath, options) {
   }
   archiveFolderPickerState[containerId] = {
     mode: startMode, path: initialPath || "", remote: "", skipExistingCheck, localRoots, localRoot: localRoots[0],
-    expanded: false, modeConfirmed: false, rootConfirmed: false,
+    expanded: true, modeConfirmed: false, rootConfirmed: false,
   };
   renderFolderPickerContents(containerId, onSelect);
 }
