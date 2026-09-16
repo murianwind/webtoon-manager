@@ -778,11 +778,6 @@ select {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.folder-picker-collapse-btn {
-  font-size: 12px;
-  padding: 4px 10px;
-  margin-bottom: 10px;
-}
 .folder-picker-mode-row {
   display: flex;
   gap: 6px;

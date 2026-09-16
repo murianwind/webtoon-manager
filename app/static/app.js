@@ -1715,13 +1715,6 @@ async function renderFolderPickerContents(containerId, onSelect) {
   }
   container.innerHTML = "";
 
-  const collapseBtn = makeButton("▲ 접기", () => {
-    state.expanded = false;
-    renderFolderPickerContents(containerId, onSelect);
-  });
-  collapseBtn.className = "folder-picker-collapse-btn";
-  container.appendChild(collapseBtn);
-
   // 모드 전환 버튼은 이 함수 안에서 무슨 일이 있어도(목록 조회가 실패하더라도)
   // 항상 살아있어야 한다 — 로컬이 미설정이라 목록 조회가 실패해도, 최소한
   // rclone으로 바꿀 방법은 남아있어야 하기 때문 (실제로 이게 막혀서 오도가도
