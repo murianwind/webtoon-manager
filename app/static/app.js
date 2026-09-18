@@ -1729,6 +1729,12 @@ async function renderFolderPickerContents(containerId, onSelect) {
     const modeRow = document.createElement("div");
     modeRow.className = "folder-picker-mode-row";
     const localBtn = makeButton("로컬 폴더", () => {
+      if (state.mode === "local" && state.modeConfirmed) {
+        // 이미 펼쳐진 걸 다시 누르면 접는다 — 그 아래 단계(루트 선택/폴더 목록)까지 같이 접힘
+        state.modeConfirmed = false;
+        renderFolderPickerContents(containerId, onSelect);
+        return;
+      }
       archiveFolderPickerState[containerId] = {
         mode: "local", path: "", remote: "", skipExistingCheck: state.skipExistingCheck,
         localRoots: state.localRoots, localRoot: state.localRoots[0], expanded: true,
@@ -1737,6 +1743,11 @@ async function renderFolderPickerContents(containerId, onSelect) {
       renderFolderPickerContents(containerId, onSelect);
     });
     const rcloneBtn = makeButton("rclone 원격", () => {
+      if (state.mode === "rclone" && state.modeConfirmed) {
+        state.modeConfirmed = false;
+        renderFolderPickerContents(containerId, onSelect);
+        return;
+      }
       archiveFolderPickerState[containerId] = {
         mode: "rclone", path: "", remote: "", skipExistingCheck: state.skipExistingCheck,
         localRoots: state.localRoots, localRoot: state.localRoots[0], expanded: true,
@@ -1744,8 +1755,8 @@ async function renderFolderPickerContents(containerId, onSelect) {
       };
       renderFolderPickerContents(containerId, onSelect);
     });
-    if (state.mode === "local" && state.modeConfirmed) localBtn.disabled = true;
-    if (state.mode === "rclone" && state.modeConfirmed) rcloneBtn.disabled = true;
+    if (state.mode === "local" && state.modeConfirmed) localBtn.classList.add("folder-picker-choice-active");
+    if (state.mode === "rclone" && state.modeConfirmed) rcloneBtn.classList.add("folder-picker-choice-active");
     modeRow.appendChild(localBtn);
     modeRow.appendChild(rcloneBtn);
     container.appendChild(modeRow);
@@ -1763,12 +1774,18 @@ async function renderFolderPickerContents(containerId, onSelect) {
     rootRow.className = "folder-picker-mode-row";
     for (const rootName of state.localRoots) {
       const btn = makeButton(localRootLabels[rootName] || rootName, () => {
+        if (state.localRoot === rootName && state.rootConfirmed) {
+          // 이미 펼쳐진 걸 다시 누르면 접는다 — 그 아래 폴더 목록이 같이 접힘
+          state.rootConfirmed = false;
+          renderFolderPickerContents(containerId, onSelect);
+          return;
+        }
         state.localRoot = rootName;
         state.path = ""; // 루트가 바뀌면 경로 기준이 달라지므로 처음부터 다시 찾아봄
         state.rootConfirmed = true;
         renderFolderPickerContents(containerId, onSelect);
       });
-      if (state.localRoot === rootName && state.rootConfirmed) btn.disabled = true;
+      if (state.localRoot === rootName && state.rootConfirmed) btn.classList.add("folder-picker-choice-active");
       rootRow.appendChild(btn);
     }
     container.appendChild(rootRow);

@@ -783,6 +783,11 @@ select {
   gap: 6px;
   margin-bottom: 10px;
 }
+.folder-picker-choice-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
 .folder-picker-path {
   font-size: 12px;
   color: var(--muted);
