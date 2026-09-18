@@ -203,6 +203,20 @@ async def fetch_all_episodes(
     return episodes
 
 
+async def fetch_latest_episode_no(
+    session: aiohttp.ClientSession, title_id: str, timeout_seconds: int
+) -> Optional[int]:
+    """이 작품의 가장 최근(가장 큰 번호) 회차 번호만 가볍게 확인한다 — 목록 1페이지에는
+    최신 회차부터 나오므로, 전체 회차를 안 받아도 바로가기 URL을 만들 수 있다."""
+    page_data = await _fetch_episode_list_page(session, title_id, 1, {}, timeout_seconds)
+    if not page_data:
+        return None
+    articles = page_data.get("articleList") or []
+    if not articles:
+        return None
+    return max(a.get("no", 0) for a in articles)
+
+
 def free_episodes_only(episodes: list[EpisodeInfo]) -> list[EpisodeInfo]:
     """썸네일 잠금(유료/미공개)이 걸린 첫 회차를 만나면 그 이후는 제외한다."""
     free: list[EpisodeInfo] = []

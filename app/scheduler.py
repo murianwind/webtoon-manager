@@ -29,6 +29,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app import archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, naver_api, repository, schedule_config, tracker, webtoon_server_client
 from app import rclone_updater
 from app.config import Settings, get_settings
+from app.constants import NAVER_DETAIL_URL_TEMPLATES
 from app.cookie_loader import get_adult_cookies
 from app.downloader import download_single_episode
 from app.file_utils import remove_forbidden_str
@@ -316,9 +317,52 @@ async def _notify_download_failures(
 _SETTING_KEY_REPORT_LAST_SENT_AT = "report_last_sent_at"
 _SETTING_KEY_WEBTOON_SERVER_URL = "webtoon_server_url"
 _REPORT_LIST_LIMIT = 40  # 디스코드 메시지 길이 제한 대비, 항목이 너무 많으면 일부만 나열
+_UNREGISTERED_NEW_EPISODE_LIMIT = 20  # 미등록 신규 에피소드는 네이버에 회차번호를 하나씩 더 물어봐야 해서, 너무 많이 걸면 부담이라 따로 더 작게 제한
 
 
-def _build_report_message(success_rows: list[dict], failed_rows: list[dict], reader_urls: dict[str, str]) -> str:
+async def _collect_unregistered_new_episodes(
+    session: aiohttp.ClientSession, settings
+) -> list[tuple[str, str, int]]:
+    """네이버 '요일별 전체목록'에는 있지만 이 앱에는 아예 등록(구독/구독해제/제외
+    전부 포함)돼 있지 않은 작품 중, 새 에피소드(UP 표시)가 있는 것만 골라서
+    (title_id, title_name, 최신 회차 번호)로 반환한다. 구독을 안 해서 놓치고
+    있었을 수도 있는 신작을 리포트에서 바로 발견할 수 있게 해주는 용도라, 없는
+    게 정상인 경우가 대부분이고 실패해도 리포트 자체는 계속 보내야 한다."""
+    try:
+        items = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
+    except Exception as e:
+        log.error("미등록 신규 에피소드 확인 중 목록 조회 실패(무시하고 계속): %s", e)
+        return []
+
+    candidates = [item for item in items if item.has_update and not repository.exists(item.title_id)]
+    candidates = candidates[:_UNREGISTERED_NEW_EPISODE_LIMIT]
+    if not candidates:
+        return []
+
+    semaphore = asyncio.Semaphore(settings.artist_scan_concurrency)
+
+    async def _fetch_one(item):
+        async with semaphore:
+            try:
+                episode_no = await naver_api.fetch_latest_episode_no(session, item.title_id, settings.request_timeout_seconds)
+            except Exception as e:
+                log.error("미등록 작품(titleId=%s) 최신 회차 조회 실패(건너뜀): %s", item.title_id, e)
+                episode_no = None
+            await asyncio.sleep(settings.delay_seconds)
+            return item, episode_no
+
+    results = await asyncio.gather(*[_fetch_one(item) for item in candidates])
+    return [
+        (item.title_id, item.title_name, episode_no)
+        for item, episode_no in results
+        if episode_no is not None
+    ]
+
+
+def _build_report_message(
+    success_rows: list[dict], failed_rows: list[dict], reader_urls: dict[str, str],
+    unregistered_new_episodes: list[tuple[str, str, int]] | None = None,
+) -> str:
     """예전 hermes webtoon_checker.py의 메시지 구조(다운로드됨/실패)를 그대로 따른다."""
     today_label = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
 
@@ -347,6 +391,17 @@ def _build_report_message(success_rows: list[dict], failed_rows: list[dict], rea
         ])
         if len(failed_titles) > _REPORT_LIST_LIMIT:
             parts.append(f"_외 {len(failed_titles) - _REPORT_LIST_LIMIT}개 생략_")
+
+    if unregistered_new_episodes:
+        new_lines = [
+            f"• {title} [바로가기]({NAVER_DETAIL_URL_TEMPLATES['webtoon']}?titleId={title_id}&no={episode_no})"
+            for title_id, title, episode_no in unregistered_new_episodes
+        ]
+        parts.extend([
+            "",
+            f"🆕 미등록 웹툰 중 새 에피소드 ({len(new_lines)}):",
+            "\n".join(new_lines),
+        ])
 
     return "\n".join(parts)
 
@@ -442,18 +497,24 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
     success_rows = [r for r in rows if r["status"] == "success"]
     failed_rows = [r for r in rows if r["status"] == "failed"]
 
-    if not rows:
-        job_status.log_line("report", "발송할 내용 없음 (다운로드 기록 자체가 없음)")
-        if not force_test:
-            repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, now_iso)
-        job_status.finish("report", success=True)
-        return
-
     webtoon_server_url = repository.get_setting(_SETTING_KEY_WEBTOON_SERVER_URL) or ""
     reader_urls: dict[str, str] = {}
 
     try:
         async with aiohttp.ClientSession() as session:
+            # 미등록 신규 에피소드는 다운로드 기록과 무관하게(rows가 비어있어도)
+            # 항상 확인한다 — 구독을 안 해서 애초에 다운로드 기록 자체가 없는
+            # 작품을 발견하는 게 이 섹션의 목적이라, "받은 게 없으니 리포트도
+            # 없음" 조건에 같이 걸려서 묻히면 안 된다.
+            unregistered_new_episodes = await _collect_unregistered_new_episodes(session, settings)
+
+            if not rows and not unregistered_new_episodes:
+                job_status.log_line("report", "발송할 내용 없음 (다운로드 기록도, 미등록 신규 에피소드도 없음)")
+                if not force_test:
+                    repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, now_iso)
+                job_status.finish("report", success=True)
+                return
+
             if webtoon_server_url:
                 for title in sorted({r["title_name"] for r in success_rows}):
                     # 웹툰서버는 실제 디스크 폴더명 기준으로 매칭한다. 그런데 폴더를
@@ -468,7 +529,7 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
                     if url:
                         reader_urls[title] = url
 
-            message = _build_report_message(success_rows, failed_rows, reader_urls)
+            message = _build_report_message(success_rows, failed_rows, reader_urls, unregistered_new_episodes)
             if used_fallback:
                 message = "🧪 **[테스트 발송 — 오늘 기록 없어 어제 기록으로 대체됨]**\n" + message
             await discord_notify.send_webhook_notification(session, settings, message)
