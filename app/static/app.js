@@ -1220,6 +1220,8 @@ async function loadSettingsPage() {
   }
   loadDiscordSettings();
   loadWebtoonServerUrl();
+  loadAppPublicBaseUrl();
+  loadUnregisteredNewEpisodesToggle();
   loadAuthorAutoRegisterSetting();
 }
 
@@ -1400,6 +1402,52 @@ document.getElementById("btn-save-webtoon-server-url").addEventListener("click",
     resultEl.textContent = "저장했습니다.";
   } catch (e) {
     resultEl.textContent = e.message;
+  }
+});
+
+async function loadAppPublicBaseUrl() {
+  try {
+    const data = await apiCall("/api/settings/app-public-base-url");
+    document.getElementById("app-public-base-url").value = data.app_public_base_url;
+  } catch (e) {
+    // 조용히 무시 — 이 필드 하나 때문에 설정 탭 전체 로드가 막히면 안 됨
+  }
+}
+
+document.getElementById("btn-save-app-public-base-url").addEventListener("click", async () => {
+  const resultEl = document.getElementById("app-public-base-url-save-result");
+  resultEl.textContent = "";
+  try {
+    const url = document.getElementById("app-public-base-url").value.trim();
+    await apiCall("/api/settings/app-public-base-url", {
+      method: "POST",
+      body: JSON.stringify({ app_public_base_url: url }),
+    });
+    resultEl.style.color = "";
+    resultEl.textContent = "저장했습니다.";
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+});
+
+async function loadUnregisteredNewEpisodesToggle() {
+  try {
+    const data = await apiCall("/api/settings/report-unregistered-new-episodes");
+    document.getElementById("report-unregistered-toggle").checked = data.enabled;
+  } catch (e) {
+    // 조용히 무시 — 이 필드 하나 때문에 설정 탭 전체 로드가 막히면 안 됨
+  }
+}
+
+document.getElementById("report-unregistered-toggle").addEventListener("change", async (e) => {
+  try {
+    await apiCall("/api/settings/report-unregistered-new-episodes", {
+      method: "POST",
+      body: JSON.stringify({ enabled: e.target.checked }),
+    });
+  } catch (err) {
+    alert(err.message);
+    e.target.checked = !e.target.checked; // 저장 실패하면 화면도 원래대로 되돌림
   }
 });
 

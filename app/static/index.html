@@ -286,6 +286,23 @@
         <p class="field-hint">입력해두면 리포트에 각 작품의 "바로가기" 링크가 붙고, 구독중인 웹툰 카드에서 바로 뷰어로 이동하는 아이콘이 생깁니다.</p>
         <span id="webtoon-server-save-result" class="hint-inline"></span>
       </div>
+
+      <div class="field-group">
+        <label for="app-public-base-url">이 앱의 외부 접속 주소 <span class="hint-inline">(선택)</span></label>
+        <div class="registry-add-row">
+          <input id="app-public-base-url" type="text" placeholder="https://webtoon.murian.ddnsfree.com" />
+          <button id="btn-save-app-public-base-url">저장</button>
+        </div>
+        <p class="field-hint">입력해두면, 아래 "미등록 웹툰 중 새 에피소드" 항목마다 "목록 제외" 링크가 붙어서 리포트에서 바로 제외 처리할 수 있습니다. 비워두면 이 링크만 생략됩니다.</p>
+        <span id="app-public-base-url-save-result" class="hint-inline"></span>
+      </div>
+
+      <div class="field-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="report-unregistered-toggle" /> 미등록 웹툰 중 새 에피소드 섹션 포함
+        </label>
+        <p class="field-hint">네이버 웹툰 전체목록에는 있지만 구독/제외 등록 안 된 작품 중 새 에피소드가 있는 것을 리포트에 같이 보여줍니다.</p>
+      </div>
     </div>
 
     <div class="settings-card">

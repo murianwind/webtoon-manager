@@ -18,6 +18,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -362,6 +363,7 @@ async def _collect_unregistered_new_episodes(
 def _build_report_message(
     success_rows: list[dict], failed_rows: list[dict], reader_urls: dict[str, str],
     unregistered_new_episodes: list[tuple[str, str, int]] | None = None,
+    app_public_base_url: str = "",
 ) -> str:
     """예전 hermes webtoon_checker.py의 메시지 구조(다운로드됨/실패)를 그대로 따른다."""
     today_label = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
@@ -393,10 +395,14 @@ def _build_report_message(
             parts.append(f"_외 {len(failed_titles) - _REPORT_LIST_LIMIT}개 생략_")
 
     if unregistered_new_episodes:
-        new_lines = [
-            f"• {title} [바로가기]({NAVER_DETAIL_URL_TEMPLATES['webtoon']}?titleId={title_id}&no={episode_no})"
-            for title_id, title, episode_no in unregistered_new_episodes
-        ]
+        new_lines = []
+        for title_id, title, episode_no in unregistered_new_episodes:
+            read_url = f"{NAVER_DETAIL_URL_TEMPLATES['webtoon']}?titleId={title_id}&no={episode_no}"
+            line = f"• {title} [바로가기]({read_url})"
+            if app_public_base_url:
+                exclude_url = f"{app_public_base_url}/api/webtoons/{title_id}/exclude-confirm?title={quote(title)}"
+                line += f" · [목록 제외]({exclude_url})"
+            new_lines.append(line)
         parts.extend([
             "",
             f"🆕 미등록 웹툰 중 새 에피소드 ({len(new_lines)}):",
@@ -498,6 +504,8 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
     failed_rows = [r for r in rows if r["status"] == "failed"]
 
     webtoon_server_url = repository.get_setting(_SETTING_KEY_WEBTOON_SERVER_URL) or ""
+    unregistered_new_episodes_enabled = repository.get_setting("report_unregistered_new_episodes_enabled") != "0"
+    app_public_base_url = repository.get_setting("app_public_base_url") or ""
     reader_urls: dict[str, str] = {}
 
     try:
@@ -506,7 +514,10 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
             # 항상 확인한다 — 구독을 안 해서 애초에 다운로드 기록 자체가 없는
             # 작품을 발견하는 게 이 섹션의 목적이라, "받은 게 없으니 리포트도
             # 없음" 조건에 같이 걸려서 묻히면 안 된다.
-            unregistered_new_episodes = await _collect_unregistered_new_episodes(session, settings)
+            unregistered_new_episodes = (
+                await _collect_unregistered_new_episodes(session, settings)
+                if unregistered_new_episodes_enabled else []
+            )
 
             if not rows and not unregistered_new_episodes:
                 job_status.log_line("report", "발송할 내용 없음 (다운로드 기록도, 미등록 신규 에피소드도 없음)")
@@ -529,7 +540,7 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
                     if url:
                         reader_urls[title] = url
 
-            message = _build_report_message(success_rows, failed_rows, reader_urls, unregistered_new_episodes)
+            message = _build_report_message(success_rows, failed_rows, reader_urls, unregistered_new_episodes, app_public_base_url)
             if used_fallback:
                 message = "🧪 **[테스트 발송 — 오늘 기록 없어 어제 기록으로 대체됨]**\n" + message
             await discord_notify.send_webhook_notification(session, settings, message)

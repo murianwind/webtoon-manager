@@ -17,12 +17,15 @@ LAN 전용, 인증 없음. 입력값 검증 실패 시 크래시 대신 명확�
 """
 
 import asyncio
+import html
+import json
 import logging
 import re
 from pathlib import Path
 
 import aiohttp
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, field_validator
 
 from app import (
@@ -311,6 +314,57 @@ async def naver_list_exclude(title_id: str, payload: NaverListEntryIn):
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_EXCLUDED)
     _trigger_enrich(title_id, register_authors_enabled=False)  # 제외해도 정보는 채우되, 저자를 관심작가로 올리진 않음
     return _to_out(await asyncio.to_thread(repository.get, title_id))
+
+
+@router.get("/webtoons/{title_id}/exclude-confirm", response_class=HTMLResponse)
+async def exclude_confirm_page(title_id: str, title: str = "", thumbnail_url: str = ""):
+    """다운로드 리포트의 '목록 제외' 링크가 여는 페이지. 디스코드는 링크를 메시지에
+    올리면 미리보기(임베드)를 만들려고 그 URL을 자동으로 한 번 열어보는데, 그 GET
+    요청만으로 실제 제외가 일어나면 사용자가 누르지도 않았는데 제외되는 사고가
+    난다 — 그래서 GET은 아무것도 바꾸지 않고 확인 버튼이 있는 페이지만 보여주고,
+    실제 제외는 그 페이지 안에서 버튼을 눌러야 별도 POST로 실행되게 분리했다."""
+    safe_title = html.escape(title or title_id)
+    payload_json = json.dumps({"title": title or title_id, "thumbnail_url": thumbnail_url})
+    return HTMLResponse(f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>목록에서 제외</title>
+<style>
+body {{ font-family: -apple-system, sans-serif; max-width: 420px; margin: 60px auto; text-align: center; padding: 0 20px; color: #222; }}
+button {{ padding: 10px 22px; font-size: 15px; margin-top: 18px; cursor: pointer; border: 1px solid #ccc; border-radius: 6px; background: #f5f5f5; }}
+button:disabled {{ opacity: 0.6; cursor: default; }}
+#result {{ margin-top: 16px; font-size: 14px; color: #555; }}
+</style></head>
+<body>
+<h3>{safe_title}</h3>
+<p>이 작품을 "제외됨" 목록으로 옮길까요? (제외됨 탭에서 다시 되돌릴 수 있습니다)</p>
+<button id="btn">제외하기</button>
+<div id="result"></div>
+<script>
+document.getElementById("btn").addEventListener("click", async () => {{
+  const btn = document.getElementById("btn");
+  btn.disabled = true;
+  btn.textContent = "처리 중...";
+  try {{
+    const res = await fetch("/api/naver-list/{title_id}/exclude", {{
+      method: "POST",
+      headers: {{"Content-Type": "application/json"}},
+      body: JSON.stringify({payload_json}),
+    }});
+    if (res.ok) {{
+      document.getElementById("result").textContent = "제외되었습니다.";
+    }} else {{
+      const err = await res.json().catch(() => ({{}}));
+      document.getElementById("result").textContent = "실패: " + (err.detail || res.status);
+      btn.disabled = false;
+      btn.textContent = "제외하기";
+    }}
+  }} catch (e) {{
+    document.getElementById("result").textContent = "오류: " + e.message;
+    btn.disabled = false;
+    btn.textContent = "제외하기";
+  }}
+}});
+</script>
+</body></html>""")
 
 
 # ── 작가/태그 자동추가 레지스트리 ──────────────────────────────────
@@ -648,6 +702,57 @@ async def set_webtoon_server_url(payload: WebtoonServerUrlIn):
         repository.set_setting, "webtoon_server_url", payload.webtoon_server_url.strip() or None
     )
     return await get_webtoon_server_url()
+
+
+class UnregisteredNewEpisodesSettingOut(BaseModel):
+    enabled: bool
+
+
+class UnregisteredNewEpisodesSettingIn(BaseModel):
+    enabled: bool
+
+
+@router.get("/settings/report-unregistered-new-episodes", response_model=UnregisteredNewEpisodesSettingOut)
+async def get_unregistered_new_episodes_setting():
+    """다운로드 리포트의 '미등록 웹툰 중 새 에피소드' 섹션 on/off. 값이 아직 없으면
+    (기존 사용자 등) 기본은 켜짐 — 이미 나가고 있던 섹션이라 꺼진 채로 조용히
+    사라지면 오히려 놓친 것처럼 보일 수 있어서."""
+    value = await asyncio.to_thread(repository.get_setting, "report_unregistered_new_episodes_enabled")
+    return UnregisteredNewEpisodesSettingOut(enabled=value != "0")
+
+
+@router.post("/settings/report-unregistered-new-episodes", response_model=UnregisteredNewEpisodesSettingOut)
+async def set_unregistered_new_episodes_setting(payload: UnregisteredNewEpisodesSettingIn):
+    await asyncio.to_thread(
+        repository.set_setting, "report_unregistered_new_episodes_enabled", "1" if payload.enabled else "0"
+    )
+    return await get_unregistered_new_episodes_setting()
+
+
+class AppPublicBaseUrlOut(BaseModel):
+    app_public_base_url: str
+
+
+class AppPublicBaseUrlIn(BaseModel):
+    app_public_base_url: str
+
+
+@router.get("/settings/app-public-base-url", response_model=AppPublicBaseUrlOut)
+async def get_app_public_base_url():
+    """이 앱을 바깥에서 접속할 때 쓰는 주소(예: https://webtoon.murian.ddnsfree.com).
+    다운로드 리포트의 '목록 제외' 같은, 디스코드에서 눌러서 이 앱의 API를 호출하는
+    링크를 만들 때 필요하다 — 컨테이너 안에서는 자기 자신의 외부 주소를 알 방법이
+    없어서 직접 설정해줘야 한다. 비워두면 그런 링크 없이 하던 대로 동작한다."""
+    value = await asyncio.to_thread(repository.get_setting, "app_public_base_url")
+    return AppPublicBaseUrlOut(app_public_base_url=value or "")
+
+
+@router.post("/settings/app-public-base-url", response_model=AppPublicBaseUrlOut)
+async def set_app_public_base_url(payload: AppPublicBaseUrlIn):
+    await asyncio.to_thread(
+        repository.set_setting, "app_public_base_url", payload.app_public_base_url.strip().rstrip("/") or None
+    )
+    return await get_app_public_base_url()
 
 
 @router.get("/webtoon-server/lookup")
