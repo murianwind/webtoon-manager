@@ -329,20 +329,26 @@ async def exclude_confirm_page(title_id: str, title: str = "", thumbnail_url: st
 <html><head><meta charset="utf-8"><title>목록에서 제외</title>
 <style>
 body {{ font-family: -apple-system, sans-serif; max-width: 420px; margin: 60px auto; text-align: center; padding: 0 20px; color: #222; }}
-button {{ padding: 10px 22px; font-size: 15px; margin-top: 18px; cursor: pointer; border: 1px solid #ccc; border-radius: 6px; background: #f5f5f5; }}
+button {{ padding: 10px 22px; font-size: 15px; margin-top: 10px; cursor: pointer; border: 1px solid #ccc; border-radius: 6px; background: #f5f5f5; }}
 button:disabled {{ opacity: 0.6; cursor: default; }}
-#result {{ margin-top: 16px; font-size: 14px; color: #555; }}
+a.btn-link {{ display: inline-block; padding: 10px 22px; font-size: 15px; margin-top: 10px; border: 1px solid #ccc; border-radius: 6px; background: #f5f5f5; color: #222; text-decoration: none; }}
+#result {{ margin-top: 20px; }}
+#result p {{ font-size: 15px; color: #1a7f37; margin: 0 0 4px; }}
+#error-text {{ font-size: 14px; color: #b00020; margin-top: 10px; }}
 </style></head>
 <body>
 <h3>{safe_title}</h3>
-<p>이 작품을 "제외됨" 목록으로 옮길까요? (제외됨 탭에서 다시 되돌릴 수 있습니다)</p>
+<p id="question">이 작품을 "제외됨" 목록으로 옮길까요? (제외됨 탭에서 다시 되돌릴 수 있습니다)</p>
 <button id="btn">제외하기</button>
+<p id="error-text"></p>
 <div id="result"></div>
 <script>
 document.getElementById("btn").addEventListener("click", async () => {{
   const btn = document.getElementById("btn");
+  const errorText = document.getElementById("error-text");
   btn.disabled = true;
   btn.textContent = "처리 중...";
+  errorText.textContent = "";
   try {{
     const res = await fetch("/api/naver-list/{title_id}/exclude", {{
       method: "POST",
@@ -350,15 +356,29 @@ document.getElementById("btn").addEventListener("click", async () => {{
       body: JSON.stringify({payload_json}),
     }});
     if (res.ok) {{
-      document.getElementById("result").textContent = "제외되었습니다.";
+      document.getElementById("question").style.display = "none";
+      btn.style.display = "none"; // 버튼은 없애고, 완료됐다는 게 한눈에 보이게 결과만 남긴다
+      document.getElementById("result").innerHTML =
+        '<p>✅ 제외되었습니다.</p>' +
+        '<a class="btn-link" href="/">서비스로 이동</a> ' +
+        '<button id="close-btn">이 탭 닫기</button>';
+      const closeBtn = document.getElementById("close-btn");
+      closeBtn.addEventListener("click", () => {{
+        window.close();
+        // 이 페이지를 직접 눌러서 열었으면(스크립트가 새 창으로 연 게 아니면)
+        // 브라우저 보안 정책상 window.close()가 조용히 안 먹힐 수 있다 —
+        // 그런 경우를 위한 안내만 남겨둔다.
+        errorText.style.color = "#555";
+        errorText.textContent = "탭이 자동으로 안 닫히면 직접 닫아주세요.";
+      }});
     }} else {{
       const err = await res.json().catch(() => ({{}}));
-      document.getElementById("result").textContent = "실패: " + (err.detail || res.status);
+      errorText.textContent = "실패: " + (err.detail || res.status);
       btn.disabled = false;
       btn.textContent = "제외하기";
     }}
   }} catch (e) {{
-    document.getElementById("result").textContent = "오류: " + e.message;
+    errorText.textContent = "오류: " + e.message;
     btn.disabled = false;
     btn.textContent = "제외하기";
   }}
