@@ -158,8 +158,14 @@ function buildWebtoonCard(w, context) {
   const authorText = context === "naver-list" ? w.author_summary : (w.writer_names || []).join(", ");
   if (authorText) metaParts.push(authorText);
   if (w.is_adult) metaParts.push("🔞");
+  // status가 "unsubscribed"여도 실제로 구독을 거친 적이 없으면(제외됨 → 목록으로만
+  // 오간 경우) "구독해제" 배지를 붙이면 안 된다 — 실제로는 구독한 적이 없으니까.
+  // 이럴 땐 완전히 미등록인 것과 똑같이 배지 자체를 안 보여준다.
+  const showsAsUnregistered = w.status === "unsubscribed" && !w.ever_subscribed;
   const statusBadge =
-    context === "naver-list" && w.status ? `<span class="badge ${w.status}">${STATUS_LABEL[w.status] || w.status}</span>` : "";
+    context === "naver-list" && w.status && !showsAsUnregistered
+      ? `<span class="badge ${w.status}">${STATUS_LABEL[w.status] || w.status}</span>`
+      : "";
 
   card.innerHTML = `
     ${w.thumbnail_url ? `<img src="${escapeHtml(w.thumbnail_url)}" alt="" loading="lazy" />` : '<div class="thumb-placeholder"></div>'}

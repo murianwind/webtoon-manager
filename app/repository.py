@@ -47,6 +47,7 @@ def _row_to_record(row) -> WebtoonRecord:
         is_paused=bool(row["is_paused"]),
         is_new=bool(row["is_new"]),
         has_update=bool(row["has_update"]),
+        ever_subscribed=bool(row["ever_subscribed"]),
     )
 
 
@@ -118,10 +119,16 @@ def update_thumbnail_url(title_id: str, thumbnail_url: str) -> None:
 
 
 def set_status(title_id: str, status: str) -> None:
+    """상태를 바꾼다. active로 바뀌는 순간(구독을 시작하는 순간) ever_subscribed도
+    같이 1로 세워두고 이후로는 절대 되돌리지 않는다 — "구독한 적 없이 제외됨→
+    목록으로만 왔다갔다 한 것"과 "실제로 구독했다가 해제한 것"을 구분해서, 네이버
+    전체목록에서 잘못된 배지("구독해제")가 붙는 걸 막기 위한 용도라, 이 값 자체가
+    나중에 상태를 바꾸는 데는 전혀 쓰이지 않고 오직 화면 표시용으로만 쓰인다."""
     with write_transaction() as conn:
         conn.execute(
-            "UPDATE webtoons SET status = ?, updated_at = ? WHERE title_id = ?",
-            (status, _now(), title_id),
+            "UPDATE webtoons SET status = ?, ever_subscribed = CASE WHEN ? = ? THEN 1 ELSE ever_subscribed END, "
+            "updated_at = ? WHERE title_id = ?",
+            (status, status, STATUS_ACTIVE, _now(), title_id),
         )
 
 

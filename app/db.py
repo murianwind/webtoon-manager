@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS webtoons (
     is_paused INTEGER NOT NULL DEFAULT 0,         -- 휴재 여부
     is_new INTEGER NOT NULL DEFAULT 0,            -- 신작 여부 (네이버 API의 'new' 필드)
     has_update INTEGER NOT NULL DEFAULT 0,        -- UP 여부 (네이버 API의 'up' 필드, 탭과 무관하게 그대로 표시)
+    ever_subscribed INTEGER NOT NULL DEFAULT 0,   -- 실제로 "구독"을 거친 적이 있는지 (화면 표시용, 상태 전환 로직에는 안 쓰임)
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -140,6 +141,7 @@ _MIGRATIONS = [
     ("webtoons", "is_new", "ALTER TABLE webtoons ADD COLUMN is_new INTEGER NOT NULL DEFAULT 0"),
     ("webtoons", "has_update", "ALTER TABLE webtoons ADD COLUMN has_update INTEGER NOT NULL DEFAULT 0"),
     ("webtoons", "writer_names", "ALTER TABLE webtoons ADD COLUMN writer_names TEXT NOT NULL DEFAULT '[]'"),
+    ("webtoons", "ever_subscribed", "ALTER TABLE webtoons ADD COLUMN ever_subscribed INTEGER NOT NULL DEFAULT 0"),
     ("watched_authors", "platform", "ALTER TABLE watched_authors ADD COLUMN platform TEXT NOT NULL DEFAULT 'naver'"),
     ("archive_targets", "dest_type", "ALTER TABLE archive_targets ADD COLUMN dest_type TEXT NOT NULL DEFAULT 'local'"),
     ("archive_targets", "source_type", "ALTER TABLE archive_targets ADD COLUMN source_type TEXT NOT NULL DEFAULT 'webtoon'"),
@@ -155,6 +157,11 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         existing_columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
         if column not in existing_columns:
             conn.execute(alter_sql)
+            if table == "webtoons" and column == "ever_subscribed":
+                # 이 컬럼이 새로 생기는 바로 이 순간에만, 지금 이미 구독중인 것들은
+                # 당연히 구독을 거친 것이므로 한 번만 채워준다 — 이후로는 set_status가
+                # active로 바뀔 때마다 알아서 채우므로 이 백필은 다시 필요 없다.
+                conn.execute("UPDATE webtoons SET ever_subscribed = 1 WHERE status = 'active'")
     conn.commit()
 
 
