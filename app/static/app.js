@@ -263,8 +263,11 @@ function renderNaverList() {
   const filterStatus = document.getElementById("naver-list-filter-status").value;
   const sortBy = document.getElementById("naver-list-sort").value;
 
-  // 구독해제/목록제외한 작품은 여기서 안 보이고, 각자의 탭(구독해제/제외됨)에서만 보인다.
-  let rows = naverListCache.filter((w) => w.status !== "excluded" && w.status !== "unsubscribed");
+  // 구독해제/목록제외한 작품은 원래 여기서 안 보이고 각자의 탭에서만 보이는 게
+  // 기본 규칙이다. 다만 "구독해제" 상태여도 실제로 구독한 적이 없으면(제외됨 →
+  // 목록으로만 거친 경우) 이 규칙에서 예외로 두고 여기서도 보여준다 — 안 그러면
+  // "목록으로"를 눌러도 전체목록 어디에도 안 보이고 그냥 사라진 것처럼 느껴진다.
+  let rows = naverListCache.filter((w) => w.status !== "excluded" && !(w.status === "unsubscribed" && w.ever_subscribed));
 
   if (filterStatus === "active") rows = rows.filter((w) => w.status === "active");
   if (filterStatus === "not-active") rows = rows.filter((w) => w.status !== "active");
