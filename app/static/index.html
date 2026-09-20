@@ -251,6 +251,25 @@
       <span id="author-auto-register-save-result" class="hint-inline"></span>
     </div>
     <div class="settings-card">
+      <h2>구독해제 관리</h2>
+      <p class="hint">구독 이력이 있는데 지금 구독 중이 아닌 작품들을 정리합니다. "초기화"하면 완전히 미등록 상태가 되어(전체목록에서만, 네이버 요일별 목록에 있는 경우에만 보임) 다시 되돌릴 수 없습니다.</p>
+
+      <div class="field-group">
+        <label>구독 이력 초기화</label>
+        <div id="unsubscribe-history-list" class="job-history-list job-history-list-compact"></div>
+      </div>
+
+      <div class="field-group">
+        <label for="register-unsubscribed-title-id">titleId로 "구독해제" 상태 직접 등록</label>
+        <p class="field-hint">이전에 실수로 완전히 사라진 작품을 구독 이력이 있는 채로 복구할 때 씁니다. 이미 구독 중인 작품은 등록할 수 없습니다.</p>
+        <div class="registry-add-row">
+          <input id="register-unsubscribed-title-id" type="text" placeholder="titleId (예: 123456)" />
+          <button id="btn-register-unsubscribed">등록</button>
+        </div>
+        <span id="register-unsubscribed-result" class="hint-inline"></span>
+      </div>
+    </div>
+    <div class="settings-card">
       <h2>실행 스케줄</h2>
       <div class="schedule-block" data-job="discovery_job">
         <h3>신작 스캔</h3>

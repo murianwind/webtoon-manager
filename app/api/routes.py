@@ -139,6 +139,11 @@ async def list_webtoons(status: str | None = None):
         if status
         else await asyncio.to_thread(repository.list_all)
     )
+    if status == repository.STATUS_UNSUBSCRIBED:
+        # "구독해제" 탭엔 실제로 구독했다가 해제한 것만 있어야 한다 — 구독한 적 없는
+        # 작품은 이 상태를 거칠 방법이 이제 없지만(목록으로가 대신 전용 상태로 보냄),
+        # 예전에 잘못 들어간 기록이 남아있을 수 있어서 한 번 더 여기서도 막아둔다.
+        rows = [r for r in rows if r.ever_subscribed]
     return [_to_out(r) for r in rows]
 
 
@@ -178,6 +183,40 @@ async def list_pending_completion():
     rows = await asyncio.to_thread(repository.list_by_status, repository.STATUS_ACTIVE)
     pending = [r for r in rows if r.is_finished and not r.finish_ack]
     return [_to_out(r) for r in pending]
+
+
+@router.get("/webtoons/history-only", response_model=list[WebtoonOut])
+async def list_history_only_webtoons():
+    """구독 이력은 있지만(ever_subscribed) 지금 구독 중은 아닌 것들 — "설정 > 구독해제
+    관리"에서 잘못 남아있는 이력을 찾아 초기화할 때 쓰는 목록이라, active는 제외한다
+    (지금 구독 중인 걸 여기서 잘못 건드리면 안 되므로)."""
+    rows = await asyncio.to_thread(repository.list_all)
+    rows = [r for r in rows if r.ever_subscribed and r.status != repository.STATUS_ACTIVE]
+    return [_to_out(r) for r in rows]
+
+
+@router.post("/webtoons/{title_id}/register-unsubscribed", response_model=WebtoonOut)
+async def register_unsubscribed_webtoon(title_id: str):
+    """"설정 > 구독해제 관리"에서 titleId만 입력해서 등록하는 기능 — 이전 버그로
+    완전히 사라져버린 작품을 구독 이력이 있는 채로 "구독해제" 탭에 복구할 때 쓴다.
+    이미 구독 중(active)인 작품은 이 방식으로 억지로 옮기면 안 되므로 막는다."""
+    existing = await asyncio.to_thread(repository.get, title_id)
+    if existing is not None and existing.status == repository.STATUS_ACTIVE:
+        raise HTTPException(status_code=400, detail="이미 구독 중인 웹툰은 이 방식으로 등록할 수 없습니다.")
+
+    if existing is not None:
+        title, thumbnail_url = existing.title, existing.thumbnail_url
+    else:
+        settings = get_settings()
+        async with aiohttp.ClientSession() as session:
+            info = await naver_api.fetch_title_info(session, title_id, settings.request_timeout_seconds)
+        if info is None:
+            raise HTTPException(status_code=404, detail="네이버에서 이 titleId를 찾을 수 없습니다.")
+        title, thumbnail_url = info.title_name, info.thumbnail_url
+
+    await asyncio.to_thread(repository.register_as_unsubscribed_history, title_id, title, thumbnail_url)
+    _trigger_enrich(title_id, register_authors_enabled=False)  # 장르/작가 등 정보만 채우고, 작가를 관심작가로 자동등록하진 않음
+    return _to_out(await asyncio.to_thread(repository.get, title_id))
 
 
 @router.post("/webtoons/{title_id}/unregister", response_model=WebtoonOut)
@@ -317,6 +356,7 @@ async def naver_list_exclude(title_id: str, payload: NaverListEntryIn):
             None,
             repository.SOURCE_MANUAL,
             payload.thumbnail_url,
+            False,  # mark_ever_subscribed: 미등록 상태에서 바로 제외하는 거라 실제 구독은 아니었음
         )
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_EXCLUDED)
     _trigger_enrich(title_id, register_authors_enabled=False)  # 제외해도 정보는 채우되, 저자를 관심작가로 올리진 않음

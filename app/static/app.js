@@ -1258,6 +1258,7 @@ async function loadSettingsPage() {
   loadAppPublicBaseUrl();
   loadUnregisteredNewEpisodesToggle();
   loadAuthorAutoRegisterSetting();
+  loadUnsubscribeHistoryList();
 }
 
 async function loadAuthorAutoRegisterSetting() {
@@ -1279,6 +1280,64 @@ document.getElementById("btn-save-author-auto-register").addEventListener("click
     });
     resultEl.style.color = "";
     resultEl.textContent = "저장했습니다.";
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+});
+
+const HISTORY_STATUS_LABEL = { unsubscribed: "구독해제", unregistered: "미등록(전체목록에만)", excluded: "제외됨" };
+
+async function loadUnsubscribeHistoryList() {
+  const listEl = document.getElementById("unsubscribe-history-list");
+  try {
+    const rows = await apiCall("/api/webtoons/history-only");
+    listEl.innerHTML = "";
+    if (rows.length === 0) {
+      listEl.innerHTML = '<p class="chip-empty-message">초기화할 이력이 없습니다.</p>';
+      return;
+    }
+    for (const w of rows) {
+      const entry = document.createElement("div");
+      entry.className = "job-history-entry";
+      const summary = document.createElement("div");
+      summary.className = "job-history-summary";
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "job-history-name";
+      nameSpan.textContent = w.title;
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = HISTORY_STATUS_LABEL[w.status] || w.status;
+      summary.appendChild(nameSpan);
+      summary.appendChild(badge);
+      const resetBtn = makeButton("초기화", async () => {
+        if (!confirm(`"${w.title}"의 구독 이력을 초기화합니다 (되돌릴 수 없음). 계속할까요?`)) return;
+        try {
+          await apiCall(`/api/webtoons/${w.title_id}`, { method: "DELETE" });
+          entry.remove();
+        } catch (e) {
+          alert(e.message);
+        }
+      });
+      summary.appendChild(resetBtn);
+      entry.appendChild(summary);
+      listEl.appendChild(entry);
+    }
+  } catch (e) {
+    listEl.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
+  }
+}
+
+document.getElementById("btn-register-unsubscribed").addEventListener("click", async () => {
+  const resultEl = document.getElementById("register-unsubscribed-result");
+  const titleId = document.getElementById("register-unsubscribed-title-id").value.trim();
+  if (!titleId) return;
+  resultEl.textContent = "";
+  try {
+    const wt = await apiCall(`/api/webtoons/${titleId}/register-unsubscribed`, { method: "POST" });
+    resultEl.style.color = "";
+    resultEl.textContent = `"${wt.title}"을(를) 구독해제 상태로 등록했습니다.`;
+    document.getElementById("register-unsubscribed-title-id").value = "";
+    loadUnsubscribeHistoryList();
   } catch (e) {
     resultEl.textContent = e.message;
   }

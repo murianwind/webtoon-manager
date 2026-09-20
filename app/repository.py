@@ -84,21 +84,29 @@ def upsert_new(
     writer_ids: list[str] | None = None,
     added_source: str = SOURCE_MANUAL,
     thumbnail_url: str = "",
+    mark_ever_subscribed: bool = True,
 ) -> None:
     """이미 존재하면 아무 것도 하지 않는다 (구독 취소/제외 상태를 덮어쓰지 않기 위해).
 
     exists() 체크 후 별도로 INSERT하면 두 코루틴(예: 작가 스캔과 태그 스캔이 동시에
     같은 신작을 발견하는 경우)이 동시에 exists()==False를 보고 둘 다 INSERT를
     시도해서 IntegrityError로 죽을 수 있다(실제로 스레드 두 개로 재현됨) — INSERT OR
-    IGNORE로 존재 여부 확인과 삽입을 원자적으로 묶어서 이 레이스 자체를 없앤다."""
+    IGNORE로 존재 여부 확인과 삽입을 원자적으로 묶어서 이 레이스 자체를 없앤다.
+
+    이 함수는 항상 status='active'로 새로 만든다 — 대부분의 호출부(수동 구독,
+    작가/태그 자동추가)는 이게 진짜 구독 시작이라 ever_subscribed도 같이 1로
+    세워야 한다(기본값 True). 유일한 예외는 "미등록 상태에서 바로 제외" 흐름
+    (naver_list_exclude)처럼, 이 INSERT가 끝나자마자 바로 다른 상태로 전환해버려서
+    실제로는 구독이 아니었던 경우 — 그 호출부만 mark_ever_subscribed=False로
+    넘겨서 구독 이력이 잘못 남는 걸 막는다."""
     now = _now()
     with write_transaction() as conn:
         conn.execute(
             """
             INSERT OR IGNORE INTO webtoons
                 (title_id, title, status, is_adult, writer_ids, added_source,
-                 last_downloaded_no, is_finished, finish_ack, thumbnail_url, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?)
+                 last_downloaded_no, is_finished, finish_ack, thumbnail_url, ever_subscribed, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?)
             """,
             (
                 title_id,
@@ -108,9 +116,24 @@ def upsert_new(
                 json.dumps(writer_ids or []),
                 added_source,
                 thumbnail_url,
+                int(mark_ever_subscribed),
                 now,
                 now,
             ),
+        )
+
+
+def register_as_unsubscribed_history(title_id: str, title: str, thumbnail_url: str = "") -> None:
+    """"구독해제 등록"(설정 화면) 전용 — 없으면 새로 만들고, 있으면 그대로 두고,
+    구독 중(active)이 아닌 이상 무조건 status=unsubscribed + ever_subscribed=1로
+    만든다. 실제 과거 이력과 무관하게 사용자가 직접 이력을 만들어주는 기능이라
+    무조건 1로 세운다 — set_status의 CASE 로직(활성화될 때만 세움)과 달리, 여기는
+    호출 자체가 "이 작품은 구독 이력이 있는 걸로 쳐줘"라는 명시적 의도이기 때문이다."""
+    upsert_new(title_id, title, thumbnail_url=thumbnail_url, mark_ever_subscribed=True)
+    with write_transaction() as conn:
+        conn.execute(
+            "UPDATE webtoons SET status = ?, ever_subscribed = 1, updated_at = ? WHERE title_id = ?",
+            (STATUS_UNSUBSCRIBED, _now(), title_id),
         )
 
 

@@ -184,6 +184,12 @@ def get_connection() -> sqlite3.Connection:
         _connection.executescript(_SCHEMA)
         _connection.commit()
         _apply_migrations(_connection)
+        # 지금 구독 중(active)인데 ever_subscribed가 안 세워진 행이 있으면 항상
+        # 바로잡는다 — 예전에 자동추가(작가/태그 감지) 경로가 이 값을 안 세우던
+        # 버그가 있었어서, 그 버그가 있던 동안 만들어진 뒤 지금까지 계속 구독 중인
+        # 행들을 시작할 때마다 값싸게 자가 치유한다(이미 맞으면 아무 일도 안 함).
+        _connection.execute("UPDATE webtoons SET ever_subscribed = 1 WHERE status = 'active' AND ever_subscribed = 0")
+        _connection.commit()
     return _connection
 
 
