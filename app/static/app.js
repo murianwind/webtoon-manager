@@ -190,14 +190,21 @@ function buildWebtoonCard(w, context) {
     }
     if (context === "excluded") {
       actions.appendChild(makeButton("목록으로", async () => {
-        // 제외 해제(구독해제 상태로 전환) 후 전체목록으로 이동한다 — 이 카드는
-        // subscriptionAction이 알아서 "제외됨" 탭 목록/캐시에서 지워준다(기존 로직
-        // 그대로 재사용). 검색창에 제목을 채우고 탭을 전환하면, 전체목록엔 이제
-        // "제외됨" 배지 없이(구독해제 상태로) 다시 나타난다.
-        await subscriptionAction(w.title_id, "unsubscribe", "excluded");
-        document.getElementById("naver-list-search").value = w.title;
-        sessionStorage.setItem(ACTIVE_TAB_KEY, "naver-list");
-        switchToTab("naver-list");
+        // DB 기록 자체를 완전히 지워서(status 전환이 아니라 진짜 미등록 상태로)
+        // 전체목록에서 "구독/목록제외" 버튼이 뜨는 상태로 만든다 — "구독해제"
+        // 상태로만 바꾸면 배지만 바뀔 뿐 여전히 DB에 남아있는 상태라 요청하신
+        // "미등록"과는 다르다. 탭 전환은 안 하고 "제외됨" 탭에 그대로 머무른다.
+        try {
+          await apiCall(`/api/webtoons/${w.title_id}`, { method: "DELETE" });
+        } catch (e) {
+          alert(e.message);
+          return;
+        }
+        const listEl = document.getElementById("excluded-list");
+        const card = listEl.querySelector(`.webtoon-card[data-title-id="${w.title_id}"]`);
+        card?.remove();
+        document.getElementById("excluded-empty").classList.toggle("hidden", listEl.children.length > 0);
+        subscriptionCache.excluded = (subscriptionCache.excluded || []).filter((x) => x.title_id !== w.title_id);
       }));
       if (w.is_finished) {
         // 완결작만 완전 삭제 허용 — 완결작은 자동추가 로직이 원래 다시 안 건드리므로 안전하다.
