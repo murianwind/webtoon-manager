@@ -191,15 +191,16 @@ function buildWebtoonCard(w, context) {
   } else {
     actions.appendChild(makeButton("구독", () => subscriptionAction(w.title_id, "subscribe", context)));
     if (context === "unsubscribed" || context === "excluded") {
-      // "구독해제" 상태로 만든다 — 완전 삭제(DB 기록 자체를 지움)와 달리, 네이버
-      // 웹툰 전체목록의 보완 로직이 "제외됨" 상태만 걸러내고 "구독해제"는 그대로
-      // 보여주기 때문에, 완결/휴재라 네이버 자체 목록엔 없는 작품도 전체목록에서
-      // 항상 찾을 수 있다. 탭 전환은 안 하고 지금 탭에 그대로 머무른다.
-      actions.appendChild(makeButton("목록으로", () => subscriptionAction(w.title_id, "unsubscribe", context)));
+      // 완전 삭제(DB 기록 자체를 지움) — "구독해제" 상태로 바꾸는 게 아니다.
+      // "구독해제" 탭은 실제로 구독했다가 해제한 것만 있어야 하는데, 여기서
+      // 상태만 바꾸면 구독한 적 없는 것도 그 탭에 섞여 들어가 버린다. 완전히
+      // 지워야 전체목록에서만(네이버 자체 목록에 있는 경우) 다시 보이고, 구독해제/
+      // 제외됨 어느 탭에도 안 남는다. "완전 삭제"와 달리 확인 팝업은 생략한다.
+      actions.appendChild(makeButton("목록으로", () => deleteWebtoonPermanently(w.title_id, context, true)));
     }
     if (context === "excluded" && w.is_finished) {
       // 완결작만 완전 삭제 허용 — 완결작은 자동추가 로직이 원래 다시 안 건드리므로 안전하다.
-      actions.appendChild(makeButton("완전 삭제", () => deleteWebtoonPermanently(w.title_id)));
+      actions.appendChild(makeButton("완전 삭제", () => deleteWebtoonPermanently(w.title_id, "excluded")));
     }
   }
 
@@ -450,15 +451,15 @@ async function subscriptionAction(titleId, action, currentTab) {
   }
 }
 
-async function deleteWebtoonPermanently(titleId) {
-  if (!confirm("완전히 삭제합니다 (되돌릴 수 없음). 계속할까요?")) return;
+async function deleteWebtoonPermanently(titleId, context, skipConfirm) {
+  if (!skipConfirm && !confirm("완전히 삭제합니다 (되돌릴 수 없음). 계속할까요?")) return;
   try {
     await apiCall(`/api/webtoons/${titleId}`, { method: "DELETE" });
-    const listEl = document.getElementById("excluded-list");
+    const listEl = document.getElementById(`${context}-list`);
     const card = listEl.querySelector(`.webtoon-card[data-title-id="${titleId}"]`);
     card?.remove();
-    document.getElementById("excluded-empty").classList.toggle("hidden", listEl.children.length > 0);
-    subscriptionCache.excluded = (subscriptionCache.excluded || []).filter((w) => w.title_id !== titleId);
+    document.getElementById(`${context}-empty`).classList.toggle("hidden", listEl.children.length > 0);
+    subscriptionCache[context] = (subscriptionCache[context] || []).filter((w) => w.title_id !== titleId);
   } catch (e) {
     alert(e.message);
   }
