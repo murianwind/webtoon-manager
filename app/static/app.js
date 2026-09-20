@@ -188,9 +188,21 @@ function buildWebtoonCard(w, context) {
       // 완전 삭제는 아니고 excluded로 옮긴다 — 이후 작가/태그 자동추가로 다시 안 들어오게 확정.
       actions.appendChild(makeButton("목록에서 제거", () => subscriptionAction(w.title_id, "remove", "unsubscribed")));
     }
-    if (context === "excluded" && w.is_finished) {
-      // 완결작만 완전 삭제 허용 — 완결작은 자동추가 로직이 원래 다시 안 건드리므로 안전하다.
-      actions.appendChild(makeButton("완전 삭제", () => deleteWebtoonPermanently(w.title_id)));
+    if (context === "excluded") {
+      actions.appendChild(makeButton("목록으로", async () => {
+        // 제외 해제(구독해제 상태로 전환) 후 전체목록으로 이동한다 — 이 카드는
+        // subscriptionAction이 알아서 "제외됨" 탭 목록/캐시에서 지워준다(기존 로직
+        // 그대로 재사용). 검색창에 제목을 채우고 탭을 전환하면, 전체목록엔 이제
+        // "제외됨" 배지 없이(구독해제 상태로) 다시 나타난다.
+        await subscriptionAction(w.title_id, "unsubscribe", "excluded");
+        document.getElementById("naver-list-search").value = w.title;
+        sessionStorage.setItem(ACTIVE_TAB_KEY, "naver-list");
+        switchToTab("naver-list");
+      }));
+      if (w.is_finished) {
+        // 완결작만 완전 삭제 허용 — 완결작은 자동추가 로직이 원래 다시 안 건드리므로 안전하다.
+        actions.appendChild(makeButton("완전 삭제", () => deleteWebtoonPermanently(w.title_id)));
+      }
     }
   }
 
