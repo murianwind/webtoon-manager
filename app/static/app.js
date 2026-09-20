@@ -158,10 +158,11 @@ function buildWebtoonCard(w, context) {
   const authorText = context === "naver-list" ? w.author_summary : (w.writer_names || []).join(", ");
   if (authorText) metaParts.push(authorText);
   if (w.is_adult) metaParts.push("🔞");
-  // status가 "unsubscribed"여도 실제로 구독을 거친 적이 없으면(제외됨 → 목록으로만
-  // 오간 경우) "구독해제" 배지를 붙이면 안 된다 — 실제로는 구독한 적이 없으니까.
-  // 이럴 땐 완전히 미등록인 것과 똑같이 배지 자체를 안 보여준다.
-  const showsAsUnregistered = w.status === "unsubscribed" && !w.ever_subscribed;
+  // status가 "unregistered"(구독 이력 있는 것을 "목록으로" 보낸 상태)이거나,
+  // "unsubscribed"인데 실제로 구독을 거친 적이 없으면(제외됨 → 목록으로만 오간
+  // 경우) 배지를 안 보여준다 — 어느 쪽도 실제로 "지금 구독해제 상태"인 게 아니라,
+  // 화면상으로는 미등록과 똑같이 취급한다.
+  const showsAsUnregistered = w.status === "unregistered" || (w.status === "unsubscribed" && !w.ever_subscribed);
   const statusBadge =
     context === "naver-list" && w.status && !showsAsUnregistered
       ? `<span class="badge ${w.status}">${STATUS_LABEL[w.status] || w.status}</span>`
@@ -191,12 +192,9 @@ function buildWebtoonCard(w, context) {
   } else {
     actions.appendChild(makeButton("구독", () => subscriptionAction(w.title_id, "subscribe", context)));
     if (context === "unsubscribed" || context === "excluded") {
-      // 완전 삭제(DB 기록 자체를 지움) — "구독해제" 상태로 바꾸는 게 아니다.
-      // "구독해제" 탭은 실제로 구독했다가 해제한 것만 있어야 하는데, 여기서
-      // 상태만 바꾸면 구독한 적 없는 것도 그 탭에 섞여 들어가 버린다. 완전히
-      // 지워야 전체목록에서만(네이버 자체 목록에 있는 경우) 다시 보이고, 구독해제/
-      // 제외됨 어느 탭에도 안 남는다. "완전 삭제"와 달리 확인 팝업은 생략한다.
-      actions.appendChild(makeButton("목록으로", () => deleteWebtoonPermanently(w.title_id, context, true)));
+      // "목록으로" — 구독 이력 여부에 따라 완전 삭제/전용 미등록 상태로 갈린다
+      // (moveToListTab 참고). "완전 삭제"와 달리 확인 팝업은 생략한다.
+      actions.appendChild(makeButton("목록으로", () => moveToListTab(w.title_id, context, w.ever_subscribed)));
     }
     if (context === "excluded" && w.is_finished) {
       // 완결작만 완전 삭제 허용 — 완결작은 자동추가 로직이 원래 다시 안 건드리므로 안전하다.
@@ -265,9 +263,11 @@ function renderNaverList() {
   const sortBy = document.getElementById("naver-list-sort").value;
 
   // 구독해제/목록제외한 작품은 원래 여기서 안 보이고 각자의 탭에서만 보이는 게
-  // 기본 규칙이다. 다만 "구독해제" 상태여도 실제로 구독한 적이 없으면(제외됨 →
-  // 목록으로만 거친 경우) 이 규칙에서 예외로 두고 여기서도 보여준다 — 안 그러면
-  // "목록으로"를 눌러도 전체목록 어디에도 안 보이고 그냥 사라진 것처럼 느껴진다.
+  // 기본 규칙이다. "unregistered" 상태(구독 이력 있는 것을 "목록으로" 보낸 것)는
+  // 어느 탭에도 안 속하니 그 규칙과 무관하게 항상 여기서 보인다. "unsubscribed"
+  // 상태는 실제로 구독한 적이 없으면(제외됨 → 목록으로만 거친 경우) 예외로 두고
+  // 여기서도 보여준다 — 이 두 경우를 안 걸러내면 "목록으로"를 눌러도 전체목록
+  // 어디에도 안 보이고 그냥 사라진 것처럼 느껴진다.
   let rows = naverListCache.filter((w) => w.status !== "excluded" && !(w.status === "unsubscribed" && w.ever_subscribed));
 
   if (filterStatus === "active") rows = rows.filter((w) => w.status === "active");
@@ -455,11 +455,33 @@ async function deleteWebtoonPermanently(titleId, context, skipConfirm) {
   if (!skipConfirm && !confirm("완전히 삭제합니다 (되돌릴 수 없음). 계속할까요?")) return;
   try {
     await apiCall(`/api/webtoons/${titleId}`, { method: "DELETE" });
-    const listEl = document.getElementById(`${context}-list`);
-    const card = listEl.querySelector(`.webtoon-card[data-title-id="${titleId}"]`);
-    card?.remove();
-    document.getElementById(`${context}-empty`).classList.toggle("hidden", listEl.children.length > 0);
-    subscriptionCache[context] = (subscriptionCache[context] || []).filter((w) => w.title_id !== titleId);
+    removeCardFromTab(titleId, context);
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+function removeCardFromTab(titleId, context) {
+  const listEl = document.getElementById(`${context}-list`);
+  const card = listEl.querySelector(`.webtoon-card[data-title-id="${titleId}"]`);
+  card?.remove();
+  document.getElementById(`${context}-empty`).classList.toggle("hidden", listEl.children.length > 0);
+  subscriptionCache[context] = (subscriptionCache[context] || []).filter((w) => w.title_id !== titleId);
+}
+
+async function moveToListTab(titleId, context, everSubscribed) {
+  // "목록으로" — 구독 이력이 있으면(everSubscribed) 완전 삭제 대신 전용 상태로
+  // 옮겨서 DB 기록을 남긴다. 그래야 완결/휴재라 네이버 자체 목록엔 없는 작품도
+  // 전체목록에서 계속 찾을 수 있다. 구독 이력이 없으면 완전 삭제한다 — 어차피
+  // 구독한 적 없는 건 지워도 이력을 잃을 게 없고, 네이버 목록에 없으면(완결/휴재)
+  // 전체목록에서도 안 보일 수 있다는 걸 이미 알고 계신다.
+  try {
+    if (everSubscribed) {
+      await apiCall(`/api/webtoons/${titleId}/unregister`, { method: "POST" });
+    } else {
+      await apiCall(`/api/webtoons/${titleId}`, { method: "DELETE" });
+    }
+    removeCardFromTab(titleId, context);
   } catch (e) {
     alert(e.message);
   }

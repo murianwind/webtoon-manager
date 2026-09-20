@@ -69,6 +69,7 @@ class WebtoonOut(BaseModel):
     has_new_episode: bool
     writer_ids: list[str]
     writer_names: list[str]
+    ever_subscribed: bool
 
 
 def _to_out(wt) -> WebtoonOut:
@@ -90,6 +91,7 @@ def _to_out(wt) -> WebtoonOut:
         has_new_episode=wt.has_update,
         writer_ids=wt.writer_ids,
         writer_names=wt.writer_names,
+        ever_subscribed=wt.ever_subscribed,
     )
 
 
@@ -176,6 +178,19 @@ async def list_pending_completion():
     rows = await asyncio.to_thread(repository.list_by_status, repository.STATUS_ACTIVE)
     pending = [r for r in rows if r.is_finished and not r.finish_ack]
     return [_to_out(r) for r in pending]
+
+
+@router.post("/webtoons/{title_id}/unregister", response_model=WebtoonOut)
+async def unregister_webtoon(title_id: str):
+    """"목록으로" — 구독 이력이 있는 작품 전용. 완전 삭제 대신 이 전용 상태로 옮겨서
+    DB 기록(과 ever_subscribed 이력)을 남긴다 — 구독해제/제외됨 어느 탭에도 안 뜨고,
+    네이버 전체목록에서는(완결/휴재라 요일별 목록엔 없어도) 계속 보인다. 구독 이력이
+    없는 작품은 이 상태를 쓸 이유가 없으니(그런 건 완전 삭제로 충분) 400으로 막는다."""
+    wt = await asyncio.to_thread(_get_or_404, title_id)
+    if not wt.ever_subscribed:
+        raise HTTPException(status_code=400, detail="구독한 적 없는 작품은 완전 삭제를 사용하세요.")
+    await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_UNREGISTERED)
+    return _to_out(await asyncio.to_thread(repository.get, title_id))
 
 
 @router.delete("/webtoons/{title_id}")
