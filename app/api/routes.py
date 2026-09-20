@@ -178,25 +178,15 @@ async def list_pending_completion():
     return [_to_out(r) for r in pending]
 
 
-@router.post("/webtoons/{title_id}/remove", response_model=WebtoonOut)
-async def remove_from_unsubscribed(title_id: str):
-    """구독해제 탭의 '목록에서 제거' — 완전 삭제가 아니라 excluded로 전환한다.
-    hard delete를 해버리면 title_id가 DB에서 사라져서 나중에 작가/태그 자동추가가
-    다시 이 작품을 추가해버릴 수 있다 — excluded 상태로 남겨야 "이후엔 등록되지
-    않는다"가 보장된다."""
-    await asyncio.to_thread(_get_or_404, title_id)
-    await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_EXCLUDED)
-    _trigger_enrich(title_id, register_authors_enabled=False)
-    return _to_out(await asyncio.to_thread(repository.get, title_id))
-
-
 @router.delete("/webtoons/{title_id}")
 async def delete_webtoon_permanently(title_id: str):
-    """제외됨 탭에서 완결작을 완전히 지운다 — 완결작은 자동추가 로직이 애초에 다시
-    안 건드리므로(항상 finished 체크로 건너뜀), 이 경우만 안전하게 완전 삭제할 수 있다."""
+    """구독해제/제외됨 탭에서 "목록으로"(완결작이면 별도 "완전 삭제")로 DB 기록을
+    완전히 지운다 — 구독 중(active)인 것만 막는다. 실수로 지금 받고 있는 작품을
+    지우는 사고를 막는 게 목적이라, 구독을 안 하고 있는 상태(구독해제/제외됨)는
+    둘 다 똑같이 안전하게 완전 삭제할 수 있다."""
     webtoon = await asyncio.to_thread(_get_or_404, title_id)
-    if webtoon.status != repository.STATUS_EXCLUDED:
-        raise HTTPException(status_code=400, detail="제외됨 상태의 웹툰만 완전 삭제할 수 있습니다.")
+    if webtoon.status == repository.STATUS_ACTIVE:
+        raise HTTPException(status_code=400, detail="구독 중인 웹툰은 완전 삭제할 수 없습니다.")
     await asyncio.to_thread(repository.hard_delete, title_id)
     return {"status": "deleted"}
 

@@ -184,32 +184,16 @@ function buildWebtoonCard(w, context) {
     }
   } else {
     actions.appendChild(makeButton("구독", () => subscriptionAction(w.title_id, "subscribe", context)));
-    if (context === "unsubscribed") {
-      // 완전 삭제는 아니고 excluded로 옮긴다 — 이후 작가/태그 자동추가로 다시 안 들어오게 확정.
-      actions.appendChild(makeButton("목록에서 제거", () => subscriptionAction(w.title_id, "remove", "unsubscribed")));
+    if (context === "unsubscribed" || context === "excluded") {
+      // "구독해제" 상태로 만든다 — 완전 삭제(DB 기록 자체를 지움)와 달리, 네이버
+      // 웹툰 전체목록의 보완 로직이 "제외됨" 상태만 걸러내고 "구독해제"는 그대로
+      // 보여주기 때문에, 완결/휴재라 네이버 자체 목록엔 없는 작품도 전체목록에서
+      // 항상 찾을 수 있다. 탭 전환은 안 하고 지금 탭에 그대로 머무른다.
+      actions.appendChild(makeButton("목록으로", () => subscriptionAction(w.title_id, "unsubscribe", context)));
     }
-    if (context === "excluded") {
-      actions.appendChild(makeButton("목록으로", async () => {
-        // DB 기록 자체를 완전히 지워서(status 전환이 아니라 진짜 미등록 상태로)
-        // 전체목록에서 "구독/목록제외" 버튼이 뜨는 상태로 만든다 — "구독해제"
-        // 상태로만 바꾸면 배지만 바뀔 뿐 여전히 DB에 남아있는 상태라 요청하신
-        // "미등록"과는 다르다. 탭 전환은 안 하고 "제외됨" 탭에 그대로 머무른다.
-        try {
-          await apiCall(`/api/webtoons/${w.title_id}`, { method: "DELETE" });
-        } catch (e) {
-          alert(e.message);
-          return;
-        }
-        const listEl = document.getElementById("excluded-list");
-        const card = listEl.querySelector(`.webtoon-card[data-title-id="${w.title_id}"]`);
-        card?.remove();
-        document.getElementById("excluded-empty").classList.toggle("hidden", listEl.children.length > 0);
-        subscriptionCache.excluded = (subscriptionCache.excluded || []).filter((x) => x.title_id !== w.title_id);
-      }));
-      if (w.is_finished) {
-        // 완결작만 완전 삭제 허용 — 완결작은 자동추가 로직이 원래 다시 안 건드리므로 안전하다.
-        actions.appendChild(makeButton("완전 삭제", () => deleteWebtoonPermanently(w.title_id)));
-      }
+    if (context === "excluded" && w.is_finished) {
+      // 완결작만 완전 삭제 허용 — 완결작은 자동추가 로직이 원래 다시 안 건드리므로 안전하다.
+      actions.appendChild(makeButton("완전 삭제", () => deleteWebtoonPermanently(w.title_id)));
     }
   }
 
