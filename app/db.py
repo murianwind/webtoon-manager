@@ -60,6 +60,26 @@ CREATE TABLE IF NOT EXISTS kakao_seen_titles (
     PRIMARY KEY (author_name, title_id)
 );
 
+-- "웹툰 전체목록"/"구독해제"/"제외됨" 탭에서 카카오웹툰을 다룰 때 쓴다. 네이버
+-- title_id와 카카오 title_id는 서로 독립된 숫자 체계라 같은 값이 우연히 겹칠 수
+-- 있어서, webtoons 테이블(네이버 전용)과는 절대 안 섞고 이 전용 테이블로 완전히
+-- 분리해둔다. status/ever_subscribed는 webtoons 테이블과 같은 규칙을 그대로
+-- 따른다(active/unsubscribed/excluded/unregistered, ever_subscribed는 active로
+-- 전환되는 순간만 세워지고 이후 절대 안 풀림) — 다만 이 상태 자체는 "웹툰 뷰어
+-- 서버 주소"가 설정돼 있어야만 의미가 있다(구독=뷰어로 보고 싶은 것으로 표시,
+-- 다운로드를 뜻하는 게 아님). 설정 안 해두면 구독 개념 없이 이 테이블은 제외
+-- 기록(status='excluded')만 쓰인다.
+CREATE TABLE IF NOT EXISTS kakao_webtoons (
+    title_id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'excluded',
+    ever_subscribed INTEGER NOT NULL DEFAULT 0,
+    thumbnail_url TEXT NOT NULL DEFAULT '',
+    seo_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS archive_targets (
     title_id TEXT PRIMARY KEY,   -- 웹툰 대상: 실제 title_id / 폴더 대상: "folder_"로 시작하는 합성 id
     dest_base_path TEXT NOT NULL,

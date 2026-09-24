@@ -81,12 +81,23 @@ function naverUrl(titleId) {
   return `https://comic.naver.com/webtoon/list?titleId=${titleId}`;
 }
 
+function kakaoContentUrl(titleId, seoId) {
+  // seoId가 없으면(구독 이력만 DB에 남아있고 지금 요일별 목록엔 없는 경우) 링크를
+  // 만들 수 없다 — 이럴 땐 호출부에서 그냥 텍스트로만 표시한다.
+  return seoId ? `https://webtoon.kakao.com/content/${encodeURIComponent(seoId)}/${titleId}` : "";
+}
+
 // 웹툰 뷰어 서버 주소가 설정되어 있는지 — 있으면 구독중 카드에 "뷰어에서 보기" 아이콘을 띄운다.
 // 페이지 열릴 때 한 번만 확인하고(설정 탭에서 바꾸면 새로고침해야 반영됨), 카드마다
 // 매번 물어보진 않는다.
 let webtoonServerConfigured = false;
 apiCall("/api/settings/webtoon-server")
   .then((data) => { webtoonServerConfigured = Boolean(data.webtoon_server_url); })
+  .catch(() => {});
+
+let kakaoWebtoonsEnabled = false;
+apiCall("/api/settings/kakao-webtoons-enabled")
+  .then((data) => { kakaoWebtoonsEnabled = data.enabled; })
   .catch(() => {});
 
 async function openInWebtoonServer(title) {
@@ -152,10 +163,11 @@ function buildWebtoonCard(w, context) {
   const card = document.createElement("div");
   card.className = "webtoon-card";
   card.dataset.titleId = w.title_id;
+  const platform = w.platform || "naver"; // naver-list/excluded 이외 탭은 전부 네이버 전용이라 기본값 naver
 
   const metaParts = [];
   if (context !== "naver-list" && w.last_downloaded_no > 0) metaParts.push(`${w.last_downloaded_no}화까지 다운로드`);
-  const authorText = context === "naver-list" ? w.author_summary : (w.writer_names || []).join(", ");
+  const authorText = context === "naver-list" || platform === "kakao" ? w.author_summary : (w.writer_names || []).join(", ");
   if (authorText) metaParts.push(authorText);
   if (w.is_adult) metaParts.push("🔞");
   // status가 "unregistered"(구독 이력 있는 것을 "목록으로" 보낸 상태)이거나,
@@ -167,11 +179,28 @@ function buildWebtoonCard(w, context) {
     context === "naver-list" && w.status && !showsAsUnregistered
       ? `<span class="badge ${w.status}">${STATUS_LABEL[w.status] || w.status}</span>`
       : "";
+  // 카카오는 구독/다운로드 개념이 없어서, "제외됨" 탭에서도 배지 자체가 필요 없다
+  // (그 탭에 있다는 것 자체가 곧 "제외됨" 상태이므로).
+  const platformBadge =
+    (context === "naver-list" || context === "excluded")
+      ? `<span class="platform-badge platform-${platform}">${platform === "kakao" ? "카카오" : "네이버"}</span>`
+      : "";
+  const checkboxHtml = context === "naver-list" ? '<input type="checkbox" class="webtoon-card-select" />' : "";
 
   card.innerHTML = `
-    ${w.thumbnail_url ? `<img src="${escapeHtml(w.thumbnail_url)}" alt="" loading="lazy" />` : '<div class="thumb-placeholder"></div>'}
+    <div class="webtoon-card-thumb-wrap">
+      ${checkboxHtml}
+      ${platformBadge}
+      ${w.thumbnail_url ? `<img src="${escapeHtml(w.thumbnail_url)}" alt="" loading="lazy" />` : '<div class="thumb-placeholder"></div>'}
+    </div>
     <div class="webtoon-card-body">
-      <div class="webtoon-card-title"><a href="${naverUrl(w.title_id)}" target="_blank" rel="noopener">${escapeHtml(w.title)}</a></div>
+      <div class="webtoon-card-title">${
+        platform === "kakao"
+          ? (kakaoContentUrl(w.title_id, w.seo_id)
+              ? `<a href="${kakaoContentUrl(w.title_id, w.seo_id)}" target="_blank" rel="noopener">${escapeHtml(w.title)}</a>`
+              : escapeHtml(w.title))
+          : `<a href="${naverUrl(w.title_id)}" target="_blank" rel="noopener">${escapeHtml(w.title)}</a>`
+      }</div>
       <div class="webtoon-card-meta">${escapeHtml(metaParts.join(" · "))}</div>
       <div class="webtoon-card-badges">${badgesHtml(w)}${statusBadge}</div>
     </div>
@@ -180,21 +209,42 @@ function buildWebtoonCard(w, context) {
 
   const actions = card.querySelector(".webtoon-card-actions");
   if (context === "naver-list") {
-    if (w.status === "active") {
-      actions.appendChild(makeButton("구독해제", () => naverListUnsubscribe(w)));
+    if (platform === "kakao") {
+      if (webtoonServerConfigured) {
+        // 뷰어 서버가 설정돼 있을 때만 구독 개념이 의미 있다(다운로드가 아니라
+        // "뷰어에서 계속 챙겨보고 싶다"는 표시) — 워크플로 자체는 네이버와 동일.
+        if (w.status === "active") {
+          actions.appendChild(makeButton("구독해제", () => webtoonListAction(w, "unsubscribe", "kakao")));
+        } else {
+          actions.appendChild(makeButton("구독", () => kakaoSubscribeWithHint(w)));
+          actions.appendChild(makeButton("목록제외", () => webtoonListAction(w, "exclude", "kakao")));
+        }
+      } else {
+        // 뷰어 서버 미설정 — 구독 개념 자체가 없고, 그냥 발견/제외만 가능하다.
+        actions.appendChild(makeButton("목록제외", () => webtoonListAction(w, "exclude", "kakao")));
+      }
+    } else if (w.status === "active") {
+      actions.appendChild(makeButton("구독해제", () => webtoonListAction(w, "unsubscribe", "naver")));
       if (webtoonServerConfigured) {
         actions.appendChild(makeIconButton(READER_ICON_SVG, "뷰어에서 보기", () => openInWebtoonServer(w.title)));
       }
     } else {
-      actions.appendChild(makeButton("구독", () => naverListAction(w, "subscribe")));
-      actions.appendChild(makeButton("목록제외", () => naverListAction(w, "exclude")));
+      actions.appendChild(makeButton("구독", () => webtoonListAction(w, "subscribe", "naver")));
+      actions.appendChild(makeButton("목록제외", () => webtoonListAction(w, "exclude", "naver")));
     }
+  } else if (platform === "kakao") {
+    // "구독해제"/"제외됨" 탭에 들어온 카카오 항목 — 네이버와 동일한 워크플로.
+    // 구독은 뷰어 서버가 설정돼 있을 때만 의미가 있으니 그때만 버튼을 보여준다.
+    if (webtoonServerConfigured) {
+      actions.appendChild(makeButton("구독", () => kakaoSubscribeWithHint(w)));
+    }
+    actions.appendChild(makeButton("목록으로", () => moveToListTab(w.title_id, context, w.ever_subscribed, "kakao")));
   } else {
     actions.appendChild(makeButton("구독", () => subscriptionAction(w.title_id, "subscribe", context)));
     if (context === "unsubscribed" || context === "excluded") {
       // "목록으로" — 구독 이력 여부에 따라 완전 삭제/전용 미등록 상태로 갈린다
       // (moveToListTab 참고). "완전 삭제"와 달리 확인 팝업은 생략한다.
-      actions.appendChild(makeButton("목록으로", () => moveToListTab(w.title_id, context, w.ever_subscribed)));
+      actions.appendChild(makeButton("목록으로", () => moveToListTab(w.title_id, context, w.ever_subscribed, "naver")));
     }
     if (context === "excluded" && w.is_finished) {
       // 완결작만 완전 삭제 허용 — 완결작은 자동추가 로직이 원래 다시 안 건드리므로 안전하다.
@@ -241,9 +291,21 @@ async function loadNaverList() {
   statusEl.textContent = "새로고침 중...";
 
   try {
-    naverListCache = await apiCall("/api/naver-list");
+    const naverItems = (await apiCall("/api/naver-list")).map((w) => ({ ...w, platform: "naver" }));
+    let kakaoItems = [];
+    let kakaoError = "";
+    if (kakaoWebtoonsEnabled) {
+      // 카카오는 요일 7개를 훑어야 해서 네이버보다 느릴 수 있다 — 그래도 실패해도
+      // 네이버 목록 표시 자체는 막지 않는다.
+      try {
+        kakaoItems = (await apiCall("/api/kakao-list")).map((w) => ({ ...w, platform: "kakao" }));
+      } catch (e) {
+        kakaoError = ` (카카오 목록 조회 실패: ${e.message})`;
+      }
+    }
+    naverListCache = [...naverItems, ...kakaoItems];
     renderNaverList();
-    statusEl.textContent = `마지막 새로고침: ${formatKoreanTime(new Date().toISOString())} (${naverListCache.length}개)`;
+    statusEl.textContent = `마지막 새로고침: ${formatKoreanTime(new Date().toISOString())} (${naverListCache.length}개)${kakaoError}`;
   } catch (e) {
     if (grid.children.length === 0) {
       emptyMsg.textContent = `목록을 불러오지 못했습니다: ${e.message}`;
@@ -293,33 +355,72 @@ function renderNaverList() {
   for (const w of rows) {
     grid.appendChild(buildWebtoonCard(w, "naver-list"));
   }
+  updateNaverListBulkBar(); // 다시 그리면 체크박스가 전부 새로 생기므로(선택 해제됨) 바도 초기화
 }
 
-async function naverListAction(webtoon, action) {
-  const { title_id: titleId, title, thumbnail_url: thumbnailUrl } = webtoon;
+function updateNaverListBulkBar() {
+  const count = document.querySelectorAll("#naver-list-grid .webtoon-card-select:checked").length;
+  document.getElementById("naver-list-bulk-bar").classList.toggle("hidden", count === 0);
+  document.getElementById("naver-list-bulk-count").textContent = `${count}개 선택됨`;
+}
+
+document.getElementById("naver-list-grid").addEventListener("change", (e) => {
+  if (e.target.classList.contains("webtoon-card-select")) updateNaverListBulkBar();
+});
+
+document.getElementById("btn-bulk-exclude-naver-list").addEventListener("click", async () => {
+  const checked = [...document.querySelectorAll("#naver-list-grid .webtoon-card-select:checked")];
+  if (checked.length === 0) return;
+  if (!confirm(`선택한 ${checked.length}개를 "제외됨"으로 옮길까요?`)) return;
+
+  const btn = document.getElementById("btn-bulk-exclude-naver-list");
+  btn.disabled = true;
   try {
-    const updated = await apiCall(`/api/naver-list/${titleId}/${action}`, {
+    for (const checkbox of checked) {
+      const card = checkbox.closest(".webtoon-card");
+      const titleId = card.dataset.titleId;
+      const webtoon = naverListCache.find((w) => String(w.title_id) === String(titleId));
+      if (!webtoon) continue;
+      try {
+        await webtoonListAction(webtoon, "exclude", webtoon.platform || "naver");
+      } catch (e) {
+        alert(`"${webtoon.title}" 제외 실패: ${e.message}`);
+      }
+    }
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function _webtoonListActionUrl(platform, titleId, action) {
+  if (platform === "kakao") return `/api/kakao-webtoons/${titleId}/${action}`;
+  // 네이버는 구독/목록제외가 /api/naver-list 밑에, 구독해제만 /api/webtoons 밑에 있다
+  // (기존부터 그렇게 나뉘어 있던 것 — 여기서 통일하지 않고 그대로 흡수한다).
+  return action === "unsubscribe" ? `/api/webtoons/${titleId}/unsubscribe` : `/api/naver-list/${titleId}/${action}`;
+}
+
+async function webtoonListAction(webtoon, action, platform) {
+  const { title_id: titleId, title, thumbnail_url: thumbnailUrl, seo_id: seoId } = webtoon;
+  const needsBody = action === "subscribe" || action === "exclude";
+  const body = platform === "kakao"
+    ? { title, thumbnail_url: thumbnailUrl || "", seo_id: seoId || "" }
+    : { title, thumbnail_url: thumbnailUrl || "" };
+  try {
+    const updated = await apiCall(_webtoonListActionUrl(platform, titleId, action), {
       method: "POST",
-      body: JSON.stringify({ title, thumbnail_url: thumbnailUrl || "" }),
+      ...(needsBody ? { body: JSON.stringify(body) } : {}),
     });
-    patchNaverListCard(titleId, webtoon, updated.status);
+    patchWebtoonListCard(titleId, webtoon, updated.status, updated.ever_subscribed, platform);
   } catch (e) {
     alert(e.message);
   }
 }
 
-async function naverListUnsubscribe(webtoon) {
-  try {
-    const updated = await apiCall(`/api/webtoons/${webtoon.title_id}/unsubscribe`, { method: "POST" });
-    patchNaverListCard(webtoon.title_id, webtoon, updated.status);
-  } catch (e) {
-    alert(e.message);
+function patchWebtoonListCard(titleId, webtoon, newStatus, everSubscribed, platform) {
+  const cacheIndex = naverListCache.findIndex((w) => w.title_id === titleId && (w.platform || "naver") === platform);
+  if (cacheIndex >= 0) {
+    naverListCache[cacheIndex] = { ...naverListCache[cacheIndex], status: newStatus, ever_subscribed: everSubscribed };
   }
-}
-
-function patchNaverListCard(titleId, webtoon, newStatus) {
-  const cacheIndex = naverListCache.findIndex((w) => w.title_id === titleId);
-  if (cacheIndex >= 0) naverListCache[cacheIndex] = { ...naverListCache[cacheIndex], status: newStatus };
 
   const card = document.querySelector(`#naver-list-grid .webtoon-card[data-title-id="${titleId}"]`);
   if (newStatus === "excluded" || newStatus === "unsubscribed") {
@@ -327,8 +428,19 @@ function patchNaverListCard(titleId, webtoon, newStatus) {
     const grid = document.getElementById("naver-list-grid");
     document.getElementById("naver-list-empty").classList.toggle("hidden", grid.children.length > 0);
   } else if (card) {
-    card.replaceWith(buildWebtoonCard({ ...webtoon, status: newStatus }, "naver-list"));
+    card.replaceWith(buildWebtoonCard({ ...webtoon, status: newStatus, ever_subscribed: everSubscribed, platform }, "naver-list"));
   }
+}
+
+async function kakaoSubscribeWithHint(webtoon) {
+  // 카카오 "구독"은 다운로드를 뜻하지 않고, 이 작품이 웹툰 뷰어 서버 라이브러리에
+  // 있다는 표시일 뿐이다 — 실수로 뷰어에 없는 작품을 구독하면(리포트 바로가기가
+  // 조용히 카카오웹툰 링크로 대체되긴 하지만) 헷갈릴 수 있어서, 누르는 시점에
+  // 한 번 안내한다.
+  if (!confirm(`"${webtoon.title}"이(가) 웹툰 뷰어 서버 라이브러리에 실제로 있나요?\n\n구독은 다운로드가 아니라 "뷰어에서 계속 챙겨보고 싶다"는 표시입니다. 뷰어에 없으면 리포트의 바로가기가 카카오웹툰 링크로 대체됩니다.`)) {
+    return;
+  }
+  await webtoonListAction(webtoon, "subscribe", "kakao");
 }
 
 document.getElementById("btn-refresh-naver-list").addEventListener("click", loadNaverList);
@@ -353,7 +465,16 @@ async function loadSubscriptionTab(status) {
     listEl.innerHTML = "<p>불러오는 중...</p>";
   }
   try {
-    subscriptionCache[status] = await apiCall(`/api/webtoons?status=${status}`);
+    const naverRows = (await apiCall(`/api/webtoons?status=${status}`)).map((w) => ({ ...w, platform: "naver" }));
+    let kakaoRows = [];
+    if (kakaoWebtoonsEnabled) {
+      try {
+        kakaoRows = (await apiCall(`/api/kakao-webtoons?status=${status}`)).map((w) => ({ ...w, platform: "kakao" }));
+      } catch (e) {
+        // 조용히 무시 — 카카오 조회 실패로 네이버 쪽까지 안 보이게 하진 않음
+      }
+    }
+    subscriptionCache[status] = [...naverRows, ...kakaoRows];
     populateFilterOptions(status);
     renderSubscriptionTab(status);
   } catch (e) {
@@ -469,17 +590,19 @@ function removeCardFromTab(titleId, context) {
   subscriptionCache[context] = (subscriptionCache[context] || []).filter((w) => w.title_id !== titleId);
 }
 
-async function moveToListTab(titleId, context, everSubscribed) {
+async function moveToListTab(titleId, context, everSubscribed, platform) {
   // "목록으로" — 구독 이력이 있으면(everSubscribed) 완전 삭제 대신 전용 상태로
   // 옮겨서 DB 기록을 남긴다. 그래야 완결/휴재라 네이버 자체 목록엔 없는 작품도
   // 전체목록에서 계속 찾을 수 있다. 구독 이력이 없으면 완전 삭제한다 — 어차피
   // 구독한 적 없는 건 지워도 이력을 잃을 게 없고, 네이버 목록에 없으면(완결/휴재)
-  // 전체목록에서도 안 보일 수 있다는 걸 이미 알고 계신다.
+  // 전체목록에서도 안 보일 수 있다는 걸 이미 알고 계신다. 카카오도 완전히 같은
+  // 규칙 — URL 접두사만 플랫폼에 따라 다르다.
+  const prefix = platform === "kakao" ? "/api/kakao-webtoons" : "/api/webtoons";
   try {
     if (everSubscribed) {
-      await apiCall(`/api/webtoons/${titleId}/unregister`, { method: "POST" });
+      await apiCall(`${prefix}/${titleId}/unregister`, { method: "POST" });
     } else {
-      await apiCall(`/api/webtoons/${titleId}`, { method: "DELETE" });
+      await apiCall(`${prefix}/${titleId}`, { method: "DELETE" });
     }
     removeCardFromTab(titleId, context);
   } catch (e) {
@@ -1257,6 +1380,7 @@ async function loadSettingsPage() {
   loadWebtoonServerUrl();
   loadAppPublicBaseUrl();
   loadUnregisteredNewEpisodesToggle();
+  loadKakaoWebtoonsEnabledToggle();
   loadAuthorAutoRegisterSetting();
   loadUnsubscribeHistoryList();
 }
@@ -1542,6 +1666,29 @@ document.getElementById("report-unregistered-toggle").addEventListener("change",
   } catch (err) {
     alert(err.message);
     e.target.checked = !e.target.checked; // 저장 실패하면 화면도 원래대로 되돌림
+  }
+});
+
+async function loadKakaoWebtoonsEnabledToggle() {
+  try {
+    const data = await apiCall("/api/settings/kakao-webtoons-enabled");
+    kakaoWebtoonsEnabled = data.enabled;
+    document.getElementById("kakao-webtoons-enabled-toggle").checked = data.enabled;
+  } catch (e) {
+    // 조용히 무시 — 이 필드 하나 때문에 설정 탭 전체 로드가 막히면 안 됨
+  }
+}
+
+document.getElementById("kakao-webtoons-enabled-toggle").addEventListener("change", async (e) => {
+  try {
+    await apiCall("/api/settings/kakao-webtoons-enabled", {
+      method: "POST",
+      body: JSON.stringify({ enabled: e.target.checked }),
+    });
+    kakaoWebtoonsEnabled = e.target.checked;
+  } catch (err) {
+    alert(err.message);
+    e.target.checked = !e.target.checked;
   }
 });
 

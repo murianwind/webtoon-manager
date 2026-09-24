@@ -379,6 +379,73 @@ def add_seen_kakao_title(author_name: str, title_id: int, title_name: str) -> No
         )
 
 
+# ── kakao_webtoons ("웹툰 전체목록"/"구독해제"/"제외됨" 탭의 카카오웹툰 상태) ──
+# webtoons 테이블(네이버)과 같은 상태값(active/unsubscribed/excluded/unregistered)과
+# ever_subscribed 규칙을 그대로 쓰지만, title_id 충돌을 피하려고 완전히 별도
+# 테이블로 둔다. "구독"은 다운로드를 뜻하지 않는다 — 웹툰 뷰어 서버 주소가
+# 설정돼 있을 때만 의미가 있고(뷰어로 계속 보고 싶다는 표시), 그게 없으면
+# status='excluded'(목록제외)만 쓰인다.
+
+def _row_to_kakao_webtoon(row) -> dict:
+    return {
+        "title_id": row["title_id"], "title": row["title"], "status": row["status"],
+        "ever_subscribed": bool(row["ever_subscribed"]), "thumbnail_url": row["thumbnail_url"],
+        "seo_id": row["seo_id"],
+    }
+
+
+def kakao_webtoon_exists(title_id: int) -> bool:
+    row = fetchone("SELECT 1 FROM kakao_webtoons WHERE title_id = ?", (title_id,))
+    return row is not None
+
+
+def get_kakao_webtoon(title_id: int) -> dict | None:
+    row = fetchone("SELECT * FROM kakao_webtoons WHERE title_id = ?", (title_id,))
+    return _row_to_kakao_webtoon(row) if row else None
+
+
+def list_kakao_webtoons_by_status(status: str) -> list[dict]:
+    rows = fetchall("SELECT * FROM kakao_webtoons WHERE status = ?", (status,))
+    return [_row_to_kakao_webtoon(r) for r in rows]
+
+
+def get_kakao_excluded_title_ids() -> set[int]:
+    rows = fetchall("SELECT title_id FROM kakao_webtoons WHERE status = ?", (STATUS_EXCLUDED,))
+    return {r["title_id"] for r in rows}
+
+
+def upsert_new_kakao_webtoon(
+    title_id: int, title: str, thumbnail_url: str = "", status: str = STATUS_ACTIVE, seo_id: str = ""
+) -> None:
+    """이미 있으면 아무것도 안 한다(webtoons.upsert_new와 같은 원자적 INSERT OR
+    IGNORE 패턴 — 동시에 같은 작품을 두 번 만들려는 레이스를 막는다). status가
+    active면 ever_subscribed도 같이 1로 세운다."""
+    now = _now()
+    with write_transaction() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO kakao_webtoons (title_id, title, status, ever_subscribed, thumbnail_url, seo_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (title_id, title, status, int(status == STATUS_ACTIVE), thumbnail_url, seo_id, now, now),
+        )
+
+
+def set_kakao_webtoon_status(title_id: int, status: str) -> None:
+    """webtoons.set_status와 완전히 같은 규칙 — active로 바뀌는 순간에만
+    ever_subscribed를 1로 세우고, 이후로는 다른 상태로 바뀌어도 절대 안 풀린다."""
+    with write_transaction() as conn:
+        conn.execute(
+            "UPDATE kakao_webtoons SET status = ?, ever_subscribed = CASE WHEN ? = ? THEN 1 ELSE ever_subscribed END, "
+            "updated_at = ? WHERE title_id = ?",
+            (status, status, STATUS_ACTIVE, _now(), title_id),
+        )
+
+
+def hard_delete_kakao_webtoon(title_id: int) -> None:
+    """"목록으로"(구독 이력 없음) — DB 기록 자체를 지운다. 네이버 hard_delete와 같은 역할."""
+    with write_transaction() as conn:
+        conn.execute("DELETE FROM kakao_webtoons WHERE title_id = ?", (title_id,))
+
+
 # ── archive_targets (아카이빙 대상 웹툰/폴더 + 목적지 그릇 폴더) ──────────────
 
 def _row_to_archive_target(r) -> ArchiveTarget:
@@ -843,6 +910,12 @@ def export_all() -> dict:
             "settings": settings_rows,
             "watched_authors": [dict(r) for r in conn.execute("SELECT * FROM watched_authors").fetchall()],
             "watched_tags": [dict(r) for r in conn.execute("SELECT * FROM watched_tags").fetchall()],
+            "kakao_seen_titles": [dict(r) for r in conn.execute("SELECT * FROM kakao_seen_titles").fetchall()],
+            "kakao_webtoons": [dict(r) for r in conn.execute("SELECT * FROM kakao_webtoons").fetchall()],
+            "filename_template_presets": [dict(r) for r in conn.execute("SELECT * FROM filename_template_presets").fetchall()],
+            "archive_targets": [dict(r) for r in conn.execute("SELECT * FROM archive_targets").fetchall()],
+            "archive_history": [dict(r) for r in conn.execute("SELECT * FROM archive_history").fetchall()],
+            "episode_history": [dict(r) for r in conn.execute("SELECT * FROM episode_history").fetchall()],
         }
 
 
@@ -850,10 +923,23 @@ _WEBTOON_COLUMNS = (
     "title_id", "title", "status", "is_adult", "writer_ids", "added_source",
     "last_downloaded_no", "is_finished", "finish_ack", "thumbnail_url",
     "finish_notified", "genres", "tags", "latest_episode_no", "is_paused",
-    "writer_names", "created_at", "updated_at",
+    "writer_names", "ever_subscribed", "created_at", "updated_at",
 )
 _WATCHED_AUTHOR_COLUMNS = ("author_id", "author_name", "enabled", "created_at", "updated_at")
 _WATCHED_TAG_COLUMNS = ("tag_id", "tag_name", "enabled", "created_at", "updated_at")
+_KAKAO_SEEN_TITLE_COLUMNS = ("author_name", "title_id", "title_name", "seen_at")
+_KAKAO_WEBTOON_COLUMNS = (
+    "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "seo_id", "created_at", "updated_at",
+)
+_FILENAME_TEMPLATE_PRESET_COLUMNS = ("id", "name", "template", "created_at", "updated_at")
+_ARCHIVE_TARGET_COLUMNS = (
+    "title_id", "dest_base_path", "dest_type", "enabled", "source_type", "source_dest_type",
+    "source_path", "display_name", "filename_template_preset_id", "created_at", "updated_at",
+)
+_ARCHIVE_HISTORY_COLUMNS = ("id", "title_id", "title_name", "file_name", "archived_at", "trigger_type")
+_EPISODE_HISTORY_COLUMNS = (
+    "id", "title_id", "title_name", "episode_no", "subtitle", "status", "error_msg", "downloaded_at",
+)
 
 
 def _insert_validated_rows(conn, table: str, allowed_columns: tuple[str, ...], rows: list[dict]) -> None:
@@ -880,12 +966,16 @@ def _insert_validated_rows(conn, table: str, allowed_columns: tuple[str, ...], r
 
 
 def restore_all(data: dict) -> None:
-    """백업 데이터로 4개 테이블을 완전히 교체한다 (기존 내용은 전부 지워짐)."""
+    """백업 데이터로 10개 테이블을 완전히 교체한다 (기존 내용은 전부 지워짐)."""
     if not isinstance(data, dict):
         raise ValueError("백업 데이터 형식이 올바르지 않습니다 (JSON 객체가 아님).")
 
     with write_transaction() as conn:
-        for table in ("webtoons", "settings", "watched_authors", "watched_tags"):
+        for table in (
+            "webtoons", "settings", "watched_authors", "watched_tags",
+            "kakao_seen_titles", "kakao_webtoons", "filename_template_presets",
+            "archive_targets", "archive_history", "episode_history",
+        ):
             conn.execute(f"DELETE FROM {table}")
 
         _insert_validated_rows(conn, "webtoons", _WEBTOON_COLUMNS, data.get("webtoons") or [])
@@ -894,3 +984,14 @@ def restore_all(data: dict) -> None:
                 conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (row["key"], row["value"]))
         _insert_validated_rows(conn, "watched_authors", _WATCHED_AUTHOR_COLUMNS, data.get("watched_authors") or [])
         _insert_validated_rows(conn, "watched_tags", _WATCHED_TAG_COLUMNS, data.get("watched_tags") or [])
+        _insert_validated_rows(conn, "kakao_seen_titles", _KAKAO_SEEN_TITLE_COLUMNS, data.get("kakao_seen_titles") or [])
+        _insert_validated_rows(conn, "kakao_webtoons", _KAKAO_WEBTOON_COLUMNS, data.get("kakao_webtoons") or [])
+        # 프리셋을 먼저 넣어야 archive_targets.filename_template_preset_id가 참조할 대상이 이미 있다
+        # (SQLite가 FK를 강제하진 않지만, id를 그대로 보존해서 순서를 맞춰주는 게 안전하다).
+        _insert_validated_rows(
+            conn, "filename_template_presets", _FILENAME_TEMPLATE_PRESET_COLUMNS,
+            data.get("filename_template_presets") or [],
+        )
+        _insert_validated_rows(conn, "archive_targets", _ARCHIVE_TARGET_COLUMNS, data.get("archive_targets") or [])
+        _insert_validated_rows(conn, "archive_history", _ARCHIVE_HISTORY_COLUMNS, data.get("archive_history") or [])
+        _insert_validated_rows(conn, "episode_history", _EPISODE_HISTORY_COLUMNS, data.get("episode_history") or [])

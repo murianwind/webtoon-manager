@@ -27,7 +27,7 @@ from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app import archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, naver_api, repository, schedule_config, tracker, webtoon_server_client
+from app import archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, kakao_api, naver_api, repository, schedule_config, tracker, webtoon_server_client
 from app import rclone_updater
 from app.config import Settings, get_settings
 from app.constants import NAVER_DETAIL_URL_TEMPLATES
@@ -360,19 +360,71 @@ async def _collect_unregistered_new_episodes(
     ]
 
 
+async def _collect_kakao_new_episodes(
+    session: aiohttp.ClientSession, settings
+) -> list[tuple[int, str, str]]:
+    """"웹툰 전체목록"에 있는(=요일 7개, 목록제외 안 한) 카카오웹툰 중 새 회차(UP
+    표시)가 있는 것만 골라서 (title_id, title_name, 바로가기 URL)로 반환한다.
+    네이버의 _collect_unregistered_new_episodes와 비슷한 역할이지만, 카카오는
+    "구독"이 다운로드를 뜻하지 않고 웹툰 뷰어 서버에 그 작품이 있다는 표시일 뿐이다 —
+    그래서 지금 구독 중(active)이고 뷰어 서버 주소도 설정돼 있으면 그 뷰어의 바로가기
+    URL을 먼저 시도하고, 조회에 실패하면(사용자가 실수로 뷰어에 없는 작품을
+    구독했을 수 있으므로) 카카오웹툰 자체 링크로 조용히 대체한다."""
+    try:
+        items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds)
+    except Exception as e:
+        log.error("카카오 신규 에피소드 확인 중 목록 조회 실패(무시하고 계속): %s", e)
+        return []
+
+    excluded_ids = repository.get_kakao_excluded_title_ids()
+    candidates = [item for item in items if item["has_update"] and item["title_id"] not in excluded_ids]
+    candidates = candidates[:_UNREGISTERED_NEW_EPISODE_LIMIT]
+    if not candidates:
+        return []
+
+    webtoon_server_url = repository.get_setting(_SETTING_KEY_WEBTOON_SERVER_URL) or ""
+    semaphore = asyncio.Semaphore(settings.artist_scan_concurrency)
+
+    async def _fetch_one(item):
+        async with semaphore:
+            url = None
+            tracked = repository.get_kakao_webtoon(item["title_id"])
+            is_subscribed = tracked is not None and tracked["status"] == repository.STATUS_ACTIVE
+            if is_subscribed and webtoon_server_url:
+                # 구독 중이고 뷰어 서버가 설정돼 있으면 뷰어의 바로가기를 먼저 시도한다
+                # — fetch_reader_url은 실패해도 예외 없이 None을 주므로 그대로 폴백된다.
+                url = await webtoon_server_client.fetch_reader_url(
+                    session, webtoon_server_url, item["title_name"], settings.request_timeout_seconds
+                )
+            if url is None:
+                try:
+                    url = await kakao_api.fetch_latest_episode_url(session, item["title_id"], settings.request_timeout_seconds)
+                except Exception as e:
+                    log.error("카카오 작품(title_id=%s) 최신 회차 조회 실패(건너뜀): %s", item["title_id"], e)
+                    url = None
+            await asyncio.sleep(settings.delay_seconds)
+            return item, url
+
+    results = await asyncio.gather(*[_fetch_one(item) for item in candidates])
+    return [(item["title_id"], item["title_name"], url) for item, url in results if url is not None]
+
+
 def _build_report_message(
     success_rows: list[dict], failed_rows: list[dict], reader_urls: dict[str, str],
     unregistered_new_episodes: list[tuple[str, str, int]] | None = None,
     app_public_base_url: str = "",
+    kakao_new_episodes: list[tuple[int, str, str]] | None = None,
 ) -> str:
-    """예전 hermes webtoon_checker.py의 메시지 구조(다운로드됨/실패)를 그대로 따른다."""
+    """예전 hermes webtoon_checker.py의 메시지 구조(다운로드됨/실패)를 그대로 따른다.
+    모든 링크는 <...>로 감싸서 디스코드가 미리보기(임베드)를 안 만들게 한다 — 링크가
+    여러 개 나열될 때 임베드가 줄줄이 생겨서 메시지가 너무 길어지는 문제가 있었다."""
     today_label = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
 
     success_titles = sorted({r["title_name"] for r in success_rows})
     success_lines = []
     for title in success_titles:
         url = reader_urls.get(title)
-        success_lines.append(f"• {title} [바로가기]({url})" if url else f"• {title}")
+        success_lines.append(f"• {title} [바로가기](<{url}>)" if url else f"• {title}")
 
     failed_titles = sorted({r["title_name"] for r in failed_rows})
 
@@ -394,18 +446,24 @@ def _build_report_message(
         if len(failed_titles) > _REPORT_LIST_LIMIT:
             parts.append(f"_외 {len(failed_titles) - _REPORT_LIST_LIMIT}개 생략_")
 
-    if unregistered_new_episodes:
-        new_lines = []
-        for title_id, title, episode_no in unregistered_new_episodes:
-            read_url = f"{NAVER_DETAIL_URL_TEMPLATES['webtoon']}?titleId={title_id}&no={episode_no}"
-            line = f"• {title} [바로가기]({read_url})"
-            if app_public_base_url:
-                exclude_url = f"{app_public_base_url}/api/webtoons/{title_id}/exclude-confirm?title={quote(title)}"
-                line += f" · [목록 제외]({exclude_url})"
-            new_lines.append(line)
+    new_lines = []
+    for title_id, title, episode_no in unregistered_new_episodes or []:
+        read_url = f"{NAVER_DETAIL_URL_TEMPLATES['webtoon']}?titleId={title_id}&no={episode_no}"
+        line = f"• [네이버] {title} [바로가기](<{read_url}>)"
+        if app_public_base_url:
+            exclude_url = f"{app_public_base_url}/api/webtoons/{title_id}/exclude-confirm?title={quote(title)}"
+            line += f" · [목록 제외](<{exclude_url}>)"
+        new_lines.append(line)
+    for title_id, title, viewer_url in kakao_new_episodes or []:
+        line = f"• [카카오] {title} [바로가기](<{viewer_url}>)"
+        if app_public_base_url:
+            exclude_url = f"{app_public_base_url}/api/kakao-webtoons/{title_id}/exclude-confirm?title={quote(title)}"
+            line += f" · [목록 제외](<{exclude_url}>)"
+        new_lines.append(line)
+    if new_lines:
         parts.extend([
             "",
-            f"🆕 미등록 웹툰 중 새 에피소드 ({len(new_lines)}):",
+            f"🆕 웹툰 전체목록 중 새 에피소드 ({len(new_lines)}):",
             "\n".join(new_lines),
         ])
 
@@ -505,6 +563,7 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
 
     webtoon_server_url = repository.get_setting(_SETTING_KEY_WEBTOON_SERVER_URL) or ""
     unregistered_new_episodes_enabled = repository.get_setting("report_unregistered_new_episodes_enabled") != "0"
+    kakao_webtoons_enabled = repository.get_setting("kakao_webtoons_enabled") == "1"
     app_public_base_url = repository.get_setting("app_public_base_url") or ""
     reader_urls: dict[str, str] = {}
 
@@ -518,9 +577,13 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
                 await _collect_unregistered_new_episodes(session, settings)
                 if unregistered_new_episodes_enabled else []
             )
+            kakao_new_episodes = (
+                await _collect_kakao_new_episodes(session, settings)
+                if unregistered_new_episodes_enabled and kakao_webtoons_enabled else []
+            )
 
-            if not rows and not unregistered_new_episodes:
-                job_status.log_line("report", "발송할 내용 없음 (다운로드 기록도, 미등록 신규 에피소드도 없음)")
+            if not rows and not unregistered_new_episodes and not kakao_new_episodes:
+                job_status.log_line("report", "발송할 내용 없음 (다운로드 기록도, 새 에피소드도 없음)")
                 if not force_test:
                     repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, now_iso)
                 job_status.finish("report", success=True)
@@ -540,7 +603,9 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
                     if url:
                         reader_urls[title] = url
 
-            message = _build_report_message(success_rows, failed_rows, reader_urls, unregistered_new_episodes, app_public_base_url)
+            message = _build_report_message(
+                success_rows, failed_rows, reader_urls, unregistered_new_episodes, app_public_base_url, kakao_new_episodes
+            )
             if used_fallback:
                 message = "🧪 **[테스트 발송 — 오늘 기록 없어 어제 기록으로 대체됨]**\n" + message
             await discord_notify.send_webhook_notification(session, settings, message)

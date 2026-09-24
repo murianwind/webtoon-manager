@@ -12,7 +12,7 @@
   </header>
 
   <nav class="main-tabs">
-    <button class="main-tab active" data-page="naver-list">네이버 웹툰 전체목록</button>
+    <button class="main-tab active" data-page="naver-list">웹툰 전체목록</button>
     <button class="main-tab" data-page="unsubscribed">구독해제</button>
     <button class="main-tab" data-page="excluded">제외됨</button>
     <button class="main-tab" data-page="manual-download">수동 다운로드</button>
@@ -23,7 +23,7 @@
     <button class="main-tab" data-page="settings">설정</button>
   </nav>
 
-  <!-- 네이버 전체 목록 -->
+  <!-- 웹툰 전체목록 (네이버+카카오) -->
   <section id="page-naver-list" class="page">
     <div class="toolbar toolbar-sticky">
       <input id="naver-list-search" type="text" placeholder="제목/저자로 검색" />
@@ -40,6 +40,10 @@
       <button id="btn-refresh-naver-list">새로고침</button>
     </div>
     <p id="naver-list-refresh-status" class="hint"></p>
+    <div id="naver-list-bulk-bar" class="hidden archive-target-bulk-bar">
+      <span id="naver-list-bulk-count"></span>
+      <button id="btn-bulk-exclude-naver-list">선택 항목 제외됨으로 이동</button>
+    </div>
     <div id="naver-list-grid" class="webtoon-grid"></div>
     <p id="naver-list-empty" class="hidden empty-message">불러온 목록이 없습니다.</p>
   </section>
@@ -320,7 +324,17 @@
         <label class="checkbox-label">
           <input type="checkbox" id="report-unregistered-toggle" /> 미등록 웹툰 중 새 에피소드 섹션 포함
         </label>
-        <p class="field-hint">네이버 웹툰 전체목록에는 있지만 구독/제외 등록 안 된 작품 중 새 에피소드가 있는 것을 리포트에 같이 보여줍니다.</p>
+        <p class="field-hint">웹툰 전체목록에는 있지만 구독/제외 등록 안 된 작품 중 새 에피소드가 있는 것을 리포트에 같이 보여줍니다(네이버+카카오 공통).</p>
+      </div>
+    </div>
+
+    <div class="settings-card">
+      <h2>카카오웹툰 관리</h2>
+      <p class="hint">"웹툰 전체목록"/다운로드 리포트에 카카오웹툰을 같이 다룰지 정합니다. 카카오는 다운로드 기능이 없어서 "구독"이 다운로드를 뜻하지 않습니다 — 아래 "웹툰 뷰어 서버 주소"가 설정돼 있어야 구독/구독해제가 가능해지고(뷰어 라이브러리에 있다는 표시), 설정 안 해두면 "목록제외"만 가능합니다.</p>
+      <div class="field-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="kakao-webtoons-enabled-toggle" /> 카카오웹툰 관리하기
+        </label>
       </div>
     </div>
 

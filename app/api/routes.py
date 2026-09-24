@@ -328,6 +328,152 @@ async def browse_naver_list():
     return result
 
 
+class KakaoWebtoonOut(BaseModel):
+    title_id: int
+    title: str
+    status: str
+    ever_subscribed: bool
+    thumbnail_url: str = ""
+    seo_id: str = ""
+
+
+class KakaoWebtoonEntryIn(BaseModel):
+    title: str
+    thumbnail_url: str = ""
+    seo_id: str = ""
+
+
+@router.get("/kakao-list")
+async def browse_kakao_list():
+    """"웹툰 전체목록"에 카카오웹툰을 같이 보여주기 위한 목록 — 요일 7개(연재 중인 것)를
+    훑고, 추적 중(구독/구독해제/제외)인 것이 있으면 그 상태를 같이 붙인다. 네이버의
+    browse_naver_list와 같은 구조 — "제외됨"만 걸러내고, 요일별 목록에서 사라진(휴재
+    장기화 등) 구독 이력 있는 작품은 DB 기록으로 보완해서 계속 보여준다."""
+    settings = get_settings()
+    async with aiohttp.ClientSession() as session:
+        items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds)
+
+    seen_ids: set[int] = set()
+    result = []
+    for item in items:
+        seen_ids.add(item["title_id"])
+        tracked = await asyncio.to_thread(repository.get_kakao_webtoon, item["title_id"])
+        if tracked is not None and tracked["status"] == repository.STATUS_EXCLUDED:
+            continue
+        result.append(
+            {
+                "title_id": item["title_id"],
+                "title": item["title_name"],
+                "thumbnail_url": item["thumbnail_url"],
+                "seo_id": item["seo_id"],
+                "is_adult": item["is_adult"],
+                "author_summary": ", ".join(item["author_names"]),
+                "is_new": item["is_new"],
+                "is_paused": item["is_paused"],
+                "has_new_episode": item["has_update"],
+                "status": tracked["status"] if tracked else None,
+                "ever_subscribed": tracked["ever_subscribed"] if tracked else False,
+            }
+        )
+
+    # 요일별 목록엔 지금 연재 중인 것만 나오므로, 장기 휴재 등으로 거기서 빠진 구독
+    # 이력 있는 작품은 DB 기록으로 보완해서 계속 보여준다(제외됨은 계속 숨김).
+    for status in (repository.STATUS_ACTIVE, repository.STATUS_UNSUBSCRIBED, repository.STATUS_UNREGISTERED):
+        for wt in await asyncio.to_thread(repository.list_kakao_webtoons_by_status, status):
+            if wt["title_id"] in seen_ids:
+                continue
+            result.append(
+                {
+                    "title_id": wt["title_id"],
+                    "title": wt["title"],
+                    "thumbnail_url": wt["thumbnail_url"],
+                    "seo_id": wt["seo_id"],
+                    "is_adult": False,
+                    "author_summary": "",
+                    "is_new": False,
+                    "is_paused": False,
+                    "has_new_episode": False,
+                    "status": wt["status"],
+                    "ever_subscribed": wt["ever_subscribed"],
+                }
+            )
+    return result
+
+
+@router.get("/kakao-webtoons", response_model=list[KakaoWebtoonOut])
+async def list_kakao_webtoons(status: str | None = None):
+    """"구독해제"/"제외됨" 탭에서 네이버 목록과 합쳐서 보여줄 카카오 목록."""
+    if status and status not in (
+        repository.STATUS_ACTIVE, repository.STATUS_UNSUBSCRIBED, repository.STATUS_EXCLUDED,
+    ):
+        raise HTTPException(status_code=400, detail="status는 active/unsubscribed/excluded 중 하나여야 합니다.")
+    rows = await asyncio.to_thread(repository.list_kakao_webtoons_by_status, status) if status else []
+    if status == repository.STATUS_UNSUBSCRIBED:
+        # webtoons와 동일한 규칙 — 구독한 적 없는 건 "구독해제" 탭에 안 보인다.
+        rows = [r for r in rows if r["ever_subscribed"]]
+    return [KakaoWebtoonOut(**r) for r in rows]
+
+
+async def _get_or_404_kakao(title_id: int) -> dict:
+    wt = await asyncio.to_thread(repository.get_kakao_webtoon, title_id)
+    if wt is None:
+        raise HTTPException(status_code=404, detail="등록되지 않은 카카오웹툰입니다.")
+    return wt
+
+
+@router.post("/kakao-webtoons/{title_id}/subscribe", response_model=KakaoWebtoonOut)
+async def subscribe_kakao_webtoon(title_id: int, payload: KakaoWebtoonEntryIn):
+    """"웹툰 뷰어 서버 주소"가 설정돼 있을 때만 의미 있는 동작 — 다운로드를 뜻하는
+    게 아니라, 뷰어로 계속 챙겨보고 싶다는 표시일 뿐이다. 그 설정 여부는 프론트엔드가
+    버튼을 보여줄지 말지로 판단하고, 여기서는 굳이 다시 검사하지 않는다."""
+    if not await asyncio.to_thread(repository.kakao_webtoon_exists, title_id):
+        await asyncio.to_thread(
+            repository.upsert_new_kakao_webtoon, title_id, payload.title, payload.thumbnail_url,
+            repository.STATUS_ACTIVE, payload.seo_id,
+        )
+    await asyncio.to_thread(repository.set_kakao_webtoon_status, title_id, repository.STATUS_ACTIVE)
+    return KakaoWebtoonOut(**await asyncio.to_thread(repository.get_kakao_webtoon, title_id))
+
+
+@router.post("/kakao-webtoons/{title_id}/unsubscribe", response_model=KakaoWebtoonOut)
+async def unsubscribe_kakao_webtoon(title_id: int):
+    await _get_or_404_kakao(title_id)
+    await asyncio.to_thread(repository.set_kakao_webtoon_status, title_id, repository.STATUS_UNSUBSCRIBED)
+    return KakaoWebtoonOut(**await asyncio.to_thread(repository.get_kakao_webtoon, title_id))
+
+
+@router.post("/kakao-webtoons/{title_id}/exclude", response_model=KakaoWebtoonOut)
+async def exclude_kakao_webtoon(title_id: int, payload: KakaoWebtoonEntryIn):
+    if not await asyncio.to_thread(repository.kakao_webtoon_exists, title_id):
+        await asyncio.to_thread(
+            repository.upsert_new_kakao_webtoon, title_id, payload.title, payload.thumbnail_url,
+            repository.STATUS_EXCLUDED, payload.seo_id,
+        )
+    await asyncio.to_thread(repository.set_kakao_webtoon_status, title_id, repository.STATUS_EXCLUDED)
+    return KakaoWebtoonOut(**await asyncio.to_thread(repository.get_kakao_webtoon, title_id))
+
+
+@router.post("/kakao-webtoons/{title_id}/unregister", response_model=KakaoWebtoonOut)
+async def unregister_kakao_webtoon(title_id: int):
+    """"목록으로" — 구독 이력이 있으면(webtoons.unregister와 같은 규칙) 완전 삭제
+    대신 전용 상태로 옮겨서 기록을 남긴다. 구독 이력이 없는 건 이 엔드포인트 대신
+    DELETE로 완전히 지운다(프론트엔드가 ever_subscribed 값으로 어느 쪽을 부를지 정함)."""
+    wt = await _get_or_404_kakao(title_id)
+    if not wt["ever_subscribed"]:
+        raise HTTPException(status_code=400, detail="구독 이력이 없는 작품은 완전 삭제를 사용하세요.")
+    await asyncio.to_thread(repository.set_kakao_webtoon_status, title_id, repository.STATUS_UNREGISTERED)
+    return KakaoWebtoonOut(**await asyncio.to_thread(repository.get_kakao_webtoon, title_id))
+
+
+@router.delete("/kakao-webtoons/{title_id}")
+async def delete_kakao_webtoon(title_id: int):
+    wt = await _get_or_404_kakao(title_id)
+    if wt["status"] == repository.STATUS_ACTIVE:
+        raise HTTPException(status_code=400, detail="구독 중인 웹툰은 완전 삭제할 수 없습니다.")
+    await asyncio.to_thread(repository.hard_delete_kakao_webtoon, title_id)
+    return {"status": "deleted"}
+
+
 @router.post("/naver-list/{title_id}/subscribe")
 async def naver_list_subscribe(title_id: str, payload: NaverListEntryIn):
     if not await asyncio.to_thread(repository.exists, title_id):
@@ -363,15 +509,15 @@ async def naver_list_exclude(title_id: str, payload: NaverListEntryIn):
     return _to_out(await asyncio.to_thread(repository.get, title_id))
 
 
-@router.get("/webtoons/{title_id}/exclude-confirm", response_class=HTMLResponse)
-async def exclude_confirm_page(title_id: str, title: str = "", thumbnail_url: str = ""):
-    """다운로드 리포트의 '목록 제외' 링크가 여는 페이지. 디스코드는 링크를 메시지에
-    올리면 미리보기(임베드)를 만들려고 그 URL을 자동으로 한 번 열어보는데, 그 GET
-    요청만으로 실제 제외가 일어나면 사용자가 누르지도 않았는데 제외되는 사고가
-    난다 — 그래서 GET은 아무것도 바꾸지 않고 확인 버튼이 있는 페이지만 보여주고,
-    실제 제외는 그 페이지 안에서 버튼을 눌러야 별도 POST로 실행되게 분리했다."""
-    safe_title = html.escape(title or title_id)
-    payload_json = json.dumps({"title": title or title_id, "thumbnail_url": thumbnail_url})
+def _render_exclude_confirm_html(title_id, title: str, exclude_endpoint: str, payload: dict) -> HTMLResponse:
+    """다운로드 리포트의 '목록 제외' 링크가 여는 페이지 — 네이버/카카오 공용.
+    디스코드는 링크를 메시지에 올리면 미리보기(임베드)를 만들려고 그 URL을 자동으로
+    한 번 열어보는데, 그 GET 요청만으로 실제 제외가 일어나면 사용자가 누르지도
+    않았는데 제외되는 사고가 난다 — 그래서 GET은 아무것도 바꾸지 않고 확인 버튼이
+    있는 페이지만 보여주고, 실제 제외는 그 페이지 안에서 버튼을 눌러야 exclude_endpoint로
+    별도 POST가 나가게 분리했다."""
+    safe_title = html.escape(title or str(title_id))
+    payload_json = json.dumps(payload)
     return HTMLResponse(f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>목록에서 제외</title>
 <style>
@@ -397,7 +543,7 @@ document.getElementById("btn").addEventListener("click", async () => {{
   btn.textContent = "처리 중...";
   errorText.textContent = "";
   try {{
-    const res = await fetch("/api/naver-list/{title_id}/exclude", {{
+    const res = await fetch("{exclude_endpoint}", {{
       method: "POST",
       headers: {{"Content-Type": "application/json"}},
       body: JSON.stringify({payload_json}),
@@ -432,6 +578,22 @@ document.getElementById("btn").addEventListener("click", async () => {{
 }});
 </script>
 </body></html>""")
+
+
+@router.get("/webtoons/{title_id}/exclude-confirm", response_class=HTMLResponse)
+async def exclude_confirm_page(title_id: str, title: str = "", thumbnail_url: str = ""):
+    return _render_exclude_confirm_html(
+        title_id, title, f"/api/naver-list/{title_id}/exclude",
+        {"title": title or title_id, "thumbnail_url": thumbnail_url},
+    )
+
+
+@router.get("/kakao-webtoons/{title_id}/exclude-confirm", response_class=HTMLResponse)
+async def kakao_exclude_confirm_page(title_id: int, title: str = ""):
+    return _render_exclude_confirm_html(
+        title_id, title, f"/api/kakao-webtoons/{title_id}/exclude", {"title": title or str(title_id)},
+    )
+
 
 
 # ── 작가/태그 자동추가 레지스트리 ──────────────────────────────────
@@ -794,6 +956,29 @@ async def set_unregistered_new_episodes_setting(payload: UnregisteredNewEpisodes
         repository.set_setting, "report_unregistered_new_episodes_enabled", "1" if payload.enabled else "0"
     )
     return await get_unregistered_new_episodes_setting()
+
+
+class KakaoWebtoonsEnabledOut(BaseModel):
+    enabled: bool
+
+
+class KakaoWebtoonsEnabledIn(BaseModel):
+    enabled: bool
+
+
+@router.get("/settings/kakao-webtoons-enabled", response_model=KakaoWebtoonsEnabledOut)
+async def get_kakao_webtoons_enabled_setting():
+    """카카오웹툰 관리(웹툰 전체목록에 표시 + 다운로드 리포트에 새 에피소드 포함) 전체
+    on/off. 새로 만든 기능이라 기존 사용자에게 예고 없이 끼어들면 안 되니, 값이
+    아직 없으면 기본은 꺼짐."""
+    value = await asyncio.to_thread(repository.get_setting, "kakao_webtoons_enabled")
+    return KakaoWebtoonsEnabledOut(enabled=value == "1")
+
+
+@router.post("/settings/kakao-webtoons-enabled", response_model=KakaoWebtoonsEnabledOut)
+async def set_kakao_webtoons_enabled_setting(payload: KakaoWebtoonsEnabledIn):
+    await asyncio.to_thread(repository.set_setting, "kakao_webtoons_enabled", "1" if payload.enabled else "0")
+    return await get_kakao_webtoons_enabled_setting()
 
 
 class AppPublicBaseUrlOut(BaseModel):

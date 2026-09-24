@@ -28,6 +28,14 @@ _CATALOG_PLACEMENTS = [
     "timetable_new", "timetable_completed",
 ]
 
+# "웹툰 전체목록"에 보여줄 건 신작/완결까지 다 필요 없고, 지금 연재 중인(요일 배정된)
+# 것만이면 된다 — 요일 7개만 따로 뽑아둔다(위 _CATALOG_PLACEMENTS의 부분집합).
+_WEEKDAY_PLACEMENTS = _CATALOG_PLACEMENTS[:7]
+
+KAKAO_EPISODE_LIST_URL_TMPL = "https://gateway-kw.kakao.com/episode/v2/views/content-home/contents/{content_id}/episodes"
+KAKAO_CONTENT_URL_TMPL = "https://webtoon.kakao.com/content/{seo_id}/{content_id}"
+KAKAO_VIEWER_URL_TMPL = "https://webtoon.kakao.com/viewer/{episode_seo_id}/{episode_id}"
+
 _HEADERS = {
     "Accept": "application/json, text/plain, */*",
     "Origin": "https://webtoon.kakao.com",
@@ -80,6 +88,100 @@ async def search_by_author(
             }
         )
     return results
+
+
+async def _fetch_placement_cards(session: aiohttp.ClientSession, placement: str, timeout_seconds: int) -> list[dict]:
+    """한 placement의 원본 카드 리스트(파싱 전)를 그대로 반환한다. 실패하면 빈 리스트 —
+    호출부가 "이 placement 하나 실패해도 나머지는 계속" 정책을 그대로 유지할 수 있게."""
+    try:
+        async with session.get(
+            KAKAO_TIMETABLE_URL,
+            params={"placement": placement},
+            headers=_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+        ) as response:
+            if response.status != 200:
+                log.warning("카카오 목록 조회 실패 (placement=%s): HTTP %s", placement, response.status)
+                return []
+            data = await response.json()
+    except Exception as e:
+        log.warning("카카오 목록 조회 예외 (placement=%s): %s", placement, e)
+        return []
+
+    cards = []
+    for group in data.get("data") or []:
+        for card_group in group.get("cardGroups") or []:
+            cards.extend(card_group.get("cards") or [])
+    return cards
+
+
+async def fetch_weekday_catalog(session: aiohttp.ClientSession, timeout_seconds: int) -> list[dict]:
+    """"웹툰 전체목록"에 보여줄 것 — 요일 7개(지금 연재 중인 것)만 훑는다. 신작/완결
+    placement는 안 써서 fetch_full_catalog보다 훨씬 가볍다.
+
+    UP/신작/휴재 전부 이 한 번의 조회(placement당 한 번, 접미사 없는 "전체")로 뽑을 수
+    있다 — badges에 type=="UP"이면 새 회차, type=="NEW"면 신작, title=="EPISODES_NOT_PUBLISHING"
+    이면 휴재(실제 HAR로 셋 다 같은 응답 안에서 확인함: 화요일 캡처엔 UP이 하나도 없어서
+    한동안 "UP은 다른 placement에만 있다"고 잘못 판단했었는데, 목요일 캡처엔 UP/신작/휴재
+    배지가 전부 이 접미사 없는 placement 응답에 같이 들어있었다 — 그날 그 요일에 해당하는
+    게 마침 없었을 뿐, placement 자체의 제약이 아니었다)."""
+    all_items: dict[int, dict] = {}
+    for placement in _WEEKDAY_PLACEMENTS:
+        for card in await _fetch_placement_cards(session, placement, timeout_seconds):
+            content = card.get("content") or {}
+            title_id = content.get("id")
+            if title_id is None:
+                continue
+            badges = content.get("badges") or []
+            badge_types = {b.get("type") for b in badges}
+            badge_titles = {b.get("title") for b in badges}
+            all_items[title_id] = {
+                "title_id": title_id,
+                "title_name": content.get("title", ""),
+                "seo_id": content.get("seoId", ""),
+                "is_adult": bool(content.get("adult")),
+                "author_names": [
+                    a.get("name") for a in content.get("authors") or [] if a.get("type") == "AUTHOR" and a.get("name")
+                ],
+                "has_update": "UP" in badge_types,
+                "is_new": "NEW" in badge_types,
+                "is_paused": "EPISODES_NOT_PUBLISHING" in badge_titles,
+                "thumbnail_url": content.get("backgroundImage") or "",
+            }
+    return list(all_items.values())
+
+
+async def fetch_latest_episode_url(
+    session: aiohttp.ClientSession, content_id: int, timeout_seconds: int
+) -> str | None:
+    """이 작품의 가장 최근 회차로 바로 가는 뷰어 URL을 만든다 — 회차 목록을
+    번호 내림차순(sort=-NO)으로 1페이지만 조회하면 맨 앞이 최신 회차다(실제 HAR로
+    확인). "다운로드 리포트"에서 UP 배지가 있는 작품에만 이걸 조회하므로, 전체
+    카탈로그 규모와 무관하게 가볍다."""
+    try:
+        async with session.get(
+            KAKAO_EPISODE_LIST_URL_TMPL.format(content_id=content_id),
+            params={"sort": "-NO", "offset": 0, "limit": 1},
+            headers=_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+        ) as response:
+            if response.status != 200:
+                log.warning("카카오 회차 목록 조회 실패 (content_id=%s): HTTP %s", content_id, response.status)
+                return None
+            data = await response.json()
+    except Exception as e:
+        log.warning("카카오 회차 목록 조회 예외 (content_id=%s): %s", content_id, e)
+        return None
+
+    episodes = ((data.get("data") or {}).get("episodes")) or []
+    if not episodes:
+        return None
+    latest = episodes[0]
+    episode_id = latest.get("id")
+    episode_seo_id = latest.get("seoId")
+    if episode_id is None or not episode_seo_id:
+        return None
+    return KAKAO_VIEWER_URL_TMPL.format(episode_seo_id=episode_seo_id, episode_id=episode_id)
 
 
 async def fetch_full_catalog(session: aiohttp.ClientSession, timeout_seconds: int) -> list[dict]:
