@@ -159,6 +159,19 @@ document.querySelectorAll(".main-tab").forEach((tab) => {
 
 // ── 공용 카드 빌더 ───────────────────────────────────────
 
+function kakaoThumbnailImgTag(baseUrl) {
+  // 카카오 CDN 썸네일 URL엔 확장자가 없다(.webp/.png/.jpg 중 하나를 시도해봐야
+  // 실제로 뜬다 — 표지 합성 쪽 백엔드 로직과 같은 이유). 브라우저에서는 서버처럼
+  // 미리 다 시도해볼 수 없으니, onerror로 다음 확장자를 순서대로 시도한다.
+  const escaped = escapeHtml(baseUrl);
+  if (/\.(webp|png|jpe?g)$/i.test(baseUrl)) {
+    return `<img src="${escaped}" alt="" loading="lazy" />`;
+  }
+  const png = escapeHtml(`${baseUrl}.png`);
+  const jpg = escapeHtml(`${baseUrl}.jpg`);
+  return `<img src="${escaped}.webp" alt="" loading="lazy" onerror="if(!this.dataset.fallback){this.dataset.fallback='1';this.src='${png}';}else if(this.dataset.fallback==='1'){this.dataset.fallback='2';this.src='${jpg}';}else{this.onerror=null;this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb-placeholder'}));}" />`;
+}
+
 function buildWebtoonCard(w, context) {
   const card = document.createElement("div");
   card.className = "webtoon-card";
@@ -191,7 +204,7 @@ function buildWebtoonCard(w, context) {
     <div class="webtoon-card-thumb-wrap">
       ${checkboxHtml}
       ${platformBadge}
-      ${w.thumbnail_url ? `<img src="${escapeHtml(w.thumbnail_url)}" alt="" loading="lazy" />` : '<div class="thumb-placeholder"></div>'}
+      ${w.thumbnail_url ? (platform === "kakao" ? kakaoThumbnailImgTag(w.thumbnail_url) : `<img src="${escapeHtml(w.thumbnail_url)}" alt="" loading="lazy" />`) : '<div class="thumb-placeholder"></div>'}
     </div>
     <div class="webtoon-card-body">
       <div class="webtoon-card-title">${
