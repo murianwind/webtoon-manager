@@ -434,15 +434,12 @@ function patchWebtoonListCard(titleId, webtoon, newStatus, everSubscribed, platf
   if (cacheIndex >= 0) {
     naverListCache[cacheIndex] = { ...naverListCache[cacheIndex], status: newStatus, ever_subscribed: everSubscribed };
   }
-
-  const card = document.querySelector(`#naver-list-grid .webtoon-card[data-title-id="${titleId}"]`);
-  if (newStatus === "excluded" || newStatus === "unsubscribed") {
-    card?.remove();
-    const grid = document.getElementById("naver-list-grid");
-    document.getElementById("naver-list-empty").classList.toggle("hidden", grid.children.length > 0);
-  } else if (card) {
-    card.replaceWith(buildWebtoonCard({ ...webtoon, status: newStatus, ever_subscribed: everSubscribed, platform }, "naver-list"));
-  }
+  // 카드를 그 자리에서 바꿔치기만 하면, 지금 걸려있는 필터(구독중만/아직 미등록만
+  // 등)에 따라 이 카드가 이제 안 보여야 하는 경우를 놓친다 — 예를 들어 "아직
+  // 미등록만" 필터에서 구독을 누르면 이제 활성 상태라 원래는 사라져야 하는데,
+  // 그 자리에 그대로 남아있는 문제가 실제로 있었다. 전체를 다시 그려서 필터/정렬을
+  // 항상 다시 정확히 적용한다.
+  renderNaverList();
 }
 
 async function kakaoSubscribeWithHint(webtoon) {
