@@ -88,6 +88,16 @@ select {
   padding-bottom: 8px;
 }
 
+/* "웹툰 전체목록"의 일괄 제외 바 — 검색창(.toolbar-sticky)이 이미 41px에 고정돼
+   있으니, 그 바로 밑(검색창 자체 높이만큼 더)에 고정한다. 페이지를 스크롤해도
+   선택 개수/버튼이 항상 보이게 하기 위함. */
+#naver-list-bulk-bar {
+  position: sticky;
+  top: 93px;
+  z-index: 14;
+  background: var(--bg);
+}
+
 .page.hidden { display: none; }
 /* 이 클래스는 "무조건 숨김"이 목적이라, 다른 곳에서 같은 우선순위로 display를
    지정하는 규칙이 스타일시트 뒤쪽에 있으면(CSS 캐스케이드상 나중 규칙이 이겨서)
