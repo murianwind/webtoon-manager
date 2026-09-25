@@ -399,6 +399,11 @@ select {
   border-bottom: 1px solid var(--border);
 }
 .schedule-block:last-of-type { border-bottom: none; }
+/* "다운로드 리포트" 카드엔 발송 시각 스케줄 블록 하나만 있는데, 뒤에 다른
+   field-group들이 이어져서 :last-of-type가 안 먹혀(같은 부모 안의 마지막
+   div가 아니게 됨) 구분선이 바로 아래 "저장" 버튼과 붙어 보이는 문제가
+   있었다 — 이 카드 안에서는 애초에 구분할 다음 스케줄 블록이 없으니 그냥 없앤다. */
+#settings-card-report .schedule-block { border-bottom: none; }
 .schedule-block h3 { font-size: 13px; margin: 0 0 8px; color: var(--muted); }
 .schedule-mode {
   padding: 6px 10px;
