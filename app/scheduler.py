@@ -408,8 +408,11 @@ async def _collect_kakao_new_episodes(
             if is_subscribed and webtoon_server_url:
                 # 구독 중이고 뷰어 서버가 설정돼 있으면 뷰어의 바로가기를 먼저 시도한다
                 # — fetch_reader_url은 실패해도 예외 없이 None을 주므로 그대로 폴백된다.
+                # 뷰어는 실제 디스크 폴더명(':' 등 금지문자가 전각으로 치환된 이름) 기준으로
+                # 매칭하므로, 원본 제목이 아니라 그 치환을 거친 이름으로 조회해야 한다
+                # (success_rows 쪽에서 이미 확인된 것과 같은 문제).
                 url = await webtoon_server_client.fetch_reader_url(
-                    session, webtoon_server_url, item["title_name"], settings.request_timeout_seconds
+                    session, webtoon_server_url, remove_forbidden_str(item["title_name"]), settings.request_timeout_seconds
                 )
             if url is None:
                 try:
