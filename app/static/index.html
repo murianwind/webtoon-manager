@@ -256,9 +256,9 @@
   <section id="page-settings" class="page hidden">
     <div class="settings-card" id="settings-card-discord">
       <h2>디스코드 설정</h2>
-      <p class="hint">여기서 웹훅 URL을 먼저 저장해야 아래 "실행 스케줄" 카드(신작 스캔·다운로드·리포트·아카이빙 스케줄 전부)와 "다운로드 리포트" 카드가 나타납니다. "다운로드 리포트" 카드의 "미등록 웹툰 중 새 에피소드 섹션 포함"을 켜면 그 아래 "카카오웹툰 관리" 카드도 나타납니다.</p>
+      <p class="hint">여기서 웹훅 URL을 먼저 저장해야 아래 "다운로드 리포트" 카드가 나타납니다("실행 스케줄" 카드는 신작 스캔·다운로드·아카이빙처럼 디스코드와 무관한 것도 다뤄서 웹훅 여부와 상관없이 항상 보입니다). "다운로드 리포트" 카드의 "미등록 웹툰 중 새 에피소드 섹션 포함"을 켜면 그 아래 "카카오웹툰 관리" 카드도 나타납니다.</p>
       <div class="discord-form-grid">
-        <label>웹훅 URL <span class="hint-inline">(신작 알림 — 아래 스케줄/리포트/카카오 설정이 나타나려면 먼저 필요)</span>
+        <label>웹훅 URL <span class="hint-inline">(신작 알림 — 아래 리포트/카카오 설정이 나타나려면 먼저 필요)</span>
           <input id="discord-webhook-url" type="password" placeholder="https://discord.com/api/webhooks/..." />
         </label>
         <label>봇 토큰 <span class="hint-inline">(완결 확인, 비워두면 기존 값 유지)</span>
@@ -277,7 +277,7 @@
       <p id="discord-bot-status" class="hint"></p>
     </div>
 
-    <div class="settings-card hidden" id="settings-card-schedule">
+    <div class="settings-card" id="settings-card-schedule">
       <h2>실행 스케줄</h2>
       <div class="schedule-block" data-job="discovery_job">
         <h3>신작 스캔</h3>
@@ -287,15 +287,11 @@
         <h3>다운로드</h3>
         <div class="schedule-controls"></div>
       </div>
-      <div class="schedule-block" data-job="report_job">
-        <h3>다운로드 리포트</h3>
-        <div class="schedule-controls"></div>
-      </div>
       <div class="schedule-block" data-job="archive_job">
         <h3>아카이빙</h3>
         <div class="schedule-controls"></div>
       </div>
-      <p class="hint">다운로드와 아카이빙 둘 다 "특정 시각" 모드면, 아카이빙은 다운로드보다 최소 10분 뒤로만 설정할 수 있습니다.</p>
+      <p class="hint">다운로드와 아카이빙 둘 다 "특정 시각" 모드면, 아카이빙은 다운로드보다 최소 10분 뒤로만 설정할 수 있습니다. "다운로드 리포트"를 언제 보낼지는 아래 "다운로드 리포트" 카드에서 정합니다(디스코드 웹훅이 설정돼야 그 카드가 나타납니다).</p>
       <button id="btn-save-settings">저장</button>
       <span id="settings-save-result" class="error"></span>
     </div>
@@ -303,6 +299,13 @@
     <div class="settings-card hidden" id="settings-card-report">
       <h2>다운로드 리포트</h2>
       <p class="hint">지정한 시각마다, 지난 리포트 이후 받은/실패한 작품을 모아 디스코드로 보냅니다 (위 웹훅 설정 그대로 사용).</p>
+
+      <div class="schedule-block" data-job="report_job">
+        <h3>발송 시각</h3>
+        <div class="schedule-controls"></div>
+      </div>
+      <button id="btn-save-report-schedule">발송 시각 저장</button>
+      <span id="report-schedule-save-result" class="error"></span>
 
       <div class="field-group">
         <label for="webtoon-server-url">웹툰 뷰어 서버 주소 <span class="hint-inline">(선택)</span></label>

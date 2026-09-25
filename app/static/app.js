@@ -1317,8 +1317,13 @@ function readScheduleControls(wrap) {
   };
 }
 
-document.getElementById("btn-save-settings").addEventListener("click", async () => {
-  const resultEl = document.getElementById("settings-save-result");
+async function saveAllSchedules(resultElId) {
+  // API가 4개 작업(신작스캔/다운로드/리포트/아카이빙) 스케줄을 한 번에 같이 받는
+  // 구조라("실행 스케줄" 저장, "다운로드 리포트"의 "발송 시각" 저장 둘 다 공용으로
+  // 쓴다), 어느 버튼에서 눌러도 지금 화면(카드 위치와 무관하게 data-job로 찾음)에
+  // 있는 4개 값을 전부 모아서 같이 보낸다 — 저장 버튼이 물리적으로 다른 카드에
+  // 있어도 실제로 저장되는 내용은 항상 최신 값 그대로다.
+  const resultEl = document.getElementById(resultElId);
   resultEl.textContent = "";
   try {
     const payload = {};
@@ -1332,7 +1337,10 @@ document.getElementById("btn-save-settings").addEventListener("click", async () 
   } catch (e) {
     resultEl.textContent = e.message;
   }
-});
+}
+
+document.getElementById("btn-save-settings").addEventListener("click", () => saveAllSchedules("settings-save-result"));
+document.getElementById("btn-save-report-schedule").addEventListener("click", () => saveAllSchedules("report-schedule-save-result"));
 
 // ── 설정: 디스코드 ───────────────────────────────────────
 
@@ -1368,8 +1376,10 @@ async function loadDiscordSettings() {
 // 기존 저장된 설정 값 자체는 전혀 안 건드리고 화면에 보일지만 정할 뿐이라, 다시
 // 조건을 채우면 이미 저장해뒀던 값 그대로 나타난다.
 function updateSettingsCardVisibility() {
+  // "실행 스케줄"은 신작 스캔/다운로드/아카이빙처럼 디스코드와 무관한 것도 다루니
+  // 웹훅 여부와 상관없이 항상 보인다. "다운로드 리포트"(발송 시각 포함)만 보낼 곳이
+  // 있어야 의미가 있어서 웹훅이 설정돼야 나타난다.
   const webhookConfigured = document.getElementById("discord-webhook-url").dataset.masked === "true";
-  document.getElementById("settings-card-schedule").classList.toggle("hidden", !webhookConfigured);
   document.getElementById("settings-card-report").classList.toggle("hidden", !webhookConfigured);
 
   const unregisteredEnabled = document.getElementById("report-unregistered-toggle").checked;
