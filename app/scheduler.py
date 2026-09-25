@@ -362,14 +362,16 @@ async def _collect_unregistered_new_episodes(
 
 async def _collect_kakao_new_episodes(
     session: aiohttp.ClientSession, settings
-) -> list[tuple[int, str, str]]:
+) -> list[tuple[int, str, str, bool]]:
     """"웹툰 전체목록"에 있는(=요일 7개, 목록제외 안 한) 카카오웹툰 중 새 회차(UP
-    표시)가 있는 것만 골라서 (title_id, title_name, 바로가기 URL)로 반환한다.
-    네이버의 _collect_unregistered_new_episodes와 비슷한 역할이지만, 카카오는
+    표시)가 있는 것만 골라서 (title_id, title_name, 바로가기 URL, 구독 중 여부)로
+    반환한다. 네이버의 _collect_unregistered_new_episodes와 비슷한 역할이지만, 카카오는
     "구독"이 다운로드를 뜻하지 않고 웹툰 뷰어 서버에 그 작품이 있다는 표시일 뿐이다 —
     그래서 지금 구독 중(active)이고 뷰어 서버 주소도 설정돼 있으면 그 뷰어의 바로가기
     URL을 먼저 시도하고, 조회에 실패하면(사용자가 실수로 뷰어에 없는 작품을
-    구독했을 수 있으므로) 카카오웹툰 자체 링크로 조용히 대체한다."""
+    구독했을 수 있으므로) 카카오웹툰 자체 링크로 조용히 대체한다. 구독 중 여부는
+    리포트에서 "목록 제외" 링크를 붙일지 정할 때 쓴다(이미 구독해서 챙겨보고 있는
+    작품에 "제외" 링크를 붙이는 건 의미가 없다)."""
     try:
         items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds)
     except Exception as e:
@@ -416,17 +418,20 @@ async def _collect_kakao_new_episodes(
                     log.error("카카오 작품(title_id=%s) 최신 회차 조회 실패(건너뜀): %s", item["title_id"], e)
                     url = None
             await asyncio.sleep(settings.delay_seconds)
-            return item, url
+            return item, url, is_subscribed
 
     results = await asyncio.gather(*[_fetch_one(item) for item in candidates])
-    return [(item["title_id"], item["title_name"], url) for item, url in results if url is not None]
+    return [
+        (item["title_id"], item["title_name"], url, is_subscribed)
+        for item, url, is_subscribed in results if url is not None
+    ]
 
 
 def _build_report_message(
     success_rows: list[dict], failed_rows: list[dict], reader_urls: dict[str, str],
     unregistered_new_episodes: list[tuple[str, str, int]] | None = None,
     app_public_base_url: str = "",
-    kakao_new_episodes: list[tuple[int, str, str]] | None = None,
+    kakao_new_episodes: list[tuple[int, str, str, bool]] | None = None,
 ) -> str:
     """예전 hermes webtoon_checker.py의 메시지 구조(다운로드됨/실패)를 그대로 따른다.
     모든 링크는 <...>로 감싸서 디스코드가 미리보기(임베드)를 안 만들게 한다 — 링크가
@@ -467,9 +472,12 @@ def _build_report_message(
             exclude_url = f"{app_public_base_url}/api/webtoons/{title_id}/exclude-confirm?title={quote(title)}"
             line += f" · [목록 제외](<{exclude_url}>)"
         new_lines.append(line)
-    for title_id, title, viewer_url in kakao_new_episodes or []:
+    for title_id, title, viewer_url, is_subscribed in kakao_new_episodes or []:
         line = f"• [카카오] {title} [바로가기](<{viewer_url}>)"
-        if app_public_base_url:
+        # 이미 구독 중인(뷰어 라이브러리에서 챙겨보고 있다고 표시한) 작품은 "제외"
+        # 링크를 붙일 이유가 없다 — 일부러 구독해둔 걸 리포트에서 실수로 눌러
+        # 빼버리는 사고를 막기 위함이기도 하다.
+        if app_public_base_url and not is_subscribed:
             exclude_url = f"{app_public_base_url}/api/kakao-webtoons/{title_id}/exclude-confirm?title={quote(title)}"
             line += f" · [목록 제외](<{exclude_url}>)"
         new_lines.append(line)
