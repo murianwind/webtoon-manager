@@ -379,7 +379,10 @@ function renderNaverList() {
     grid.appendChild(buildWebtoonCard(w, "naver-list"));
   }
   updateNaverListBulkBar(); // 다시 그리면 체크박스가 전부 새로 생기므로(선택 해제됨) 바도 초기화
+  naverListBulkSelectStartScrollY = null; // 새로 그려졌으니 "선택을 시작한 위치"도 다시 잡아야 함
 }
+
+let naverListBulkSelectStartScrollY = null;
 
 function updateNaverListBulkBar() {
   const count = document.querySelectorAll("#naver-list-grid .webtoon-card-select:checked").length;
@@ -388,7 +391,15 @@ function updateNaverListBulkBar() {
 }
 
 document.getElementById("naver-list-grid").addEventListener("change", (e) => {
-  if (e.target.classList.contains("webtoon-card-select")) updateNaverListBulkBar();
+  if (!e.target.classList.contains("webtoon-card-select")) return;
+  // 체크박스를 처음 켠 시점의 스크롤 위치를 기억해둔다 — "선택 항목 제외됨으로
+  // 이동"이 끝난 뒤 이 위치로 되돌려서, 선택하려고 스크롤해 내려온 걸 다시
+  // 손으로 올릴 필요가 없게 한다. 이후에 체크를 더 추가해도(맨 처음 위치 그대로
+  // 유지해야 하므로) 다시 갱신하지 않는다.
+  if (naverListBulkSelectStartScrollY === null && e.target.checked) {
+    naverListBulkSelectStartScrollY = window.scrollY;
+  }
+  updateNaverListBulkBar();
 });
 
 document.getElementById("btn-bulk-exclude-naver-list").addEventListener("click", async () => {
@@ -398,6 +409,7 @@ document.getElementById("btn-bulk-exclude-naver-list").addEventListener("click",
 
   const btn = document.getElementById("btn-bulk-exclude-naver-list");
   btn.disabled = true;
+  const restoreScrollY = naverListBulkSelectStartScrollY !== null ? naverListBulkSelectStartScrollY : window.scrollY;
   try {
     for (const checkbox of checked) {
       const card = checkbox.closest(".webtoon-card");
@@ -407,15 +419,15 @@ document.getElementById("btn-bulk-exclude-naver-list").addEventListener("click",
       try {
         // 여러 개를 처리하는 동안은 매번 다시 그리지 않는다(skipRender) — 하나
         // 처리할 때마다 목록 길이가 바뀌면서 스크롤이 계속 흔들리는 문제가
-        // 실제로 있었다. 다 끝난 뒤 한 번만 그리고, 맨 위로 스크롤해서 다시
-        // 손으로 올릴 필요가 없게 한다.
+        // 실제로 있었다. 다 끝난 뒤 한 번만 그리고, 선택을 시작했던 스크롤
+        // 위치로 되돌려서 다시 손으로 그 자리까지 내릴 필요가 없게 한다.
         await webtoonListAction(webtoon, "exclude", webtoon.platform || "naver", true);
       } catch (e) {
         alert(`"${webtoon.title}" 제외 실패: ${e.message}`);
       }
     }
     renderNaverList();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({ top: restoreScrollY, behavior: "auto" });
   } finally {
     btn.disabled = false;
   }
