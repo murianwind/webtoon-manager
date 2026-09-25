@@ -21,6 +21,7 @@
     <button class="main-tab" data-page="manual-run">수동 실행</button>
     <button class="main-tab" data-page="archive">아카이빙</button>
     <button class="main-tab" data-page="settings">설정</button>
+    <button class="main-tab" data-page="help">도움말</button>
   </nav>
 
   <!-- 웹툰 전체목록 (네이버+카카오) -->
@@ -255,7 +256,7 @@
   <section id="page-settings" class="page hidden">
     <div class="settings-card" id="settings-card-discord">
       <h2>디스코드 설정</h2>
-      <p class="hint">여기서 웹훅 URL을 먼저 설정해야 아래 "실행 스케줄"/"다운로드 리포트"(신작 알림·리포트를 보낼 곳이 있어야 의미가 있어서)가 나타나고, 그 안의 "미등록 웹툰 중 새 에피소드 섹션 포함"을 켜야 "카카오웹툰 관리"도 나타납니다.</p>
+      <p class="hint">여기서 웹훅 URL을 먼저 저장해야 아래 "실행 스케줄" 카드(신작 스캔·다운로드·리포트·아카이빙 스케줄 전부)와 "다운로드 리포트" 카드가 나타납니다. "다운로드 리포트" 카드의 "미등록 웹툰 중 새 에피소드 섹션 포함"을 켜면 그 아래 "카카오웹툰 관리" 카드도 나타납니다.</p>
       <div class="discord-form-grid">
         <label>웹훅 URL <span class="hint-inline">(신작 알림 — 아래 스케줄/리포트/카카오 설정이 나타나려면 먼저 필요)</span>
           <input id="discord-webhook-url" type="password" placeholder="https://discord.com/api/webhooks/..." />
@@ -327,7 +328,7 @@
         <label class="checkbox-label">
           <input type="checkbox" id="report-unregistered-toggle" /> 미등록 웹툰 중 새 에피소드 섹션 포함
         </label>
-        <p class="field-hint">웹툰 전체목록에는 있지만 구독/제외 등록 안 된 작품 중 새 에피소드가 있는 것을 리포트에 같이 보여줍니다(네이버+카카오 공통). 이걸 켜면 아래 "카카오웹툰 관리"도 나타납니다.</p>
+        <p class="field-hint">웹툰 전체목록에는 있지만 구독/제외 등록 안 된 작품 중 새 에피소드가 있는 것을 리포트에 같이 보여줍니다. 카카오웹툰의 리포트를 받고 싶다면, 이 옵션을 켜면 나타나는 아래 "카카오웹툰 관리"를 마저 켜셔야 합니다.</p>
       </div>
     </div>
 
@@ -377,6 +378,11 @@
       </label>
       <span id="backup-result" class="error"></span>
     </div>
+  </section>
+
+  <!-- 도움말 -->
+  <section id="page-help" class="page hidden">
+    <div id="help-content" class="markdown-body"><p>불러오는 중...</p></div>
   </section>
 
   <!-- 수동 실행 -->

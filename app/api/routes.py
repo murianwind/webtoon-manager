@@ -24,6 +24,7 @@ import re
 import time
 from pathlib import Path
 
+import markdown
 import aiohttp
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
@@ -465,9 +466,10 @@ async def browse_kakao_list():
 @router.get("/kakao-webtoons", response_model=list[KakaoWebtoonOut])
 async def list_kakao_webtoons(status: str | None = None):
     """"구독해제"/"제외됨" 탭에서 네이버 목록과 합쳐서 보여줄 카카오 목록. 신작/UP/휴재
-    배지도 붙여준다 — 요일별 목록을 다시 훑어서 지금도 연재 중인 것만 매칭되고,
-    거기 없으면(장기 휴재 등) 배지 없이 나간다(browse_kakao_list의 DB 보완 항목과
-    같은 한계)."""
+    배지와 저자 정보도 요일별 목록과 대조해서 채워준다(지금도 연재 중인 것만 매칭되고,
+    거기 없으면 — 장기 휴재 등 — DB에 저장된 값 그대로 나간다. browse_kakao_list의
+    DB 보완 항목과 같은 한계). 저자 정보가 비어있거나 오래된 채로 저장돼 있었다면
+    이 조회 자체가 최신 값으로 갱신해서, 이 탭을 여는 것만으로도 스스로 채워진다."""
     if status and status not in (
         repository.STATUS_ACTIVE, repository.STATUS_UNSUBSCRIBED, repository.STATUS_EXCLUDED,
     ):
@@ -483,15 +485,31 @@ async def list_kakao_webtoons(status: str | None = None):
     try:
         async with aiohttp.ClientSession() as session:
             catalog_items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds)
-        badges_by_id = {
-            item["title_id"]: {"is_new": item["is_new"], "is_paused": item["is_paused"], "has_new_episode": item["has_update"]}
-            for item in catalog_items
-        }
+        catalog_by_id = {item["title_id"]: item for item in catalog_items}
     except Exception as e:
-        log.warning("카카오 목록(%s) 배지 보강 실패(배지 없이 표시): %s", status, e)
-        badges_by_id = {}
+        log.warning("카카오 목록(%s) 배지/저자 보강 실패(그대로 표시): %s", status, e)
+        catalog_by_id = {}
 
-    return [KakaoWebtoonOut(**r, **badges_by_id.get(r["title_id"], {})) for r in rows]
+    result = []
+    for r in rows:
+        catalog_item = catalog_by_id.get(r["title_id"])
+        extra = {}
+        if catalog_item is not None:
+            extra = {
+                "is_new": catalog_item["is_new"], "is_paused": catalog_item["is_paused"],
+                "has_new_episode": catalog_item["has_update"],
+            }
+            fresh_author_summary = ", ".join(catalog_item["author_names"])
+            # 저자 정보가 나중에(이 컬럼이 생기기 전 등) 비어있는 채로 저장된 채 계속
+            # 남아있는 경우가 있었다 — "제외됨"/"구독해제" 조회할 때도 요일별 목록을
+            # 이미 훑고 있으니, 여기서도 최신 정보로 같이 채우고 DB에도 반영해서
+            # 다음부터는 이 조회 자체로 매번 자동으로 채워지게 한다("웹툰 전체목록"을
+            # 거쳐야만 채워지던 것과 달리, 이 탭만 봐도 스스로 낫는다).
+            if fresh_author_summary and fresh_author_summary != r["author_summary"]:
+                await asyncio.to_thread(repository.refresh_kakao_webtoon_author_summary, r["title_id"], fresh_author_summary)
+                r = {**r, "author_summary": fresh_author_summary}
+        result.append(KakaoWebtoonOut(**r, **extra))
+    return result
 
 
 async def _get_or_404_kakao(title_id: int) -> dict:
@@ -1369,6 +1387,21 @@ async def test_discord_bot():
 
 
 # ── 백업 / 복원 ────────────────────────────────────────────────────
+
+@router.get("/help", response_class=HTMLResponse)
+async def get_help_page():
+    """"도움말" 탭에 보여줄 README를 HTML로 변환해서 준다 — README.md 하나로
+    설치 안내/앱 안내를 둘 다 겸하고 있어서, 그중 앱을 쓰는 방법 부분만 이 화면에
+    나오면 되지만 굳이 분리하지 않고 전체를 그대로 보여준다(설치 안내도 나중에
+    다시 볼 일이 있을 수 있어서)."""
+    readme_path = Path(__file__).resolve().parent.parent.parent / "README.md"
+    try:
+        text = await asyncio.to_thread(readme_path.read_text, encoding="utf-8")
+    except FileNotFoundError:
+        return HTMLResponse("<p>README.md를 찾을 수 없습니다.</p>", status_code=404)
+    html = markdown.markdown(text, extensions=["tables", "fenced_code"])
+    return HTMLResponse(html)
+
 
 @router.get("/backup")
 async def download_backup():

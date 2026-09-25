@@ -136,6 +136,7 @@ const pageLoaders = {
   "manual-run": loadManualRunPage,
   archive: loadArchivePage,
   settings: loadSettingsPage,
+  help: loadHelpPage,
 };
 
 const ACTIVE_TAB_KEY = "activeMainTab";
@@ -1475,6 +1476,23 @@ document.getElementById("restore-file-input").addEventListener("change", async (
 // ── 설정: 수동 실행 + 진행상황 ────────────────────────────
 
 let jobPollTimer = null;
+
+let helpLoaded = false;
+
+async function loadHelpPage() {
+  // README는 앱을 쓰다가 바뀔 일이 없어서, 탭을 열 때마다 다시 안 받고 세션 중엔
+  // 한 번만 가져온다.
+  if (helpLoaded) return;
+  const container = document.getElementById("help-content");
+  try {
+    const res = await fetch("/api/help");
+    if (!res.ok) throw new Error(`불러오기 실패 (${res.status})`);
+    container.innerHTML = await res.text();
+    helpLoaded = true;
+  } catch (e) {
+    container.innerHTML = `<p>도움말을 불러오지 못했습니다: ${escapeHtml(e.message)}</p>`;
+  }
+}
 
 async function loadSettingsPage() {
   try {

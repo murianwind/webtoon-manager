@@ -891,3 +891,57 @@ select {
   display: none;
 }
 
+/* "도움말" 탭 — README를 그대로 HTML로 변환해서 넣는 곳(app/api/routes.py의
+   /api/help 참고). 일반 마크다운 요소들이 이 앱 전역 스타일엔 없어서 여기서만
+   기본 가독성 정도를 챙긴다. */
+.markdown-body {
+  max-width: 900px;
+  line-height: 1.6;
+}
+.markdown-body h1, .markdown-body h2, .markdown-body h3 {
+  margin-top: 28px;
+  margin-bottom: 10px;
+}
+.markdown-body h1 { font-size: 24px; }
+.markdown-body h2 { font-size: 19px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.markdown-body h3 { font-size: 16px; }
+.markdown-body p, .markdown-body ul, .markdown-body ol {
+  margin: 10px 0;
+}
+.markdown-body ul, .markdown-body ol {
+  padding-left: 22px;
+}
+.markdown-body li { margin: 4px 0; }
+.markdown-body code {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.9em;
+}
+.markdown-body pre {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  overflow-x: auto;
+}
+.markdown-body pre code {
+  border: none;
+  padding: 0;
+  background: none;
+}
+.markdown-body table {
+  border-collapse: collapse;
+  margin: 12px 0;
+  width: 100%;
+}
+.markdown-body th, .markdown-body td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+}
+.markdown-body th { background: var(--card); }
+.markdown-body a { color: inherit; text-decoration: underline; }
+.markdown-body hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+
