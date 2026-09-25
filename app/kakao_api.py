@@ -36,6 +36,15 @@ _CATALOG_PLACEMENTS = [
 # 창작자가 아니라서 제외한다.
 _AUTHOR_LIKE_TYPES = {"AUTHOR", "ILLUSTRATOR", "ORIGINAL_STORY"}
 
+
+def _extract_author_names(authors: list[dict]) -> list[str]:
+    """화면 표시용 저자 이름 목록(중복 제거, 순서 유지) — 같은 사람/스튜디오가 그림+글
+    둘 다처럼 여러 역할로 동시에 credit되어 있으면 authors 배열에 이름이 역할 수만큼
+    반복해서 들어있다(실제로 "넥스트레벨스튜디오"가 두 번 나오는 경우가 있었음).
+    그대로 join하면 "A, A, B"처럼 같은 이름이 중복 표시되므로, dict.fromkeys로
+    순서는 유지한 채 중복만 없앤다."""
+    return list(dict.fromkeys(a.get("name") for a in authors if a.get("type") in _AUTHOR_LIKE_TYPES and a.get("name")))
+
 # "웹툰 전체목록"에 보여줄 건 신작/완결까지 다 필요 없고, 지금 연재 중인(요일 배정된)
 # 것만이면 된다 — 요일 7개만 따로 뽑아둔다(위 _CATALOG_PLACEMENTS의 부분집합).
 _WEEKDAY_PLACEMENTS = _CATALOG_PLACEMENTS[:7]
@@ -148,9 +157,7 @@ async def fetch_weekday_catalog(session: aiohttp.ClientSession, timeout_seconds:
                 "title_name": content.get("title", ""),
                 "seo_id": content.get("seoId", ""),
                 "is_adult": bool(content.get("adult")),
-                "author_names": [
-                    a.get("name") for a in content.get("authors") or [] if a.get("type") in _AUTHOR_LIKE_TYPES and a.get("name")
-                ],
+                "author_names": _extract_author_names(content.get("authors") or []),
                 "has_update": "UP" in badge_types,
                 "is_new": "NEW" in badge_types,
                 "is_paused": "EPISODES_NOT_PUBLISHING" in badge_titles,
@@ -220,7 +227,7 @@ async def fetch_full_catalog(session: aiohttp.ClientSession, timeout_seconds: in
                 # 그 함수가 스스로 좁혀서 쓰게 한다(용도가 다르면 같은 원본에서 각자
                 # 필요한 만큼만 걸러 쓰는 게 맞다).
                 "authors": authors,
-                "author_names": [a.get("name") for a in authors if a.get("type") in _AUTHOR_LIKE_TYPES and a.get("name")],
+                "author_names": _extract_author_names(authors),
             }
     return list(all_items.values())
 
