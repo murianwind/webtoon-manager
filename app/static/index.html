@@ -32,6 +32,12 @@
         <option value="active">구독중만</option>
         <option value="not-active">아직 미등록만</option>
       </select>
+      <select id="naver-list-badge-filter">
+        <option value="">전체</option>
+        <option value="new">신작만</option>
+        <option value="paused">휴재만</option>
+        <option value="up">새 에피소드만</option>
+      </select>
       <select id="naver-list-sort">
         <option value="title">제목순</option>
         <option value="author">저자순</option>
@@ -52,12 +58,12 @@
   <section id="page-unsubscribed" class="page hidden">
     <div class="toolbar toolbar-sticky">
       <input id="unsubscribed-search" type="text" placeholder="제목/저자로 검색" />
-      <select id="unsubscribed-author-filter"><option value="">작가 전체</option></select>
       <select id="unsubscribed-tag-filter"><option value="">태그 전체</option></select>
       <select id="unsubscribed-badge-filter">
         <option value="">전체</option>
         <option value="new">신작만</option>
         <option value="paused">휴재만</option>
+        <option value="up">새 에피소드만</option>
       </select>
     </div>
     <div id="unsubscribed-list" class="webtoon-grid"></div>
@@ -68,12 +74,12 @@
   <section id="page-excluded" class="page hidden">
     <div class="toolbar toolbar-sticky">
       <input id="excluded-search" type="text" placeholder="제목/저자로 검색" />
-      <select id="excluded-author-filter"><option value="">작가 전체</option></select>
       <select id="excluded-tag-filter"><option value="">태그 전체</option></select>
       <select id="excluded-badge-filter">
         <option value="">전체</option>
         <option value="new">신작만</option>
         <option value="paused">휴재만</option>
+        <option value="up">새 에피소드만</option>
       </select>
     </div>
     <div id="excluded-list" class="webtoon-grid"></div>
@@ -247,6 +253,94 @@
 
   <!-- 설정 -->
   <section id="page-settings" class="page hidden">
+    <div class="settings-card" id="settings-card-discord">
+      <h2>디스코드 설정</h2>
+      <p class="hint">여기서 웹훅 URL을 먼저 설정해야 아래 "실행 스케줄"/"다운로드 리포트"(신작 알림·리포트를 보낼 곳이 있어야 의미가 있어서)가 나타나고, 그 안의 "미등록 웹툰 중 새 에피소드 섹션 포함"을 켜야 "카카오웹툰 관리"도 나타납니다.</p>
+      <div class="discord-form-grid">
+        <label>웹훅 URL <span class="hint-inline">(신작 알림 — 아래 스케줄/리포트/카카오 설정이 나타나려면 먼저 필요)</span>
+          <input id="discord-webhook-url" type="password" placeholder="https://discord.com/api/webhooks/..." />
+        </label>
+        <label>봇 토큰 <span class="hint-inline">(완결 확인, 비워두면 기존 값 유지)</span>
+          <input id="discord-bot-token" type="password" placeholder="설정됨 (변경하려면 입력)" />
+        </label>
+        <label>알림 채널 ID
+          <input id="discord-channel-id" type="text" placeholder="123456789012345678" />
+        </label>
+      </div>
+      <div class="discord-actions">
+        <button id="btn-save-discord">저장</button>
+        <button id="btn-test-webhook">웹훅 테스트</button>
+        <button id="btn-test-bot">봇 테스트</button>
+      </div>
+      <span id="discord-save-result" class="error"></span>
+      <p id="discord-bot-status" class="hint"></p>
+    </div>
+
+    <div class="settings-card hidden" id="settings-card-schedule">
+      <h2>실행 스케줄</h2>
+      <div class="schedule-block" data-job="discovery_job">
+        <h3>신작 스캔</h3>
+        <div class="schedule-controls"></div>
+      </div>
+      <div class="schedule-block" data-job="download_job">
+        <h3>다운로드</h3>
+        <div class="schedule-controls"></div>
+      </div>
+      <div class="schedule-block" data-job="report_job">
+        <h3>다운로드 리포트</h3>
+        <div class="schedule-controls"></div>
+      </div>
+      <div class="schedule-block" data-job="archive_job">
+        <h3>아카이빙</h3>
+        <div class="schedule-controls"></div>
+      </div>
+      <p class="hint">다운로드와 아카이빙 둘 다 "특정 시각" 모드면, 아카이빙은 다운로드보다 최소 10분 뒤로만 설정할 수 있습니다.</p>
+      <button id="btn-save-settings">저장</button>
+      <span id="settings-save-result" class="error"></span>
+    </div>
+
+    <div class="settings-card hidden" id="settings-card-report">
+      <h2>다운로드 리포트</h2>
+      <p class="hint">지정한 시각마다, 지난 리포트 이후 받은/실패한 작품을 모아 디스코드로 보냅니다 (위 웹훅 설정 그대로 사용).</p>
+
+      <div class="field-group">
+        <label for="webtoon-server-url">웹툰 뷰어 서버 주소 <span class="hint-inline">(선택)</span></label>
+        <div class="registry-add-row">
+          <input id="webtoon-server-url" type="text" placeholder="http://192.168.0.49:25600" />
+          <button id="btn-save-webtoon-server-url">저장</button>
+        </div>
+        <p class="field-hint">입력해두면 리포트에 각 작품의 "바로가기" 링크가 붙고, 구독중인 웹툰 카드에서 바로 뷰어로 이동하는 아이콘이 생깁니다(카카오 포함).</p>
+        <span id="webtoon-server-save-result" class="hint-inline"></span>
+      </div>
+
+      <div class="field-group">
+        <label for="app-public-base-url">이 앱의 외부 접속 주소 <span class="hint-inline">(선택)</span></label>
+        <div class="registry-add-row">
+          <input id="app-public-base-url" type="text" placeholder="https://webtoon.murian.ddnsfree.com" />
+          <button id="btn-save-app-public-base-url">저장</button>
+        </div>
+        <p class="field-hint">입력해두면, 아래 "미등록 웹툰 중 새 에피소드" 항목마다 "목록 제외" 링크가 붙어서 리포트에서 바로 제외 처리할 수 있습니다. 비워두면 이 링크만 생략됩니다.</p>
+        <span id="app-public-base-url-save-result" class="hint-inline"></span>
+      </div>
+
+      <div class="field-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="report-unregistered-toggle" /> 미등록 웹툰 중 새 에피소드 섹션 포함
+        </label>
+        <p class="field-hint">웹툰 전체목록에는 있지만 구독/제외 등록 안 된 작품 중 새 에피소드가 있는 것을 리포트에 같이 보여줍니다(네이버+카카오 공통). 이걸 켜면 아래 "카카오웹툰 관리"도 나타납니다.</p>
+      </div>
+    </div>
+
+    <div class="settings-card hidden" id="settings-card-kakao">
+      <h2>카카오웹툰 관리</h2>
+      <p class="hint">"웹툰 전체목록"/다운로드 리포트에 카카오웹툰을 같이 다룰지 정합니다. 카카오는 다운로드 기능이 없어서 "구독"이 다운로드를 뜻하지 않습니다 — 위 "웹툰 뷰어 서버 주소"가 설정돼 있어야 구독/구독해제가 가능해지고(뷰어 라이브러리에 있다는 표시), 설정 안 해두면 "목록제외"만 가능합니다.</p>
+      <div class="field-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="kakao-webtoons-enabled-toggle" /> 카카오웹툰 관리하기
+        </label>
+      </div>
+    </div>
+
     <div class="settings-card">
       <h2>작가 자동 등록</h2>
       <label class="checkbox-label"><input type="checkbox" id="author-auto-register-toggle" /> 웹툰 구독 시 그 작품 작가를 자동으로 "등록된 작가"로 추가</label>
@@ -272,92 +366,6 @@
         </div>
         <span id="register-unsubscribed-result" class="hint-inline"></span>
       </div>
-    </div>
-    <div class="settings-card">
-      <h2>실행 스케줄</h2>
-      <div class="schedule-block" data-job="discovery_job">
-        <h3>신작 스캔</h3>
-        <div class="schedule-controls"></div>
-      </div>
-      <div class="schedule-block" data-job="download_job">
-        <h3>다운로드</h3>
-        <div class="schedule-controls"></div>
-      </div>
-      <div class="schedule-block" data-job="report_job">
-        <h3>다운로드 리포트</h3>
-        <div class="schedule-controls"></div>
-      </div>
-      <div class="schedule-block" data-job="archive_job">
-        <h3>아카이빙</h3>
-        <div class="schedule-controls"></div>
-      </div>
-      <p class="hint">다운로드와 아카이빙 둘 다 "특정 시각" 모드면, 아카이빙은 다운로드보다 최소 10분 뒤로만 설정할 수 있습니다.</p>
-      <button id="btn-save-settings">저장</button>
-      <span id="settings-save-result" class="error"></span>
-    </div>
-
-    <div class="settings-card">
-      <h2>다운로드 리포트</h2>
-      <p class="hint">지정한 시각마다, 지난 리포트 이후 받은/실패한 작품을 모아 디스코드로 보냅니다 (위 웹훅 설정 그대로 사용).</p>
-
-      <div class="field-group">
-        <label for="webtoon-server-url">웹툰 뷰어 서버 주소 <span class="hint-inline">(선택)</span></label>
-        <div class="registry-add-row">
-          <input id="webtoon-server-url" type="text" placeholder="http://192.168.0.49:25600" />
-          <button id="btn-save-webtoon-server-url">저장</button>
-        </div>
-        <p class="field-hint">입력해두면 리포트에 각 작품의 "바로가기" 링크가 붙고, 구독중인 웹툰 카드에서 바로 뷰어로 이동하는 아이콘이 생깁니다.</p>
-        <span id="webtoon-server-save-result" class="hint-inline"></span>
-      </div>
-
-      <div class="field-group">
-        <label for="app-public-base-url">이 앱의 외부 접속 주소 <span class="hint-inline">(선택)</span></label>
-        <div class="registry-add-row">
-          <input id="app-public-base-url" type="text" placeholder="https://webtoon.murian.ddnsfree.com" />
-          <button id="btn-save-app-public-base-url">저장</button>
-        </div>
-        <p class="field-hint">입력해두면, 아래 "미등록 웹툰 중 새 에피소드" 항목마다 "목록 제외" 링크가 붙어서 리포트에서 바로 제외 처리할 수 있습니다. 비워두면 이 링크만 생략됩니다.</p>
-        <span id="app-public-base-url-save-result" class="hint-inline"></span>
-      </div>
-
-      <div class="field-group">
-        <label class="checkbox-label">
-          <input type="checkbox" id="report-unregistered-toggle" /> 미등록 웹툰 중 새 에피소드 섹션 포함
-        </label>
-        <p class="field-hint">웹툰 전체목록에는 있지만 구독/제외 등록 안 된 작품 중 새 에피소드가 있는 것을 리포트에 같이 보여줍니다(네이버+카카오 공통).</p>
-      </div>
-    </div>
-
-    <div class="settings-card">
-      <h2>카카오웹툰 관리</h2>
-      <p class="hint">"웹툰 전체목록"/다운로드 리포트에 카카오웹툰을 같이 다룰지 정합니다. 카카오는 다운로드 기능이 없어서 "구독"이 다운로드를 뜻하지 않습니다 — 아래 "웹툰 뷰어 서버 주소"가 설정돼 있어야 구독/구독해제가 가능해지고(뷰어 라이브러리에 있다는 표시), 설정 안 해두면 "목록제외"만 가능합니다.</p>
-      <div class="field-group">
-        <label class="checkbox-label">
-          <input type="checkbox" id="kakao-webtoons-enabled-toggle" /> 카카오웹툰 관리하기
-        </label>
-      </div>
-    </div>
-
-    <div class="settings-card">
-      <h2>디스코드 설정</h2>
-      <div class="discord-form-grid">
-        <label>웹훅 URL <span class="hint-inline">(신작 알림)</span>
-          <input id="discord-webhook-url" type="password" placeholder="https://discord.com/api/webhooks/..." />
-        </label>
-        <label>봇 토큰 <span class="hint-inline">(완결 확인, 비워두면 기존 값 유지)</span>
-          <input id="discord-bot-token" type="password" placeholder="설정됨 (변경하려면 입력)" />
-        </label>
-        <label>알림 채널 ID
-          <input id="discord-channel-id" type="text" placeholder="123456789012345678" />
-        </label>
-      </div>
-      <div class="discord-actions">
-        <button id="btn-save-discord">저장</button>
-        <button id="btn-test-webhook">웹훅 테스트</button>
-        <button id="btn-test-bot">봇 테스트</button>
-      </div>
-      <span id="discord-save-result" class="error"></span>
-      <p id="discord-bot-status" class="hint"></p>
     </div>
 
     <div class="settings-card">

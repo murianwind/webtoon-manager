@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS kakao_webtoons (
     ever_subscribed INTEGER NOT NULL DEFAULT 0,
     thumbnail_url TEXT NOT NULL DEFAULT '',
     seo_id TEXT NOT NULL DEFAULT '',
+    author_summary TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -167,6 +168,7 @@ _MIGRATIONS = [
     ("archive_targets", "source_type", "ALTER TABLE archive_targets ADD COLUMN source_type TEXT NOT NULL DEFAULT 'webtoon'"),
     ("archive_targets", "source_dest_type", "ALTER TABLE archive_targets ADD COLUMN source_dest_type TEXT NOT NULL DEFAULT 'local'"),
     ("archive_targets", "source_path", "ALTER TABLE archive_targets ADD COLUMN source_path TEXT NOT NULL DEFAULT ''"),
+    ("kakao_webtoons", "author_summary", "ALTER TABLE kakao_webtoons ADD COLUMN author_summary TEXT NOT NULL DEFAULT ''"),
     ("archive_targets", "display_name", "ALTER TABLE archive_targets ADD COLUMN display_name TEXT NOT NULL DEFAULT ''"),
     ("archive_targets", "filename_template_preset_id", "ALTER TABLE archive_targets ADD COLUMN filename_template_preset_id INTEGER"),
 ]

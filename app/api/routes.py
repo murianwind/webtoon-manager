@@ -337,12 +337,17 @@ class KakaoWebtoonOut(BaseModel):
     ever_subscribed: bool
     thumbnail_url: str = ""
     seo_id: str = ""
+    author_summary: str = ""
+    is_new: bool = False
+    is_paused: bool = False
+    has_new_episode: bool = False
 
 
 class KakaoWebtoonEntryIn(BaseModel):
     title: str
     thumbnail_url: str = ""
     seo_id: str = ""
+    author_summary: str = ""
 
 
 _KAKAO_THUMB_CACHE_TTL_DAYS = 30  # 표지 소재가 나중에 바뀌는 경우(리커버 등)를 대비해 이 기간 지나면 다시 합성
@@ -409,6 +414,13 @@ async def browse_kakao_list():
         tracked = await asyncio.to_thread(repository.get_kakao_webtoon, item["title_id"])
         if tracked is not None and tracked["status"] == repository.STATUS_EXCLUDED:
             continue
+        author_summary = ", ".join(item["author_names"])
+        if tracked is not None and author_summary and author_summary != tracked["author_summary"]:
+            # 추적 중인(구독/구독해제/미등록) 작품이면, 요일별 목록에서 받은 최신
+            # 작가 정보로 DB 기록도 슬쩍 갱신해둔다 — 이걸 안 하면 "구독해제"/
+            # "제외됨" 탭(요일별 목록을 다시 안 훑음)에서는 예전에 저장된(혹은 이
+            # 기능이 생기기 전이라 비어있는) 작가 정보만 계속 보이게 된다.
+            await asyncio.to_thread(repository.refresh_kakao_webtoon_author_summary, item["title_id"], author_summary)
         result.append(
             {
                 "title_id": item["title_id"],
@@ -416,7 +428,7 @@ async def browse_kakao_list():
                 "thumbnail_url": item["thumbnail_url"],
                 "seo_id": item["seo_id"],
                 "is_adult": item["is_adult"],
-                "author_summary": ", ".join(item["author_names"]),
+                "author_summary": author_summary,
                 "is_new": item["is_new"],
                 "is_paused": item["is_paused"],
                 "has_new_episode": item["has_update"],
@@ -438,7 +450,7 @@ async def browse_kakao_list():
                     "thumbnail_url": wt["thumbnail_url"],
                     "seo_id": wt["seo_id"],
                     "is_adult": False,
-                    "author_summary": "",
+                    "author_summary": wt["author_summary"],
                     "is_new": False,
                     "is_paused": False,
                     "has_new_episode": False,
@@ -451,7 +463,10 @@ async def browse_kakao_list():
 
 @router.get("/kakao-webtoons", response_model=list[KakaoWebtoonOut])
 async def list_kakao_webtoons(status: str | None = None):
-    """"구독해제"/"제외됨" 탭에서 네이버 목록과 합쳐서 보여줄 카카오 목록."""
+    """"구독해제"/"제외됨" 탭에서 네이버 목록과 합쳐서 보여줄 카카오 목록. 신작/UP/휴재
+    배지도 붙여준다 — 요일별 목록을 다시 훑어서 지금도 연재 중인 것만 매칭되고,
+    거기 없으면(장기 휴재 등) 배지 없이 나간다(browse_kakao_list의 DB 보완 항목과
+    같은 한계)."""
     if status and status not in (
         repository.STATUS_ACTIVE, repository.STATUS_UNSUBSCRIBED, repository.STATUS_EXCLUDED,
     ):
@@ -460,7 +475,22 @@ async def list_kakao_webtoons(status: str | None = None):
     if status == repository.STATUS_UNSUBSCRIBED:
         # webtoons와 동일한 규칙 — 구독한 적 없는 건 "구독해제" 탭에 안 보인다.
         rows = [r for r in rows if r["ever_subscribed"]]
-    return [KakaoWebtoonOut(**r) for r in rows]
+    if not rows:
+        return []
+
+    settings = get_settings()
+    try:
+        async with aiohttp.ClientSession() as session:
+            catalog_items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds)
+        badges_by_id = {
+            item["title_id"]: {"is_new": item["is_new"], "is_paused": item["is_paused"], "has_new_episode": item["has_update"]}
+            for item in catalog_items
+        }
+    except Exception as e:
+        log.warning("카카오 목록(%s) 배지 보강 실패(배지 없이 표시): %s", status, e)
+        badges_by_id = {}
+
+    return [KakaoWebtoonOut(**r, **badges_by_id.get(r["title_id"], {})) for r in rows]
 
 
 async def _get_or_404_kakao(title_id: int) -> dict:
@@ -478,9 +508,10 @@ async def subscribe_kakao_webtoon(title_id: int, payload: KakaoWebtoonEntryIn):
     if not await asyncio.to_thread(repository.kakao_webtoon_exists, title_id):
         await asyncio.to_thread(
             repository.upsert_new_kakao_webtoon, title_id, payload.title, payload.thumbnail_url,
-            repository.STATUS_ACTIVE, payload.seo_id,
+            repository.STATUS_ACTIVE, payload.seo_id, payload.author_summary,
         )
     await asyncio.to_thread(repository.set_kakao_webtoon_status, title_id, repository.STATUS_ACTIVE)
+    await asyncio.to_thread(repository.refresh_kakao_webtoon_author_summary, title_id, payload.author_summary)
     return KakaoWebtoonOut(**await asyncio.to_thread(repository.get_kakao_webtoon, title_id))
 
 
@@ -496,9 +527,10 @@ async def exclude_kakao_webtoon(title_id: int, payload: KakaoWebtoonEntryIn):
     if not await asyncio.to_thread(repository.kakao_webtoon_exists, title_id):
         await asyncio.to_thread(
             repository.upsert_new_kakao_webtoon, title_id, payload.title, payload.thumbnail_url,
-            repository.STATUS_EXCLUDED, payload.seo_id,
+            repository.STATUS_EXCLUDED, payload.seo_id, payload.author_summary,
         )
     await asyncio.to_thread(repository.set_kakao_webtoon_status, title_id, repository.STATUS_EXCLUDED)
+    await asyncio.to_thread(repository.refresh_kakao_webtoon_author_summary, title_id, payload.author_summary)
     return KakaoWebtoonOut(**await asyncio.to_thread(repository.get_kakao_webtoon, title_id))
 
 

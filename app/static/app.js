@@ -238,6 +238,7 @@ function buildWebtoonCard(w, context) {
         // "뷰어에서 계속 챙겨보고 싶다"는 표시) — 워크플로 자체는 네이버와 동일.
         if (w.status === "active") {
           actions.appendChild(makeButton("구독해제", () => webtoonListAction(w, "unsubscribe", "kakao", context)));
+          actions.appendChild(makeIconButton(READER_ICON_SVG, "뷰어에서 보기", () => openInWebtoonServer(w.title)));
         } else {
           actions.appendChild(makeButton("구독", () => kakaoSubscribeWithHint(w, context)));
           actions.appendChild(makeButton("목록제외", () => webtoonListAction(w, "exclude", "kakao", context)));
@@ -286,6 +287,7 @@ const NAVER_LIST_PREFS_KEY = "naverListPrefs";
 function saveNaverListPrefs() {
   const prefs = {
     filterStatus: document.getElementById("naver-list-filter-status").value,
+    badgeFilter: document.getElementById("naver-list-badge-filter").value,
     sort: document.getElementById("naver-list-sort").value,
   };
   localStorage.setItem(NAVER_LIST_PREFS_KEY, JSON.stringify(prefs));
@@ -295,6 +297,7 @@ function restoreNaverListPrefs() {
   try {
     const prefs = JSON.parse(localStorage.getItem(NAVER_LIST_PREFS_KEY) || "{}");
     if (prefs.filterStatus) document.getElementById("naver-list-filter-status").value = prefs.filterStatus;
+    if (prefs.badgeFilter) document.getElementById("naver-list-badge-filter").value = prefs.badgeFilter;
     if (prefs.sort) document.getElementById("naver-list-sort").value = prefs.sort;
   } catch (e) {
     // 저장된 값이 이상하면 그냥 기본값 사용
@@ -345,6 +348,7 @@ function renderNaverList() {
   const emptyMsg = document.getElementById("naver-list-empty");
   const query = document.getElementById("naver-list-search").value.trim().toLowerCase();
   const filterStatus = document.getElementById("naver-list-filter-status").value;
+  const badgeFilter = document.getElementById("naver-list-badge-filter").value;
   const sortBy = document.getElementById("naver-list-sort").value;
 
   // 구독해제/목록제외한 작품은 원래 여기서 안 보이고 각자의 탭에서만 보이는 게
@@ -357,6 +361,9 @@ function renderNaverList() {
 
   if (filterStatus === "active") rows = rows.filter((w) => w.status === "active");
   if (filterStatus === "not-active") rows = rows.filter((w) => w.status !== "active");
+  if (badgeFilter === "new") rows = rows.filter((w) => w.is_new);
+  if (badgeFilter === "paused") rows = rows.filter((w) => w.is_paused);
+  if (badgeFilter === "up") rows = rows.filter((w) => w.has_new_episode);
 
   if (query) {
     rows = rows.filter(
@@ -441,10 +448,10 @@ function _webtoonListActionUrl(platform, titleId, action) {
 }
 
 async function webtoonListAction(webtoon, action, platform, context, skipRender) {
-  const { title_id: titleId, title, thumbnail_url: thumbnailUrl, seo_id: seoId } = webtoon;
+  const { title_id: titleId, title, thumbnail_url: thumbnailUrl, seo_id: seoId, author_summary: authorSummary } = webtoon;
   const needsBody = action === "subscribe" || action === "exclude";
   const body = platform === "kakao"
-    ? { title, thumbnail_url: thumbnailUrl || "", seo_id: seoId || "" }
+    ? { title, thumbnail_url: thumbnailUrl || "", seo_id: seoId || "", author_summary: authorSummary || "" }
     : { title, thumbnail_url: thumbnailUrl || "" };
   try {
     const updated = await apiCall(_webtoonListActionUrl(platform, titleId, action), {
@@ -498,6 +505,10 @@ document.getElementById("naver-list-filter-status").addEventListener("change", (
   saveNaverListPrefs();
   renderNaverList();
 });
+document.getElementById("naver-list-badge-filter").addEventListener("change", () => {
+  saveNaverListPrefs();
+  renderNaverList();
+});
 document.getElementById("naver-list-sort").addEventListener("change", () => {
   saveNaverListPrefs();
   renderNaverList();
@@ -537,29 +548,10 @@ async function loadSubscriptionTab(status) {
 function populateFilterOptions(status) {
   const rows = subscriptionCache[status] || [];
 
-  // 작가 이름은 각 웹툰 자체에 저장된 writer_ids/writer_names에서 직접 뽑는다
-  // (별도 레지스트리 조회 없이, 지금 보이는 웹툰들의 실제 데이터만으로 채운다).
-  const authorNames = new Map(); // id -> name
   const tagNames = new Set();
   for (const w of rows) {
-    const ids = w.writer_ids || [];
-    const names = w.writer_names || [];
-    ids.forEach((id, i) => {
-      if (!authorNames.has(id)) authorNames.set(id, names[i] || id);
-    });
     (w.tags || []).forEach((t) => tagNames.add(t));
   }
-
-  const authorSelect = document.getElementById(`${status}-author-filter`);
-  const currentAuthor = authorSelect.value;
-  authorSelect.innerHTML = '<option value="">작가 전체</option>';
-  for (const [id, name] of [...authorNames.entries()].sort((a, b) => a[1].localeCompare(b[1]))) {
-    const opt = document.createElement("option");
-    opt.value = id;
-    opt.textContent = name;
-    authorSelect.appendChild(opt);
-  }
-  authorSelect.value = currentAuthor;
 
   const tagSelect = document.getElementById(`${status}-tag-filter`);
   const currentTag = tagSelect.value;
@@ -577,20 +569,22 @@ function renderSubscriptionTab(status) {
   const listEl = document.getElementById(`${status}-list`);
   const emptyEl = document.getElementById(`${status}-empty`);
   const query = document.getElementById(`${status}-search`).value.trim().toLowerCase();
-  const authorFilter = document.getElementById(`${status}-author-filter`).value;
   const tagFilter = document.getElementById(`${status}-tag-filter`).value;
   const badgeFilter = document.getElementById(`${status}-badge-filter`).value;
 
   let rows = subscriptionCache[status] || [];
   if (query) {
     rows = rows.filter(
-      (w) => w.title.toLowerCase().includes(query) || (w.writer_names || []).some((n) => n.toLowerCase().includes(query))
+      (w) =>
+        w.title.toLowerCase().includes(query) ||
+        (w.writer_names || []).some((n) => n.toLowerCase().includes(query)) ||
+        (w.author_summary || "").toLowerCase().includes(query)
     );
   }
-  if (authorFilter) rows = rows.filter((w) => (w.writer_ids || []).includes(authorFilter));
   if (tagFilter) rows = rows.filter((w) => (w.tags || []).includes(tagFilter));
   if (badgeFilter === "new") rows = rows.filter((w) => w.is_new);
   if (badgeFilter === "paused") rows = rows.filter((w) => w.is_paused);
+  if (badgeFilter === "up") rows = rows.filter((w) => w.has_new_episode);
 
   rows = [...rows].sort((a, b) => a.title.localeCompare(b.title));
 
@@ -603,7 +597,6 @@ function renderSubscriptionTab(status) {
 
 for (const status of ["unsubscribed", "excluded"]) {
   document.getElementById(`${status}-search`).addEventListener("input", () => renderSubscriptionTab(status));
-  document.getElementById(`${status}-author-filter`).addEventListener("change", () => renderSubscriptionTab(status));
   document.getElementById(`${status}-tag-filter`).addEventListener("change", () => renderSubscriptionTab(status));
   document.getElementById(`${status}-badge-filter`).addEventListener("change", () => renderSubscriptionTab(status));
 }
@@ -1315,9 +1308,26 @@ async function loadDiscordSettings() {
     tokenInput.dataset.masked = s.bot_token_set ? "true" : "false";
 
     document.getElementById("discord-bot-status").textContent = s.bot_ready ? "🟢 봇 연결됨" : "⚪ 봇 연결 안 됨";
+    updateSettingsCardVisibility();
   } catch (e) {
     document.getElementById("discord-save-result").textContent = e.message;
   }
+}
+
+// "디스코드 설정"(웹훅) -> "실행 스케줄"/"다운로드 리포트" -> (그 안의 "미등록 웹툰
+// 중 새 에피소드" 토글) -> "카카오웹툰 관리" 순으로 하나씩 조건이 채워져야 다음
+// 카드가 나타난다 — 신작 알림/리포트를 보낼 데가 없으면 스케줄이나 리포트 세부
+// 설정 자체가 의미 없고, 카카오는 그 리포트의 한 항목(미등록 새 에피소드)에
+// 얹혀서 나가는 기능이라 그게 꺼져 있으면 역시 의미가 없어서 이 순서로 숨겨둔다.
+// 기존 저장된 설정 값 자체는 전혀 안 건드리고 화면에 보일지만 정할 뿐이라, 다시
+// 조건을 채우면 이미 저장해뒀던 값 그대로 나타난다.
+function updateSettingsCardVisibility() {
+  const webhookConfigured = document.getElementById("discord-webhook-url").dataset.masked === "true";
+  document.getElementById("settings-card-schedule").classList.toggle("hidden", !webhookConfigured);
+  document.getElementById("settings-card-report").classList.toggle("hidden", !webhookConfigured);
+
+  const unregisteredEnabled = document.getElementById("report-unregistered-toggle").checked;
+  document.getElementById("settings-card-kakao").classList.toggle("hidden", !(webhookConfigured && unregisteredEnabled));
 }
 
 document.getElementById("discord-webhook-url").addEventListener("focus", (e) => {
@@ -1356,6 +1366,13 @@ document.getElementById("btn-save-discord").addEventListener("click", async () =
     });
     resultEl.style.color = "";
     resultEl.textContent = "저장했습니다. 봇을 재연결하는 중입니다 (몇 초 걸릴 수 있음).";
+    // 빈 문자열로 저장해도 기존 웹훅은 안 지워지므로(discord_config.set_webhook_url
+    // 참고), "이미 마스킹돼 있었다" OR "방금 뭔가 입력했다" 둘 중 하나면 바로 설정된
+    // 것으로 보고 3초씩 기다리지 않고 즉시 다음 카드들을 보여준다.
+    if (webhookInput.dataset.masked === "true" || webhookToSend !== "") {
+      webhookInput.dataset.masked = "true";
+      updateSettingsCardVisibility();
+    }
     setTimeout(loadDiscordSettings, 3000);
   } catch (e) {
     resultEl.textContent = e.message;
@@ -1716,6 +1733,7 @@ async function loadUnregisteredNewEpisodesToggle() {
   try {
     const data = await apiCall("/api/settings/report-unregistered-new-episodes");
     document.getElementById("report-unregistered-toggle").checked = data.enabled;
+    updateSettingsCardVisibility(); // loadDiscordSettings보다 늦게 끝날 수 있어서, 여기서도 다시 반영
   } catch (e) {
     // 조용히 무시 — 이 필드 하나 때문에 설정 탭 전체 로드가 막히면 안 됨
   }
@@ -1727,6 +1745,7 @@ document.getElementById("report-unregistered-toggle").addEventListener("change",
       method: "POST",
       body: JSON.stringify({ enabled: e.target.checked }),
     });
+    updateSettingsCardVisibility(); // 켜면 즉시 "카카오웹툰 관리" 카드가 나타나게(꺼도 즉시 숨겨지게)
   } catch (err) {
     alert(err.message);
     e.target.checked = !e.target.checked; // 저장 실패하면 화면도 원래대로 되돌림

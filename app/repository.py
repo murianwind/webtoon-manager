@@ -390,7 +390,7 @@ def _row_to_kakao_webtoon(row) -> dict:
     return {
         "title_id": row["title_id"], "title": row["title"], "status": row["status"],
         "ever_subscribed": bool(row["ever_subscribed"]), "thumbnail_url": row["thumbnail_url"],
-        "seo_id": row["seo_id"],
+        "seo_id": row["seo_id"], "author_summary": row["author_summary"],
     }
 
 
@@ -415,7 +415,8 @@ def get_kakao_excluded_title_ids() -> set[int]:
 
 
 def upsert_new_kakao_webtoon(
-    title_id: int, title: str, thumbnail_url: str = "", status: str = STATUS_ACTIVE, seo_id: str = ""
+    title_id: int, title: str, thumbnail_url: str = "", status: str = STATUS_ACTIVE,
+    seo_id: str = "", author_summary: str = "",
 ) -> None:
     """이미 있으면 아무것도 안 한다(webtoons.upsert_new와 같은 원자적 INSERT OR
     IGNORE 패턴 — 동시에 같은 작품을 두 번 만들려는 레이스를 막는다). status가
@@ -423,9 +424,25 @@ def upsert_new_kakao_webtoon(
     now = _now()
     with write_transaction() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO kakao_webtoons (title_id, title, status, ever_subscribed, thumbnail_url, seo_id, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (title_id, title, status, int(status == STATUS_ACTIVE), thumbnail_url, seo_id, now, now),
+            "INSERT OR IGNORE INTO kakao_webtoons "
+            "(title_id, title, status, ever_subscribed, thumbnail_url, seo_id, author_summary, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (title_id, title, status, int(status == STATUS_ACTIVE), thumbnail_url, seo_id, author_summary, now, now),
+        )
+
+
+def refresh_kakao_webtoon_author_summary(title_id: int, author_summary: str) -> None:
+    """"웹툰 전체목록"(카카오 원본에서 매번 작가 정보를 새로 받음)에서 구독/제외를
+    누를 때, 그 시점의 최신 작가 정보로 갱신해둔다 — 이 정보를 안 저장해두면
+    "구독해제"/"제외됨" 탭에서는(요일별 목록을 다시 안 훑으므로) 작가가 영영 안
+    보인다. author_summary가 비어있으면 아무것도 안 한다(호출부가 최신 정보를
+    안 갖고 있을 때, 이미 저장된 값을 빈 값으로 덮어써서 지워버리면 안 되므로)."""
+    if not author_summary:
+        return
+    with write_transaction() as conn:
+        conn.execute(
+            "UPDATE kakao_webtoons SET author_summary = ?, updated_at = ? WHERE title_id = ?",
+            (author_summary, _now(), title_id),
         )
 
 
@@ -929,7 +946,7 @@ _WATCHED_AUTHOR_COLUMNS = ("author_id", "author_name", "enabled", "created_at", 
 _WATCHED_TAG_COLUMNS = ("tag_id", "tag_name", "enabled", "created_at", "updated_at")
 _KAKAO_SEEN_TITLE_COLUMNS = ("author_name", "title_id", "title_name", "seen_at")
 _KAKAO_WEBTOON_COLUMNS = (
-    "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "seo_id", "created_at", "updated_at",
+    "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "seo_id", "author_summary", "created_at", "updated_at",
 )
 _FILENAME_TEMPLATE_PRESET_COLUMNS = ("id", "name", "template", "created_at", "updated_at")
 _ARCHIVE_TARGET_COLUMNS = (
