@@ -50,7 +50,6 @@ def _extract_author_names(authors: list[dict]) -> list[str]:
 _WEEKDAY_PLACEMENTS = _CATALOG_PLACEMENTS[:7]
 
 KAKAO_EPISODE_LIST_URL_TMPL = "https://gateway-kw.kakao.com/episode/v2/views/content-home/contents/{content_id}/episodes"
-KAKAO_CONTENT_URL_TMPL = "https://webtoon.kakao.com/content/{seo_id}/{content_id}"
 KAKAO_VIEWER_URL_TMPL = "https://webtoon.kakao.com/viewer/{episode_seo_id}/{episode_id}"
 
 _HEADERS = {

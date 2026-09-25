@@ -933,6 +933,7 @@ def export_all() -> dict:
             "archive_targets": [dict(r) for r in conn.execute("SELECT * FROM archive_targets").fetchall()],
             "archive_history": [dict(r) for r in conn.execute("SELECT * FROM archive_history").fetchall()],
             "episode_history": [dict(r) for r in conn.execute("SELECT * FROM episode_history").fetchall()],
+            "archive_pending_finish": [dict(r) for r in conn.execute("SELECT * FROM archive_pending_finish").fetchall()],
         }
 
 
@@ -940,9 +941,9 @@ _WEBTOON_COLUMNS = (
     "title_id", "title", "status", "is_adult", "writer_ids", "added_source",
     "last_downloaded_no", "is_finished", "finish_ack", "thumbnail_url",
     "finish_notified", "genres", "tags", "latest_episode_no", "is_paused",
-    "writer_names", "ever_subscribed", "created_at", "updated_at",
+    "writer_names", "ever_subscribed", "is_new", "has_update", "created_at", "updated_at",
 )
-_WATCHED_AUTHOR_COLUMNS = ("author_id", "author_name", "enabled", "created_at", "updated_at")
+_WATCHED_AUTHOR_COLUMNS = ("author_id", "author_name", "enabled", "platform", "created_at", "updated_at")
 _WATCHED_TAG_COLUMNS = ("tag_id", "tag_name", "enabled", "created_at", "updated_at")
 _KAKAO_SEEN_TITLE_COLUMNS = ("author_name", "title_id", "title_name", "seen_at")
 _KAKAO_WEBTOON_COLUMNS = (
@@ -954,6 +955,7 @@ _ARCHIVE_TARGET_COLUMNS = (
     "source_path", "display_name", "filename_template_preset_id", "created_at", "updated_at",
 )
 _ARCHIVE_HISTORY_COLUMNS = ("id", "title_id", "title_name", "file_name", "archived_at", "trigger_type")
+_ARCHIVE_PENDING_FINISH_COLUMNS = ("title_id", "marked_at")
 _EPISODE_HISTORY_COLUMNS = (
     "id", "title_id", "title_name", "episode_no", "subtitle", "status", "error_msg", "downloaded_at",
 )
@@ -983,7 +985,7 @@ def _insert_validated_rows(conn, table: str, allowed_columns: tuple[str, ...], r
 
 
 def restore_all(data: dict) -> None:
-    """백업 데이터로 10개 테이블을 완전히 교체한다 (기존 내용은 전부 지워짐)."""
+    """백업 데이터로 11개 테이블을 완전히 교체한다 (기존 내용은 전부 지워짐)."""
     if not isinstance(data, dict):
         raise ValueError("백업 데이터 형식이 올바르지 않습니다 (JSON 객체가 아님).")
 
@@ -991,7 +993,7 @@ def restore_all(data: dict) -> None:
         for table in (
             "webtoons", "settings", "watched_authors", "watched_tags",
             "kakao_seen_titles", "kakao_webtoons", "filename_template_presets",
-            "archive_targets", "archive_history", "episode_history",
+            "archive_targets", "archive_history", "episode_history", "archive_pending_finish",
         ):
             conn.execute(f"DELETE FROM {table}")
 
@@ -1012,3 +1014,6 @@ def restore_all(data: dict) -> None:
         _insert_validated_rows(conn, "archive_targets", _ARCHIVE_TARGET_COLUMNS, data.get("archive_targets") or [])
         _insert_validated_rows(conn, "archive_history", _ARCHIVE_HISTORY_COLUMNS, data.get("archive_history") or [])
         _insert_validated_rows(conn, "episode_history", _EPISODE_HISTORY_COLUMNS, data.get("episode_history") or [])
+        _insert_validated_rows(
+            conn, "archive_pending_finish", _ARCHIVE_PENDING_FINISH_COLUMNS, data.get("archive_pending_finish") or [],
+        )
