@@ -238,7 +238,9 @@ function buildWebtoonCard(w, context) {
         // "뷰어에서 계속 챙겨보고 싶다"는 표시) — 워크플로 자체는 네이버와 동일.
         if (w.status === "active") {
           actions.appendChild(makeButton("구독해제", () => webtoonListAction(w, "unsubscribe", "kakao", context)));
-          actions.appendChild(makeIconButton(READER_ICON_SVG, "뷰어에서 보기", () => openInWebtoonServer(w.title)));
+          const viewerBtn = makeIconButton(READER_ICON_SVG, "뷰어에서 보기", () => openInWebtoonServer(w.title));
+          viewerBtn.dataset.viewerCheckTitle = w.title; // 렌더링 뒤에 실제로 뷰어에 있는지 확인해서 없으면 지운다
+          actions.appendChild(viewerBtn);
         } else {
           actions.appendChild(makeButton("구독", () => kakaoSubscribeWithHint(w, context)));
           actions.appendChild(makeButton("목록제외", () => webtoonListAction(w, "exclude", "kakao", context)));
@@ -250,7 +252,9 @@ function buildWebtoonCard(w, context) {
     } else if (w.status === "active") {
       actions.appendChild(makeButton("구독해제", () => webtoonListAction(w, "unsubscribe", "naver", context)));
       if (webtoonServerConfigured) {
-        actions.appendChild(makeIconButton(READER_ICON_SVG, "뷰어에서 보기", () => openInWebtoonServer(w.title)));
+        const viewerBtn = makeIconButton(READER_ICON_SVG, "뷰어에서 보기", () => openInWebtoonServer(w.title));
+        viewerBtn.dataset.viewerCheckTitle = w.title;
+        actions.appendChild(viewerBtn);
       }
     } else {
       actions.appendChild(makeButton("구독", () => webtoonListAction(w, "subscribe", "naver", context)));
@@ -387,9 +391,32 @@ function renderNaverList() {
   }
   updateNaverListBulkBar(); // 다시 그리면 체크박스가 전부 새로 생기므로(선택 해제됨) 바도 초기화
   naverListBulkSelectStartScrollY = null; // 새로 그려졌으니 "선택을 시작한 위치"도 다시 잡아야 함
+  pruneMissingViewerIcons();
 }
 
 let naverListBulkSelectStartScrollY = null;
+
+async function pruneMissingViewerIcons() {
+  // "뷰어에서 보기" 아이콘은 구독 중이면 무조건 붙는데, 실제로 뷰어 라이브러리에
+  // 없는 작품도 있다(특히 카카오는 구독=다운로드가 아니라서 더 흔함) — 렌더링
+  // 자체를 그 확인 때문에 늦추지 않고, 그려진 뒤 백그라운드로 하나씩 확인해서
+  // 없는 것만 조용히 지운다. 뷰어가 로컬망에 있다는 전제라 확인 자체는 빠르다.
+  const buttons = [...document.querySelectorAll("[data-viewer-check-title]")];
+  const uniqueTitles = [...new Set(buttons.map((b) => b.dataset.viewerCheckTitle))];
+  await Promise.all(
+    uniqueTitles.map(async (title) => {
+      try {
+        const data = await apiCall(`/api/webtoon-server/lookup?title=${encodeURIComponent(title)}`);
+        if (!data.url) {
+          document.querySelectorAll(`[data-viewer-check-title="${CSS.escape(title)}"]`).forEach((b) => b.remove());
+        }
+      } catch (e) {
+        // 조회 자체가 실패하면(네트워크 문제 등) 아이콘은 그냥 둔다 — 눌렀을 때
+        // 다시 시도되고, 여기서 실패했다고 성급하게 지우면 안 된다.
+      }
+    })
+  );
+}
 
 function updateNaverListBulkBar() {
   const count = document.querySelectorAll("#naver-list-grid .webtoon-card-select:checked").length;
