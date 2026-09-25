@@ -45,7 +45,7 @@ from app import kakao_api
 from app import webtoon_server_client
 from app import archiver
 from app import kakao_cover
-from app.file_utils import remove_forbidden_str
+from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
 from app import rclone_client
 from app import rclone_updater
 from app.config import get_settings
@@ -1090,21 +1090,22 @@ async def set_app_public_base_url(payload: AppPublicBaseUrlIn):
 
 
 @router.get("/webtoon-server/lookup")
-async def lookup_webtoon_server_reader_url(title: str):
+async def lookup_webtoon_server_reader_url(title: str, platform: str = "naver"):
     """구독중인 웹툰 카드의 '뷰어에서 보기' 아이콘이 누르는 순간(또는 배경에서 존재
     여부를 확인할 때) 호출한다 — 매번 최신 상태를 물어보는 게 목적이라, 캐시하지
     않고 그때그때 webtoon-server에 직접 조회한다. 뷰어는 실제 디스크 폴더명(':' 등
-    금지문자가 전각으로 치환된 이름, 예: "제목 : 부제" → "제목 ： 부제") 기준으로
-    매칭하므로, 원본 제목이 아니라 그 치환을 거친 이름으로 조회해야 한다(다운로드
-    리포트의 "받은 작품" 섹션에서 이미 확인된 것과 같은 문제 — remove_forbidden_str 참고)."""
+    금지문자가 치환된 이름) 기준으로 매칭하는데, 그 치환 규칙이 플랫폼마다 다르다 —
+    네이버는 이 앱이 직접 받아서 전각 콜론(예: "제목 : 부제" → "제목 ： 부제")으로,
+    카카오는 사용자가 쓰는 별도 도구가 받아서 밑줄(예: "제목 : 부제" → "제목_ 부제")로
+    치환한다(둘 다 실제로 확인됨). 원본 제목이 아니라 그 치환을 거친 이름으로
+    조회해야 한다 — remove_forbidden_str/remove_forbidden_str_kakao 참고."""
     server_url = await asyncio.to_thread(repository.get_setting, "webtoon_server_url")
     if not server_url:
         return {"url": None}
     settings = get_settings()
+    safe_title = remove_forbidden_str_kakao(title) if platform == "kakao" else remove_forbidden_str(title)
     async with aiohttp.ClientSession() as session:
-        url = await webtoon_server_client.fetch_reader_url(
-            session, server_url, remove_forbidden_str(title), settings.request_timeout_seconds
-        )
+        url = await webtoon_server_client.fetch_reader_url(session, server_url, safe_title, settings.request_timeout_seconds)
     return {"url": url}
 
 

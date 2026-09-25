@@ -100,9 +100,11 @@ apiCall("/api/settings/kakao-webtoons-enabled")
   .then((data) => { kakaoWebtoonsEnabled = data.enabled; })
   .catch(() => {});
 
-async function openInWebtoonServer(title) {
+async function openInWebtoonServer(title, platform) {
   try {
-    const data = await apiCall(`/api/webtoon-server/lookup?title=${encodeURIComponent(title)}`);
+    const data = await apiCall(
+      `/api/webtoon-server/lookup?title=${encodeURIComponent(title)}&platform=${encodeURIComponent(platform || "naver")}`
+    );
     if (data.url) {
       window.open(data.url, "_blank", "noopener");
     } else {
@@ -238,8 +240,9 @@ function buildWebtoonCard(w, context) {
         // "뷰어에서 계속 챙겨보고 싶다"는 표시) — 워크플로 자체는 네이버와 동일.
         if (w.status === "active") {
           actions.appendChild(makeButton("구독해제", () => webtoonListAction(w, "unsubscribe", "kakao", context)));
-          const viewerBtn = makeIconButton(READER_ICON_SVG, "뷰어에서 보기", () => openInWebtoonServer(w.title));
+          const viewerBtn = makeIconButton(READER_ICON_SVG, "뷰어에서 보기", () => openInWebtoonServer(w.title, "kakao"));
           viewerBtn.dataset.viewerCheckTitle = w.title; // 렌더링 뒤에 실제로 뷰어에 있는지 확인해서 없으면 지운다
+          viewerBtn.dataset.viewerCheckPlatform = "kakao";
           actions.appendChild(viewerBtn);
         } else {
           actions.appendChild(makeButton("구독", () => kakaoSubscribeWithHint(w, context)));
@@ -252,8 +255,9 @@ function buildWebtoonCard(w, context) {
     } else if (w.status === "active") {
       actions.appendChild(makeButton("구독해제", () => webtoonListAction(w, "unsubscribe", "naver", context)));
       if (webtoonServerConfigured) {
-        const viewerBtn = makeIconButton(READER_ICON_SVG, "뷰어에서 보기", () => openInWebtoonServer(w.title));
+        const viewerBtn = makeIconButton(READER_ICON_SVG, "뷰어에서 보기", () => openInWebtoonServer(w.title, "naver"));
         viewerBtn.dataset.viewerCheckTitle = w.title;
+        viewerBtn.dataset.viewerCheckPlatform = "naver";
         actions.appendChild(viewerBtn);
       }
     } else {
@@ -401,14 +405,28 @@ async function pruneMissingViewerIcons() {
   // 없는 작품도 있다(특히 카카오는 구독=다운로드가 아니라서 더 흔함) — 렌더링
   // 자체를 그 확인 때문에 늦추지 않고, 그려진 뒤 백그라운드로 하나씩 확인해서
   // 없는 것만 조용히 지운다. 뷰어가 로컬망에 있다는 전제라 확인 자체는 빠르다.
+  // 네이버/카카오는 폴더명 만드는 도구가 서로 달라서 특수문자 치환 규칙도 다르므로
+  // (예: 콜론 -> 네이버는 전각 콜론, 카카오는 밑줄), 같은 제목이라도 플랫폼별로
+  // 따로 조회해야 한다 — (제목, 플랫폼) 조합 단위로 묶는다.
   const buttons = [...document.querySelectorAll("[data-viewer-check-title]")];
-  const uniqueTitles = [...new Set(buttons.map((b) => b.dataset.viewerCheckTitle))];
+  const seen = new Map(); // "title\u0000platform" -> {title, platform}
+  for (const b of buttons) {
+    const platform = b.dataset.viewerCheckPlatform || "naver";
+    const key = `${b.dataset.viewerCheckTitle}\u0000${platform}`;
+    if (!seen.has(key)) seen.set(key, { title: b.dataset.viewerCheckTitle, platform });
+  }
   await Promise.all(
-    uniqueTitles.map(async (title) => {
+    [...seen.values()].map(async ({ title, platform }) => {
       try {
-        const data = await apiCall(`/api/webtoon-server/lookup?title=${encodeURIComponent(title)}`);
+        const data = await apiCall(
+          `/api/webtoon-server/lookup?title=${encodeURIComponent(title)}&platform=${encodeURIComponent(platform)}`
+        );
         if (!data.url) {
-          document.querySelectorAll(`[data-viewer-check-title="${CSS.escape(title)}"]`).forEach((b) => b.remove());
+          document
+            .querySelectorAll(
+              `[data-viewer-check-title="${CSS.escape(title)}"][data-viewer-check-platform="${CSS.escape(platform)}"]`
+            )
+            .forEach((b) => b.remove());
         }
       } catch (e) {
         // 조회 자체가 실패하면(네트워크 문제 등) 아이콘은 그냥 둔다 — 눌렀을 때
