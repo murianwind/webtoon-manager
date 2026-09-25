@@ -21,6 +21,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from app import repository
+
 try:
     from PIL import Image, ImageDraw
 
@@ -223,6 +225,42 @@ def compose_cover_bytes_for_content(content_id: str, timeout: int = 15) -> bytes
     ch = _fetch_asset_bytes(session, detail["character"], timeout) if detail["character"] else None
     lg = _fetch_asset_bytes(session, detail["title_logo"], timeout) if detail["title_logo"] else None
     return compose_kakao_cover(bg, ch, lg, detail["background_color"])
+
+
+def thumbnail_cache_dir(database_path: str) -> Path:
+    # DB 파일이 있는 곳(영구 볼륨)과 같은 위치에 캐시 폴더를 둔다 — 컨테이너를
+    # 재시작해도 매번 다시 합성하지 않도록. routes.py(서빙)와 scheduler.py(자동
+    # 정리) 양쪽에서 같은 경로를 써야 해서, 이 모듈에 하나로 정의해둔다(양쪽 다
+    # kakao_cover를 이미 임포트하고 있어서 순환 참조 걱정이 없다).
+    return Path(database_path).parent / "kakao_thumb_cache"
+
+
+def thumbnail_cache_keep_ids(catalog_items: list[dict]) -> set[int]:
+    """지금 요일별 목록에 있는 것 + 구독/구독해제/미등록 이력이 있는 것 — 이 둘을
+    합친 게 "썸네일 캐시를 계속 남겨둘 만한" title_id 집합이다. 다운로드 리포트
+    작업(이미 요일별 목록을 조회한 뒤)과 "수동 실행"의 정리 버튼이 이 함수를 공유한다."""
+    catalog_ids = {item["title_id"] for item in catalog_items}
+    tracked_ids: set[int] = set()
+    for status in (repository.STATUS_ACTIVE, repository.STATUS_UNSUBSCRIBED, repository.STATUS_UNREGISTERED):
+        tracked_ids |= {wt["title_id"] for wt in repository.list_kakao_webtoons_by_status(status)}
+    return catalog_ids | tracked_ids
+
+
+def cleanup_thumbnail_cache_dir(cache_dir: Path, keep_ids: set[int]) -> int:
+    """cache_dir 안의 {title_id}.jpg 파일 중 keep_ids에 없는 것을 지우고, 지운
+    개수를 반환한다."""
+    if not cache_dir.is_dir():
+        return 0
+    deleted = 0
+    for path in cache_dir.glob("*.jpg"):
+        try:
+            title_id = int(path.stem)
+        except ValueError:
+            continue
+        if title_id not in keep_ids:
+            path.unlink(missing_ok=True)
+            deleted += 1
+    return deleted
 
 
 def refresh_kakao_cover_if_applicable(webtoon_dir: Path, *, timeout: int = 15) -> bool:

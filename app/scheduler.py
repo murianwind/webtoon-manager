@@ -27,7 +27,7 @@ from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app import archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, kakao_api, naver_api, repository, schedule_config, tracker, webtoon_server_client
+from app import archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, kakao_api, kakao_cover, naver_api, repository, schedule_config, tracker, webtoon_server_client
 from app import rclone_updater
 from app.config import Settings, get_settings
 from app.constants import NAVER_DETAIL_URL_TEMPLATES
@@ -375,6 +375,19 @@ async def _collect_kakao_new_episodes(
     except Exception as e:
         log.error("카카오 신규 에피소드 확인 중 목록 조회 실패(무시하고 계속): %s", e)
         return []
+
+    # 이미 요일별 목록을 조회한 김에, 더 이상 필요 없는 썸네일 캐시(요일별 목록에도
+    # 없고 구독/구독해제/미등록 이력도 없는 것)를 자동으로 같이 정리한다 — 정리만
+    # 하려고 카카오 서버에 또 목록을 물어보는 별도 요청을 안 만들려는 것. 실패해도
+    # (디스크 오류 등) 신규 에피소드 확인 자체는 계속 진행한다.
+    try:
+        cache_dir = kakao_cover.thumbnail_cache_dir(settings.database_path)
+        keep_ids = await asyncio.to_thread(kakao_cover.thumbnail_cache_keep_ids, items)
+        deleted = await asyncio.to_thread(kakao_cover.cleanup_thumbnail_cache_dir, cache_dir, keep_ids)
+        if deleted:
+            log.info("카카오 썸네일 캐시 %d개 정리함", deleted)
+    except Exception as e:
+        log.warning("카카오 썸네일 캐시 자동 정리 실패(무시하고 계속): %s", e)
 
     excluded_ids = repository.get_kakao_excluded_title_ids()
     candidates = [item for item in items if item["has_update"] and item["title_id"] not in excluded_ids]

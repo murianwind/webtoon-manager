@@ -197,48 +197,41 @@ async def fetch_full_catalog(session: aiohttp.ClientSession, timeout_seconds: in
     요일 7개 + 신작 + 완결 placement를 전부 불러서 합친다 — 네이버의 "요일별 전체목록"에
     대응하는, 카카오웹툰의 사실상 전체 카탈로그. 한 placement가 실패해도(네트워크 오류 등)
     나머지는 계속 가져온다 — 완결 목록이 2000개가 넘어서 그것 하나만 잠깐 느려도 다른
-    요일 정보까지 전부 날아가면 안 되기 때문.
+    요일 정보까지 전부 날아가면 안 되기 때문. fetch_weekday_catalog와 같은 저수준
+    조회 함수(_fetch_placement_cards)를 그대로 재사용한다.
     """
     all_items: dict[int, dict] = {}
     for placement in _CATALOG_PLACEMENTS:
-        try:
-            async with session.get(
-                KAKAO_TIMETABLE_URL,
-                params={"placement": placement},
-                headers=_HEADERS,
-                timeout=aiohttp.ClientTimeout(total=timeout_seconds),
-            ) as response:
-                if response.status != 200:
-                    log.warning("카카오 카탈로그 조회 실패 (placement=%s): HTTP %s", placement, response.status)
-                    continue
-                data = await response.json()
-        except Exception as e:
-            log.warning("카카오 카탈로그 조회 예외 (placement=%s): %s", placement, e)
-            continue
-
-        groups = data.get("data") or []
-        for group in groups:
-            for card_group in group.get("cardGroups") or []:
-                for card in card_group.get("cards") or []:
-                    content = card.get("content") or {}
-                    title_id = content.get("id")
-                    if title_id is None:
-                        continue
-                    all_items[title_id] = {
-                        "title_id": title_id,
-                        "title_name": content.get("title", ""),
-                        "is_adult": bool(content.get("adult")),
-                        "author_names": [
-                            a.get("name") for a in content.get("authors") or [] if a.get("type") in _AUTHOR_LIKE_TYPES and a.get("name")
-                        ],
-                    }
+        for card in await _fetch_placement_cards(session, placement, timeout_seconds):
+            content = card.get("content") or {}
+            title_id = content.get("id")
+            if title_id is None:
+                continue
+            authors = content.get("authors") or []
+            all_items[title_id] = {
+                "title_id": title_id,
+                "title_name": content.get("title", ""),
+                "is_adult": bool(content.get("adult")),
+                # 화면에 보여줄 때는(웹툰 전체목록 등) ILLUSTRATOR/ORIGINAL_STORY도
+                # 저자로 쳐야 한다(원작 기반 작품은 AUTHOR 타입이 아예 없는 경우가
+                # 실제로 있음 — fetch_weekday_catalog 참고). 다만 "작가/태그 관리"의
+                # 관심 작가 후보 추천(extract_candidate_author_names)은 원래부터
+                # AUTHOR 타입만 쓰려던 의도라서, 타입 정보를 그대로 authors에 남겨두고
+                # 그 함수가 스스로 좁혀서 쓰게 한다(용도가 다르면 같은 원본에서 각자
+                # 필요한 만큼만 걸러 쓰는 게 맞다).
+                "authors": authors,
+                "author_names": [a.get("name") for a in authors if a.get("type") in _AUTHOR_LIKE_TYPES and a.get("name")],
+            }
     return list(all_items.values())
 
 
 def extract_candidate_author_names(items: list[dict]) -> list[str]:
-    """전체 카탈로그에서 AUTHOR 타입 이름만 뽑아 중복 제거한다 (PUBLISHER/ILLUSTRATOR
-    전용 이름은 제외 — 그렇게 안 하면 "카카오웹툰 스튜디오" 같은 게 후보에 계속 낀다)."""
+    """전체 카탈로그에서 AUTHOR 타입 이름만 뽑아 중복 제거한다 (PUBLISHER/ILLUSTRATOR/
+    ORIGINAL_STORY 전용 이름은 제외 — 그렇게 안 하면 "카카오웹툰 스튜디오" 같은 게
+    관심 작가 후보에 계속 낀다). fetch_full_catalog의 author_names는 화면 표시용으로
+    범위가 더 넓어서(ILLUSTRATOR/ORIGINAL_STORY 포함) 여기서는 못 쓰고, authors
+    원본에서 다시 좁혀서 뽑는다."""
     names: set[str] = set()
     for item in items:
-        names.update(item.get("author_names") or [])
+        names.update(a.get("name") for a in item.get("authors") or [] if a.get("type") == "AUTHOR" and a.get("name"))
     return sorted(names)

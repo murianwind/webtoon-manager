@@ -348,12 +348,6 @@ class KakaoWebtoonEntryIn(BaseModel):
 _KAKAO_THUMB_CACHE_TTL_DAYS = 30  # 표지 소재가 나중에 바뀌는 경우(리커버 등)를 대비해 이 기간 지나면 다시 합성
 
 
-def _kakao_thumb_cache_dir() -> Path:
-    # DB 파일이 있는 곳(영구 볼륨)과 같은 위치에 캐시 폴더를 둔다 — 컨테이너를
-    # 재시작해도 매번 다시 합성하지 않도록.
-    return Path(get_settings().database_path).parent / "kakao_thumb_cache"
-
-
 @router.get("/kakao-thumbnail/{title_id}")
 async def get_kakao_thumbnail(title_id: int):
     """"웹툰 전체목록"의 카카오 썸네일 — 원본 배경 이미지만 그대로 보여주면 흐릿한
@@ -362,9 +356,9 @@ async def get_kakao_thumbnail(title_id: int):
     합성 파이프라인을 그대로 재사용하되, 매번 다시 합성하면 목록에 뜨는 수백 개를
     새로고침마다 전부 다시 합성해야 해서 디스크에 한 번 합성한 결과를 캐싱해둔다.
     다만 표지 소재가 나중에 바뀔 수도 있으니(리커버 등) 일정 기간 지난 캐시는
-    다시 합성한다 — get_kakao_thumbnail_cleanup(수동 실행)로 오래 안 쓰인 캐시
-    자체를 지우는 것과는 별개의 정책이다."""
-    cache_dir = _kakao_thumb_cache_dir()
+    다시 합성한다 — 안 쓰는 캐시 자체를 지우는 것(cleanup_kakao_thumbnail_cache)과는
+    별개의 정책이다."""
+    cache_dir = kakao_cover.thumbnail_cache_dir(get_settings().database_path)
     cache_path = cache_dir / f"{title_id}.jpg"
     is_stale = cache_path.is_file() and (
         time.time() - cache_path.stat().st_mtime > _KAKAO_THUMB_CACHE_TTL_DAYS * 86400
@@ -385,35 +379,17 @@ async def get_kakao_thumbnail(title_id: int):
 @router.post("/kakao-thumbnail-cache/cleanup")
 async def cleanup_kakao_thumbnail_cache():
     """더 이상 필요 없는 캐시 파일(요일별 목록에도 없고, 구독/구독해제/미등록 이력도
-    없는 title_id — 즉 제외했거나 아예 모르는 작품)을 지운다. "수동 실행"에서
-    누르는 관리용 기능이라 자동으로는 안 돈다(디스크 정리는 당장 급한 일이
-    아니라서, 매번 조용히 도는 것보다 필요할 때 직접 누르는 쪽이 안전하다)."""
-    cache_dir = _kakao_thumb_cache_dir()
-    if not cache_dir.is_dir():
-        return {"deleted": 0}
-
+    없는 title_id — 즉 제외했거나 아예 모르는 작품)을 지운다. 다운로드 리포트가
+    돌 때 자동으로도 정리되지만(카카오 요일별 목록을 이미 조회하는 김에), 리포트를
+    안 기다리고 지금 바로 정리하고 싶을 때 "수동 실행"에서 이 버튼을 누르면 된다."""
     settings = get_settings()
     async with aiohttp.ClientSession() as session:
-        catalog_ids = {
-            item["title_id"]
-            for item in await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds)
-        }
-    tracked_ids = set()
-    for status in (repository.STATUS_ACTIVE, repository.STATUS_UNSUBSCRIBED, repository.STATUS_UNREGISTERED):
-        tracked_ids |= {wt["title_id"] for wt in await asyncio.to_thread(repository.list_kakao_webtoons_by_status, status)}
-    keep_ids = catalog_ids | tracked_ids
-
-    deleted = 0
-    for path in cache_dir.glob("*.jpg"):
-        try:
-            title_id = int(path.stem)
-        except ValueError:
-            continue
-        if title_id not in keep_ids:
-            path.unlink(missing_ok=True)
-            deleted += 1
+        catalog_items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds)
+    keep_ids = await asyncio.to_thread(kakao_cover.thumbnail_cache_keep_ids, catalog_items)
+    deleted = await asyncio.to_thread(
+        kakao_cover.cleanup_thumbnail_cache_dir, kakao_cover.thumbnail_cache_dir(settings.database_path), keep_ids
+    )
     return {"deleted": deleted}
-
 
 
 @router.get("/kakao-list")
