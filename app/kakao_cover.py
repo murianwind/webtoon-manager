@@ -210,6 +210,21 @@ def compose_kakao_cover(
         return None
 
 
+def compose_cover_bytes_for_content(content_id: str, timeout: int = 15) -> bytes | None:
+    """content_id 하나로 표지 소재를 전부 받아서 합성한 JPEG 바이트를 반환한다
+    (실패 시 None) — 아카이빙(폴더에 직접 써야 함)과 "웹툰 전체목록" 썸네일
+    캐시(파일로 저장해서 서빙해야 함)처럼, 최종 저장 방식이 다른 여러 호출부가
+    공통으로 쓰는 합성 파이프라인이다."""
+    detail = fetch_kakao_content_detail(content_id, timeout)
+    if detail is None:
+        return None
+    session = requests.Session()
+    bg = _fetch_asset_bytes(session, detail["background"], timeout) if detail["background"] else None
+    ch = _fetch_asset_bytes(session, detail["character"], timeout) if detail["character"] else None
+    lg = _fetch_asset_bytes(session, detail["title_logo"], timeout) if detail["title_logo"] else None
+    return compose_kakao_cover(bg, ch, lg, detail["background_color"])
+
+
 def refresh_kakao_cover_if_applicable(webtoon_dir: Path, *, timeout: int = 15) -> bool:
     """webtoon_dir가 카카오웹툰 폴더면(info.xml의 <Web> 태그로 판단) cover.jpg를
     새로 합성해서 덮어쓴다. 카카오가 아니거나, 조회/합성 중 뭐가 됐든 실패하면

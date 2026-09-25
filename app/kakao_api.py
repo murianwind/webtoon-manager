@@ -28,6 +28,14 @@ _CATALOG_PLACEMENTS = [
     "timetable_new", "timetable_completed",
 ]
 
+# 저자 목록(authors)의 type 값 — 대부분은 그냥 "AUTHOR"인데, 원작 기반 작품은
+# 그림/원작이 나뉘어서 "ILLUSTRATOR"/"ORIGINAL_STORY"로만 들어오는 경우가 실제로
+# 있다(예: "아기님 캐시로 로판 달린다" — AUTHOR 타입이 아예 없고 ILLUSTRATOR/
+# ORIGINAL_STORY/PUBLISHER만 있음, 실제 HAR로 확인). "AUTHOR"만 보면 이런 작품은
+# 저자가 통째로 안 뽑혀서 화면에 아무것도 안 나온다 — PUBLISHER(플랫폼/출판사)는
+# 창작자가 아니라서 제외한다.
+_AUTHOR_LIKE_TYPES = {"AUTHOR", "ILLUSTRATOR", "ORIGINAL_STORY"}
+
 # "웹툰 전체목록"에 보여줄 건 신작/완결까지 다 필요 없고, 지금 연재 중인(요일 배정된)
 # 것만이면 된다 — 요일 7개만 따로 뽑아둔다(위 _CATALOG_PLACEMENTS의 부분집합).
 _WEEKDAY_PLACEMENTS = _CATALOG_PLACEMENTS[:7]
@@ -141,7 +149,7 @@ async def fetch_weekday_catalog(session: aiohttp.ClientSession, timeout_seconds:
                 "seo_id": content.get("seoId", ""),
                 "is_adult": bool(content.get("adult")),
                 "author_names": [
-                    a.get("name") for a in content.get("authors") or [] if a.get("type") == "AUTHOR" and a.get("name")
+                    a.get("name") for a in content.get("authors") or [] if a.get("type") in _AUTHOR_LIKE_TYPES and a.get("name")
                 ],
                 "has_update": "UP" in badge_types,
                 "is_new": "NEW" in badge_types,
@@ -221,7 +229,7 @@ async def fetch_full_catalog(session: aiohttp.ClientSession, timeout_seconds: in
                         "title_name": content.get("title", ""),
                         "is_adult": bool(content.get("adult")),
                         "author_names": [
-                            a.get("name") for a in content.get("authors") or [] if a.get("type") == "AUTHOR" and a.get("name")
+                            a.get("name") for a in content.get("authors") or [] if a.get("type") in _AUTHOR_LIKE_TYPES and a.get("name")
                         ],
                     }
     return list(all_items.values())

@@ -25,8 +25,6 @@ import shutil
 import zipfile
 from pathlib import Path, PurePosixPath
 
-import requests
-
 from app import kakao_cover, rclone_client, repository
 from app.file_utils import remove_forbidden_str
 from app.zipper import _LEADING_DIGITS_RE, _clean_name
@@ -988,14 +986,7 @@ def _compose_kakao_cover_to_temp_file(content_id: str) -> str | None:
     합성 결과를 임시 로컬 파일로 저장하고 그 경로를 반환한다(실패 시 None)."""
     import tempfile
 
-    detail = kakao_cover.fetch_kakao_content_detail(content_id)
-    if detail is None:
-        return None
-    session = requests.Session()
-    bg = kakao_cover._fetch_asset_bytes(session, detail["background"], 15) if detail["background"] else None
-    ch = kakao_cover._fetch_asset_bytes(session, detail["character"], 15) if detail["character"] else None
-    lg = kakao_cover._fetch_asset_bytes(session, detail["title_logo"], 15) if detail["title_logo"] else None
-    jpeg_bytes = kakao_cover.compose_kakao_cover(bg, ch, lg, detail["background_color"])
+    jpeg_bytes = kakao_cover.compose_cover_bytes_for_content(content_id)
     if jpeg_bytes is None:
         return None
     fd, tmp_path = tempfile.mkstemp(suffix=".jpg", prefix="kakao_cover_")

@@ -159,17 +159,25 @@ document.querySelectorAll(".main-tab").forEach((tab) => {
 
 // ── 공용 카드 빌더 ───────────────────────────────────────
 
-function kakaoThumbnailImgTag(baseUrl) {
-  // 카카오 CDN 썸네일 URL엔 확장자가 없다(.webp/.png/.jpg 중 하나를 시도해봐야
-  // 실제로 뜬다 — 표지 합성 쪽 백엔드 로직과 같은 이유). 브라우저에서는 서버처럼
-  // 미리 다 시도해볼 수 없으니, onerror로 다음 확장자를 순서대로 시도한다.
-  const escaped = escapeHtml(baseUrl);
-  if (/\.(webp|png|jpe?g)$/i.test(baseUrl)) {
-    return `<img src="${escaped}" alt="" loading="lazy" />`;
-  }
-  const png = escapeHtml(`${baseUrl}.png`);
-  const jpg = escapeHtml(`${baseUrl}.jpg`);
-  return `<img src="${escaped}.webp" alt="" loading="lazy" onerror="if(!this.dataset.fallback){this.dataset.fallback='1';this.src='${png}';}else if(this.dataset.fallback==='1'){this.dataset.fallback='2';this.src='${jpg}';}else{this.onerror=null;this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb-placeholder'}));}" />`;
+function kakaoRawThumbnailFallbackSrc(baseUrl) {
+  // 원본 배경 이미지 URL(합성 실패 시 최후 대안)엔 확장자가 없다(.webp/.png/.jpg 중
+  // 하나를 시도해봐야 실제로 뜬다) — 그냥 .webp를 기본으로 하나만 쓰고, 그것도
+  // 안 되면 자리표시자로 넘어간다(합성 캐시가 정상 동작하는 한 이 경로는 거의
+  // 안 타므로 너무 복잡하게 여러 확장자를 다 시도하진 않는다).
+  return `${baseUrl}.webp`;
+}
+
+function kakaoThumbnailImgTag(titleId, rawBackgroundUrl) {
+  // 배경 이미지 원본을 그냥 보여주면 흐릿한 배경만 나오고 실제 표지처럼 안 보여서,
+  // 서버가 배경+캐릭터+제목로고를 합성해서 캐싱해둔 결과를 쓴다(/api/kakao-thumbnail).
+  // 합성이 실패한 작품(소재가 없는 경우 등)은 그 엔드포인트가 404를 주므로, onerror로
+  // 원본 배경 이미지 -> 그래도 실패하면 자리표시자로 넘어간다.
+  const composedUrl = `/api/kakao-thumbnail/${titleId}`;
+  const rawFallback = rawBackgroundUrl ? escapeHtml(kakaoRawThumbnailFallbackSrc(rawBackgroundUrl)) : "";
+  const onerror = rawFallback
+    ? `if(!this.dataset.fallback){this.dataset.fallback='1';this.src='${rawFallback}';}else{this.onerror=null;this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb-placeholder'}));}`
+    : `this.onerror=null;this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb-placeholder'}));`;
+  return `<img src="${composedUrl}" alt="" loading="lazy" onerror="${onerror}" />`;
 }
 
 function buildWebtoonCard(w, context) {
@@ -204,7 +212,9 @@ function buildWebtoonCard(w, context) {
     <div class="webtoon-card-thumb-wrap">
       ${checkboxHtml}
       ${platformBadge}
-      ${w.thumbnail_url ? (platform === "kakao" ? kakaoThumbnailImgTag(w.thumbnail_url) : `<img src="${escapeHtml(w.thumbnail_url)}" alt="" loading="lazy" />`) : '<div class="thumb-placeholder"></div>'}
+      ${platform === "kakao"
+        ? kakaoThumbnailImgTag(w.title_id, w.thumbnail_url)
+        : (w.thumbnail_url ? `<img src="${escapeHtml(w.thumbnail_url)}" alt="" loading="lazy" />` : '<div class="thumb-placeholder"></div>')}
     </div>
     <div class="webtoon-card-body">
       <div class="webtoon-card-title">${
@@ -395,11 +405,17 @@ document.getElementById("btn-bulk-exclude-naver-list").addEventListener("click",
       const webtoon = naverListCache.find((w) => String(w.title_id) === String(titleId));
       if (!webtoon) continue;
       try {
-        await webtoonListAction(webtoon, "exclude", webtoon.platform || "naver");
+        // 여러 개를 처리하는 동안은 매번 다시 그리지 않는다(skipRender) — 하나
+        // 처리할 때마다 목록 길이가 바뀌면서 스크롤이 계속 흔들리는 문제가
+        // 실제로 있었다. 다 끝난 뒤 한 번만 그리고, 맨 위로 스크롤해서 다시
+        // 손으로 올릴 필요가 없게 한다.
+        await webtoonListAction(webtoon, "exclude", webtoon.platform || "naver", true);
       } catch (e) {
         alert(`"${webtoon.title}" 제외 실패: ${e.message}`);
       }
     }
+    renderNaverList();
+    window.scrollTo({ top: 0, behavior: "smooth" });
   } finally {
     btn.disabled = false;
   }
@@ -412,7 +428,7 @@ function _webtoonListActionUrl(platform, titleId, action) {
   return action === "unsubscribe" ? `/api/webtoons/${titleId}/unsubscribe` : `/api/naver-list/${titleId}/${action}`;
 }
 
-async function webtoonListAction(webtoon, action, platform) {
+async function webtoonListAction(webtoon, action, platform, skipRender) {
   const { title_id: titleId, title, thumbnail_url: thumbnailUrl, seo_id: seoId } = webtoon;
   const needsBody = action === "subscribe" || action === "exclude";
   const body = platform === "kakao"
@@ -423,17 +439,18 @@ async function webtoonListAction(webtoon, action, platform) {
       method: "POST",
       ...(needsBody ? { body: JSON.stringify(body) } : {}),
     });
-    patchWebtoonListCard(titleId, webtoon, updated.status, updated.ever_subscribed, platform);
+    patchWebtoonListCard(titleId, webtoon, updated.status, updated.ever_subscribed, platform, skipRender);
   } catch (e) {
     alert(e.message);
   }
 }
 
-function patchWebtoonListCard(titleId, webtoon, newStatus, everSubscribed, platform) {
+function patchWebtoonListCard(titleId, webtoon, newStatus, everSubscribed, platform, skipRender) {
   const cacheIndex = naverListCache.findIndex((w) => w.title_id === titleId && (w.platform || "naver") === platform);
   if (cacheIndex >= 0) {
     naverListCache[cacheIndex] = { ...naverListCache[cacheIndex], status: newStatus, ever_subscribed: everSubscribed };
   }
+  if (skipRender) return; // 여러 개를 한꺼번에 처리할 때(일괄 제외 등) 매번 다시 그리면 그때마다 목록 길이가 바뀌어 스크롤이 계속 흔들린다 — 호출부가 다 끝난 뒤 한 번만 그리게 맡긴다.
   // 카드를 그 자리에서 바꿔치기만 하면, 지금 걸려있는 필터(구독중만/아직 미등록만
   // 등)에 따라 이 카드가 이제 안 보여야 하는 경우를 놓친다 — 예를 들어 "아직
   // 미등록만" 필터에서 구독을 누르면 이제 활성 상태라 원래는 사라져야 하는데,
@@ -1606,6 +1623,21 @@ document.getElementById("btn-run-metadata-sync").addEventListener("click", async
 document.getElementById("btn-run-report").addEventListener("click", async () => {
   await apiCall("/api/jobs/report/run", { method: "POST" });
   await refreshJobStatus();
+});
+
+document.getElementById("btn-cleanup-kakao-thumb-cache").addEventListener("click", async () => {
+  const btn = document.getElementById("btn-cleanup-kakao-thumb-cache");
+  const resultEl = document.getElementById("kakao-thumb-cleanup-result");
+  btn.disabled = true;
+  resultEl.textContent = "정리 중...";
+  try {
+    const result = await apiCall("/api/kakao-thumbnail-cache/cleanup", { method: "POST" });
+    resultEl.textContent = `${result.deleted}개 정리했습니다.`;
+  } catch (e) {
+    resultEl.textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 async function loadWebtoonServerUrl() {
