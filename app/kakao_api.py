@@ -9,6 +9,7 @@
 이번 신작 알림 기능 범위에서는 쿠키가 필요 없다.
 """
 
+import asyncio
 import logging
 
 import aiohttp
@@ -171,21 +172,41 @@ async def fetch_latest_episode_url(
     """이 작품의 가장 최근 회차로 바로 가는 뷰어 URL을 만든다 — 회차 목록을
     번호 내림차순(sort=-NO)으로 1페이지만 조회하면 맨 앞이 최신 회차다(실제 HAR로
     확인). "다운로드 리포트"에서 UP 배지가 있는 작품에만 이걸 조회하므로, 전체
-    카탈로그 규모와 무관하게 가볍다."""
-    try:
-        async with session.get(
-            KAKAO_EPISODE_LIST_URL_TMPL.format(content_id=content_id),
-            params={"sort": "-NO", "offset": 0, "limit": 1},
-            headers=_HEADERS,
-            timeout=aiohttp.ClientTimeout(total=timeout_seconds),
-        ) as response:
-            if response.status != 200:
-                log.warning("카카오 회차 목록 조회 실패 (content_id=%s): HTTP %s", content_id, response.status)
-                return None
-            data = await response.json()
-    except Exception as e:
-        log.warning("카카오 회차 목록 조회 예외 (content_id=%s): %s", content_id, e)
-        return None
+    카탈로그 규모와 무관하게 가볍다.
+
+    실제로 겪은 문제: 요청 헤더가 실제 브라우저와 완전히 같은데도(HAR로 직접
+    대조 확인함) 이 엔드포인트만 이따금 HTTP 403이 난다 — 유료/무료 구분 문제가
+    아니라(성인 표시 없는 일반 작품에서도 발생), 서버에서 짧은 시간에 여러 작품을
+    연달아 조회할 때만 생기는 걸로 보아 요청 빈도 제한이나 봇 탐지 쪽일 가능성이
+    높다. 원인을 완전히 확정할 순 없어서, 403/429/5xx는 잠깐 쉬었다가 한두 번 더
+    시도해보고, 그래도 안 되면 포기한다(그 작품 하나가 이번 리포트에서 빠질 뿐,
+    전체 리포트를 막지는 않아야 하므로)."""
+    for attempt in range(3):
+        try:
+            async with session.get(
+                KAKAO_EPISODE_LIST_URL_TMPL.format(content_id=content_id),
+                params={"sort": "-NO", "offset": 0, "limit": 1},
+                headers=_HEADERS,
+                timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+            ) as response:
+                if response.status in (403, 429) or response.status >= 500:
+                    if attempt < 2:
+                        log.warning(
+                            "카카오 회차 목록 조회 실패 (content_id=%s): HTTP %s, %.1f초 뒤 재시도 (%d/3)",
+                            content_id, response.status, 2 * (attempt + 1), attempt + 1,
+                        )
+                        await asyncio.sleep(2 * (attempt + 1))
+                        continue
+                    log.warning("카카오 회차 목록 조회 실패 (content_id=%s): HTTP %s (재시도 소진)", content_id, response.status)
+                    return None
+                if response.status != 200:
+                    log.warning("카카오 회차 목록 조회 실패 (content_id=%s): HTTP %s", content_id, response.status)
+                    return None
+                data = await response.json()
+                break
+        except Exception as e:
+            log.warning("카카오 회차 목록 조회 예외 (content_id=%s): %s", content_id, e)
+            return None
 
     episodes = ((data.get("data") or {}).get("episodes")) or []
     if not episodes:

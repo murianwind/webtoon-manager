@@ -434,10 +434,20 @@ async def _collect_kakao_new_episodes(
             return item, url, is_subscribed
 
     results = await asyncio.gather(*[_fetch_one(item) for item in candidates])
-    return [
+    final = [
         (item["title_id"], item["title_name"], url, is_subscribed)
         for item, url, is_subscribed in results if url is not None
     ]
+    if len(final) < len(candidates):
+        # 후보였는데 최종 리포트엔 안 실린 개수 — 조회 실패(HTTP 403 등)로 조용히
+        # 빠진 게 몇 개인지 여기서 한눈에 보이게 남겨둔다. 원인 자체는 위
+        # fetch_latest_episode_url/조회 실패 경고 로그에 있지만, 매번 그걸 하나하나
+        # 찾아보지 않아도 "얼마나 빠졌는지"는 바로 알 수 있어야 한다.
+        log.warning(
+            "카카오 새 에피소드 후보 %d개 중 %d개만 최종 리포트에 포함됨(나머지는 회차 조회 실패)",
+            len(candidates), len(final),
+        )
+    return final
 
 
 def _build_report_message(
