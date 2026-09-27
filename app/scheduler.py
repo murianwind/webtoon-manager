@@ -319,6 +319,16 @@ _SETTING_KEY_REPORT_LAST_SENT_AT = "report_last_sent_at"
 _SETTING_KEY_WEBTOON_SERVER_URL = "webtoon_server_url"
 _REPORT_LIST_LIMIT = 40  # 디스코드 메시지 길이 제한 대비, 항목이 너무 많으면 일부만 나열
 _UNREGISTERED_NEW_EPISODE_LIMIT = 20  # 미등록 신규 에피소드는 네이버에 회차번호를 하나씩 더 물어봐야 해서, 너무 많이 걸면 부담이라 따로 더 작게 제한
+# 카카오는 "웹툰 전체목록"에 있는(=요일 7개, 제외 안 한) 것 전부가 후보 대상이라
+# 네이버의 "완전 미등록"보다 모수가 훨씬 크다 — UP 표시된 게 20개를 넘는 날은 실제로
+# 흔해서, 위 한도를 그대로 쓰면 뒤로 밀린 작품(카탈로그에서 나중에 나온 것)의 새
+# 에피소드가 후보에도 못 들고 조용히 빠지는 문제가 있었다(실제로 확인됨: "바퀴벌레
+# 잔혹사"가 UP인데 리포트엔 안 나옴). 조회 자체(뷰어/카카오 최신 회차 확인)는 이미
+# 동시 실행 수 제한(artist_scan_concurrency)이 있어서 이 한도를 넉넉히 키워도
+# 부담이 크지 않고, 실제 디스코드 메시지에 보여줄 개수는 아래 _build_report_message
+# 에서 _REPORT_LIST_LIMIT로 별도로 줄인다(둘을 분리해야 "후보에서 누락"과 "메시지에서
+# 생략 표시하며 자름"이 다른 문제라는 게 명확해진다).
+_KAKAO_NEW_EPISODE_CANDIDATE_LIMIT = 150
 
 
 async def _collect_unregistered_new_episodes(
@@ -393,7 +403,7 @@ async def _collect_kakao_new_episodes(
 
     excluded_ids = repository.get_kakao_excluded_title_ids()
     candidates = [item for item in items if item["has_update"] and item["title_id"] not in excluded_ids]
-    candidates = candidates[:_UNREGISTERED_NEW_EPISODE_LIMIT]
+    candidates = candidates[:_KAKAO_NEW_EPISODE_CANDIDATE_LIMIT]
     if not candidates:
         return []
 
@@ -488,8 +498,10 @@ def _build_report_message(
         parts.extend([
             "",
             f"🆕 웹툰 전체목록 중 새 에피소드 ({len(new_lines)}):",
-            "\n".join(new_lines),
+            "\n".join(new_lines[:_REPORT_LIST_LIMIT]),
         ])
+        if len(new_lines) > _REPORT_LIST_LIMIT:
+            parts.append(f"_외 {len(new_lines) - _REPORT_LIST_LIMIT}개 생략_")
 
     return "\n".join(parts)
 
