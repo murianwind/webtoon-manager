@@ -55,9 +55,25 @@ KAKAO_VIEWER_URL_TMPL = "https://webtoon.kakao.com/viewer/{episode_seo_id}/{epis
 
 _HEADERS = {
     "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "ko",
+    "Accept-Encoding": "gzip, deflate",  # aiohttp가 자동으로 풀어주는 인코딩만 명시(br/zstd는 별도 패키지 없이는 못 풀어서 뺌)
     "Origin": "https://webtoon.kakao.com",
     "Referer": "https://webtoon.kakao.com/",
+    "DNT": "1",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    # 아래 sec-ch-ua*/sec-fetch-* 는 실제 크롬 브라우저만 자동으로 붙이는 헤더들이다
+    # (스크립트로 직접 만드는 요청엔 원래 없음) — 실제로 확인해보니 회차 목록 조회
+    # (episodes) 엔드포인트가 HTTP 403을 낼 때 이 헤더들이 통째로 빠져있었던 게
+    # 유력한 원인으로 보인다(요일별 목록 조회는 이 헤더 없이도 계속 잘 됐던 것과 대비됨
+    # — episodes 쪽만 더 엄격하게 "진짜 브라우저인지" 확인하는 것으로 추정). User-Agent가
+    # Windows Chrome이므로 sec-ch-ua* 값도 그것과 어긋나지 않게 맞춘다(플랫폼이
+    # 서로 다르면 그 자체가 또 다른 이상 신호가 될 수 있어서).
+    "sec-ch-ua": '"Chromium";v="120", "Google Chrome";v="120", "Not.A/Brand";v="24"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-site",
 }
 
 
