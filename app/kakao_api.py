@@ -186,9 +186,16 @@ async def fetch_latest_episode_url(
     session: aiohttp.ClientSession, content_id: int, timeout_seconds: int
 ) -> str | None:
     """이 작품의 가장 최근 회차로 바로 가는 뷰어 URL을 만든다 — 회차 목록을
-    번호 내림차순(sort=-NO)으로 1페이지만 조회하면 맨 앞이 최신 회차다(실제 HAR로
-    확인). "다운로드 리포트"에서 UP 배지가 있는 작품에만 이걸 조회하므로, 전체
-    카탈로그 규모와 무관하게 가볍다.
+    번호 내림차순(sort=-NO)으로 조회하면 앞쪽이 최신 회차다(실제 HAR로 확인).
+    "다운로드 리포트"에서 UP 배지가 있는 작품에만 이걸 조회하므로, 전체 카탈로그
+    규모와 무관하게 가볍다.
+
+    다만 맨 앞(번호가 가장 높은) 회차가 항상 "지금 읽을 수 있는" 회차는 아니다 —
+    카카오는 "유료 선공개"(useType: EARLY_ACCESS, readable: false) 회차가 정식
+    무료 공개보다 먼저 번호를 차지하고 있는 경우가 실제로 있다(HAR로 직접 확인:
+    39~45화가 EARLY_ACCESS/readable=false, 38화부터 FREE/readable=true). 그걸
+    그대로 링크로 주면 유료 결제 화면으로 보내는 셈이라, 앞에서부터 readable이
+    true인 첫 회차를 찾는다. 선공개 회차가 몰려있을 수 있어 넉넉히 20개까지 본다.
 
     실제로 겪은 문제: 요청 헤더가 실제 브라우저와 완전히 같은데도(HAR로 직접
     대조 확인함) 이 엔드포인트만 이따금 HTTP 403이 난다 — 유료/무료 구분 문제가
@@ -201,7 +208,7 @@ async def fetch_latest_episode_url(
         try:
             async with session.get(
                 KAKAO_EPISODE_LIST_URL_TMPL.format(content_id=content_id),
-                params={"sort": "-NO", "offset": 0, "limit": 1},
+                params={"sort": "-NO", "offset": 0, "limit": 20},
                 headers=_HEADERS,
                 timeout=aiohttp.ClientTimeout(total=timeout_seconds),
             ) as response:
@@ -225,9 +232,12 @@ async def fetch_latest_episode_url(
             return None
 
     episodes = ((data.get("data") or {}).get("episodes")) or []
-    if not episodes:
+    latest = next((ep for ep in episodes if ep.get("readable")), None)
+    if latest is None:
+        # 조회한 범위(최신 20개) 전부가 아직 안 풀린 유료 선공개인 드문 경우 —
+        # 이럴 땐 링크를 잘못 주느니 그냥 이번 리포트에서 빠지는 쪽을 택한다.
+        log.warning("카카오 작품(content_id=%s) 최근 20개 회차가 전부 읽을 수 없음(선공개뿐) — 건너뜀", content_id)
         return None
-    latest = episodes[0]
     episode_id = latest.get("id")
     episode_seo_id = latest.get("seoId")
     if episode_id is None or not episode_seo_id:

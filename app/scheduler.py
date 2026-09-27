@@ -401,8 +401,14 @@ async def _collect_kakao_new_episodes(
     except Exception as e:
         log.warning("카카오 썸네일 캐시 자동 정리 실패(무시하고 계속): %s", e)
 
-    excluded_ids = repository.get_kakao_excluded_title_ids()
-    candidates = [item for item in items if item["has_update"] and item["title_id"] not in excluded_ids]
+    # "제외됨"뿐 아니라 "구독해제"도 후보에서 빼야 한다 — 구독해제는 "더 이상 안
+    # 챙겨보고 싶다"는 뜻이라 목록제외와 사실상 같은 의도인데, 여태 제외됨만 걸러서
+    # 구독해제한 작품도 새 에피소드 리포트에 계속 나오는 문제가 있었다(실제로 확인됨).
+    # active/unregistered는 "웹툰 전체목록"에 그대로 보이는 상태라 그대로 후보로 둔다.
+    hidden_ids = repository.get_kakao_excluded_title_ids() | {
+        wt["title_id"] for wt in repository.list_kakao_webtoons_by_status(repository.STATUS_UNSUBSCRIBED)
+    }
+    candidates = [item for item in items if item["has_update"] and item["title_id"] not in hidden_ids]
     candidates = candidates[:_KAKAO_NEW_EPISODE_CANDIDATE_LIMIT]
     if not candidates:
         return []
