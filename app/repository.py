@@ -9,7 +9,7 @@ SQL을 직접 다루지 않는다 (SRP). 모든 함수는 동기(sync)이며, �
 import json
 from datetime import datetime, timedelta, timezone
 
-from app.db import fetchall, fetchone, read_lock, write_transaction
+from app.db import LEGACY_KAKAO_ID_LIMIT, fetchall, fetchone, read_lock, write_transaction
 from app.models import ArchiveTarget, FilenameTemplatePreset, WatchedAuthor, WatchedTag, WebtoonRecord
 
 STATUS_ACTIVE = "active"
@@ -390,7 +390,7 @@ def _row_to_kakao_webtoon(row) -> dict:
     return {
         "title_id": row["title_id"], "title": row["title"], "status": row["status"],
         "ever_subscribed": bool(row["ever_subscribed"]), "thumbnail_url": row["thumbnail_url"],
-        "seo_id": row["seo_id"], "author_summary": row["author_summary"],
+        "author_summary": row["author_summary"],
     }
 
 
@@ -416,7 +416,7 @@ def get_kakao_excluded_title_ids() -> set[int]:
 
 def upsert_new_kakao_webtoon(
     title_id: int, title: str, thumbnail_url: str = "", status: str = STATUS_ACTIVE,
-    seo_id: str = "", author_summary: str = "",
+    author_summary: str = "",
 ) -> None:
     """이미 있으면 아무것도 안 한다(webtoons.upsert_new와 같은 원자적 INSERT OR
     IGNORE 패턴 — 동시에 같은 작품을 두 번 만들려는 레이스를 막는다). status가
@@ -425,9 +425,9 @@ def upsert_new_kakao_webtoon(
     with write_transaction() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO kakao_webtoons "
-            "(title_id, title, status, ever_subscribed, thumbnail_url, seo_id, author_summary, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (title_id, title, status, int(status == STATUS_ACTIVE), thumbnail_url, seo_id, author_summary, now, now),
+            "(title_id, title, status, ever_subscribed, thumbnail_url, author_summary, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (title_id, title, status, int(status == STATUS_ACTIVE), thumbnail_url, author_summary, now, now),
         )
 
 
@@ -461,6 +461,39 @@ def hard_delete_kakao_webtoon(title_id: int) -> None:
     """"목록으로"(구독 이력 없음) — DB 기록 자체를 지운다. 네이버 hard_delete와 같은 역할."""
     with write_transaction() as conn:
         conn.execute("DELETE FROM kakao_webtoons WHERE title_id = ?", (title_id,))
+
+
+def migrate_legacy_kakao_webtoons(catalog_items: list[dict]) -> dict:
+    """옛 카카오웹툰 기록(번호 체계가 달라 카카오페이지와 안 맞음)을 카카오페이지 작품으로
+    옮긴다 — 카카오페이지 요일별 목록에서 제목이 정확히 하나만 일치하는 작품이 있을 때만
+    번호를 새 series_id로 바꾸고(상태/구독 이력/생성 시각은 그대로), 그 외에는(제목이 다르거나
+    지금 연재 중이 아니거나 제목이 겹쳐 모호한 경우) 건드리지 않고 목록으로 돌려준다."""
+    title_counts: dict[str, int] = {}
+    for item in catalog_items:
+        title_counts[item["title_name"]] = title_counts.get(item["title_name"], 0) + 1
+    unique_by_title = {i["title_name"]: i for i in catalog_items if title_counts[i["title_name"]] == 1}
+
+    migrated = 0
+    unmatched: list[dict] = []
+    with write_transaction() as conn:
+        legacy_rows = conn.execute(
+            "SELECT title_id, title, status FROM kakao_webtoons WHERE title_id < ?", (LEGACY_KAKAO_ID_LIMIT,)
+        ).fetchall()
+        for row in legacy_rows:
+            item = unique_by_title.get(row["title"])
+            taken = item is not None and conn.execute(
+                "SELECT 1 FROM kakao_webtoons WHERE title_id = ?", (item["title_id"],)
+            ).fetchone()
+            if item is None or taken:
+                unmatched.append({"title": row["title"], "status": row["status"]})
+                continue
+            conn.execute(
+                "UPDATE kakao_webtoons SET title_id = ?, thumbnail_url = ?, author_summary = ?, updated_at = ? "
+                "WHERE title_id = ?",
+                (item["title_id"], item["thumbnail_url"], ", ".join(item["author_names"]), _now(), row["title_id"]),
+            )
+            migrated += 1
+    return {"migrated": migrated, "unmatched": unmatched}
 
 
 # ── archive_targets (아카이빙 대상 웹툰/폴더 + 목적지 그릇 폴더) ──────────────
@@ -947,7 +980,7 @@ _WATCHED_AUTHOR_COLUMNS = ("author_id", "author_name", "enabled", "platform", "c
 _WATCHED_TAG_COLUMNS = ("tag_id", "tag_name", "enabled", "created_at", "updated_at")
 _KAKAO_SEEN_TITLE_COLUMNS = ("author_name", "title_id", "title_name", "seen_at")
 _KAKAO_WEBTOON_COLUMNS = (
-    "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "seo_id", "author_summary", "created_at", "updated_at",
+    "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "author_summary", "created_at", "updated_at",
 )
 _FILENAME_TEMPLATE_PRESET_COLUMNS = ("id", "name", "template", "created_at", "updated_at")
 _ARCHIVE_TARGET_COLUMNS = (

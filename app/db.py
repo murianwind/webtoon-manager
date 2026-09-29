@@ -75,7 +75,6 @@ CREATE TABLE IF NOT EXISTS kakao_webtoons (
     status TEXT NOT NULL DEFAULT 'excluded',
     ever_subscribed INTEGER NOT NULL DEFAULT 0,
     thumbnail_url TEXT NOT NULL DEFAULT '',
-    seo_id TEXT NOT NULL DEFAULT '',
     author_summary TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -196,6 +195,10 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+# 카카오웹툰 → 카카오페이지 통합으로 작품 번호 체계가 바뀌었다. 옛 카카오웹툰 번호는 4자리
+# 안팎, 카카오페이지 series_id는 8자리라 이 값 미만이면 옛 카카오웹툰 번호로 본다.
+LEGACY_KAKAO_ID_LIMIT = 1_000_000
+
 _connection: sqlite3.Connection | None = None
 
 
@@ -211,6 +214,11 @@ def get_connection() -> sqlite3.Connection:
         # 버그가 있었어서, 그 버그가 있던 동안 만들어진 뒤 지금까지 계속 구독 중인
         # 행들을 시작할 때마다 값싸게 자가 치유한다(이미 맞으면 아무 일도 안 함).
         _connection.execute("UPDATE webtoons SET ever_subscribed = 1 WHERE status = 'active' AND ever_subscribed = 0")
+        # 관심 작가의 "이미 본 작품" 기준선 중 옛 카카오웹툰 번호로 저장된 것은 이제 아무 데도
+        # 안 맞는다 — 그대로 두면 카카오페이지로 첫 스캔할 때 그 작가의 모든 작품이 "신작"으로
+        # 알림 폭탄이 된다. 지워두면 작가별 다음 스캔이 "첫 스캔"으로 취급돼 조용히 기준선만
+        # 다시 쌓는다(이미 지운 뒤에는 옛 번호 행이 없어서 매번 실행돼도 아무 일도 안 함).
+        _connection.execute("DELETE FROM kakao_seen_titles WHERE title_id < ?", (LEGACY_KAKAO_ID_LIMIT,))
         _connection.commit()
     return _connection
 

@@ -21,13 +21,12 @@ import html
 import json
 import logging
 import re
-import time
 from pathlib import Path
 
 import markdown
 import aiohttp
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, field_validator
 
 from app import (
@@ -45,7 +44,6 @@ from app import scheduler as scheduler_mod
 from app import kakao_api
 from app import webtoon_server_client
 from app import archiver
-from app import kakao_cover
 from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
 from app import rclone_client
 from app import rclone_updater
@@ -338,7 +336,6 @@ class KakaoWebtoonOut(BaseModel):
     status: str
     ever_subscribed: bool
     thumbnail_url: str = ""
-    seo_id: str = ""
     author_summary: str = ""
     is_new: bool = False
     is_paused: bool = False
@@ -348,66 +345,18 @@ class KakaoWebtoonOut(BaseModel):
 class KakaoWebtoonEntryIn(BaseModel):
     title: str
     thumbnail_url: str = ""
-    seo_id: str = ""
     author_summary: str = ""
 
 
-_KAKAO_THUMB_CACHE_TTL_DAYS = 30  # 표지 소재가 나중에 바뀌는 경우(리커버 등)를 대비해 이 기간 지나면 다시 합성
-
-
-@router.get("/kakao-thumbnail/{title_id}")
-async def get_kakao_thumbnail(title_id: int):
-    """"웹툰 전체목록"의 카카오 썸네일 — 원본 배경 이미지만 그대로 보여주면 흐릿한
-    배경만 보이고 실제 표지처럼은 안 보인다(배경+캐릭터+제목로고를 합성해야 진짜
-    표지 느낌이 남, 아카이빙 때 카카오 표지를 새로 합성하는 것과 같은 이유). 그
-    합성 파이프라인을 그대로 재사용하되, 매번 다시 합성하면 목록에 뜨는 수백 개를
-    새로고침마다 전부 다시 합성해야 해서 디스크에 한 번 합성한 결과를 캐싱해둔다.
-    다만 표지 소재가 나중에 바뀔 수도 있으니(리커버 등) 일정 기간 지난 캐시는
-    다시 합성한다 — 안 쓰는 캐시 자체를 지우는 것(cleanup_kakao_thumbnail_cache)과는
-    별개의 정책이다."""
-    cache_dir = kakao_cover.thumbnail_cache_dir(get_settings().database_path)
-    cache_path = cache_dir / f"{title_id}.jpg"
-    is_stale = cache_path.is_file() and (
-        time.time() - cache_path.stat().st_mtime > _KAKAO_THUMB_CACHE_TTL_DAYS * 86400
-    )
-    if not cache_path.is_file() or is_stale:
-        jpeg_bytes = await asyncio.to_thread(kakao_cover.compose_cover_bytes_for_content, str(title_id))
-        if jpeg_bytes is None:
-            if is_stale:
-                # 다시 합성하다 실패했으면(일시적 네트워크 문제 등) 오래됐어도 있던
-                # 캐시를 계속 쓴다 — 없는 것보다는 오래된 표지라도 있는 게 낫다.
-                return FileResponse(cache_path, media_type="image/jpeg")
-            raise HTTPException(status_code=404, detail="표지를 합성할 수 없습니다.")
-        await asyncio.to_thread(cache_dir.mkdir, parents=True, exist_ok=True)
-        await asyncio.to_thread(cache_path.write_bytes, jpeg_bytes)
-    return FileResponse(cache_path, media_type="image/jpeg")
-
-
-@router.post("/kakao-thumbnail-cache/cleanup")
-async def cleanup_kakao_thumbnail_cache():
-    """더 이상 필요 없는 캐시 파일(요일별 목록에도 없고, 구독/구독해제/미등록 이력도
-    없는 title_id — 즉 제외했거나 아예 모르는 작품)을 지운다. 다운로드 리포트가
-    돌 때 자동으로도 정리되지만(카카오 요일별 목록을 이미 조회하는 김에), 리포트를
-    안 기다리고 지금 바로 정리하고 싶을 때 "수동 실행"에서 이 버튼을 누르면 된다."""
-    settings = get_settings()
-    async with aiohttp.ClientSession() as session:
-        catalog_items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds)
-    keep_ids = await asyncio.to_thread(kakao_cover.thumbnail_cache_keep_ids, catalog_items)
-    deleted = await asyncio.to_thread(
-        kakao_cover.cleanup_thumbnail_cache_dir, kakao_cover.thumbnail_cache_dir(settings.database_path), keep_ids
-    )
-    return {"deleted": deleted}
-
-
 @router.get("/kakao-list")
-async def browse_kakao_list():
-    """"웹툰 전체목록"에 카카오웹툰을 같이 보여주기 위한 목록 — 요일 7개(연재 중인 것)를
-    훑고, 추적 중(구독/구독해제/제외)인 것이 있으면 그 상태를 같이 붙인다. 네이버의
+async def browse_kakao_list(refresh: bool = False):
+    """"웹툰 전체목록"에 카카오페이지 웹툰을 같이 보여주기 위한 목록 — 요일 7개(연재 중인 것)를
+    훑고(요청이 많아서 10분간 캐시하고, refresh=true면 캐시를 무시하고 새로 받는다), 추적 중(구독/구독해제/제외)인 것이 있으면 그 상태를 같이 붙인다. 네이버의
     browse_naver_list와 같은 구조 — "제외됨"만 걸러내고, 요일별 목록에서 사라진(휴재
     장기화 등) 구독 이력 있는 작품은 DB 기록으로 보완해서 계속 보여준다."""
     settings = get_settings()
     async with aiohttp.ClientSession() as session:
-        items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds)
+        items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds, use_cache=not refresh)
 
     seen_ids: set[int] = set()
     result = []
@@ -428,7 +377,6 @@ async def browse_kakao_list():
                 "title_id": item["title_id"],
                 "title": item["title_name"],
                 "thumbnail_url": item["thumbnail_url"],
-                "seo_id": item["seo_id"],
                 "is_adult": item["is_adult"],
                 "author_summary": author_summary,
                 "is_new": item["is_new"],
@@ -450,7 +398,6 @@ async def browse_kakao_list():
                     "title_id": wt["title_id"],
                     "title": wt["title"],
                     "thumbnail_url": wt["thumbnail_url"],
-                    "seo_id": wt["seo_id"],
                     "is_adult": False,
                     "author_summary": wt["author_summary"],
                     "is_new": False,
@@ -512,6 +459,21 @@ async def list_kakao_webtoons(status: str | None = None):
     return result
 
 
+@router.post("/kakao-webtoons/migrate-legacy")
+async def migrate_legacy_kakao_webtoons():
+    """카카오웹툰이 카카오페이지로 통합되면서 작품 번호 체계가 바뀌어서, 예전에 구독/제외/
+    구독해제해둔 기록이 새 목록과 안 맞는다 — 카카오페이지 요일별 목록에서 제목이 정확히
+    하나만 일치하는 작품으로 그 기록을 옮긴다(상태와 구독 이력은 그대로). 못 옮긴 것(제목이
+    달라졌거나 지금 연재 중이 아닌 것 등)은 건드리지 않고 목록으로 돌려준다. 눌렀을 때만
+    실행되는 수동 작업이라, 여러 번 눌러도 이미 옮긴 건 다시 안 건드린다."""
+    settings = get_settings()
+    async with aiohttp.ClientSession() as session:
+        items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds, use_cache=False)
+    if not items:
+        raise HTTPException(status_code=502, detail="카카오페이지 목록을 가져오지 못해 이전하지 못했습니다. 잠시 뒤 다시 시도해주세요.")
+    return await asyncio.to_thread(repository.migrate_legacy_kakao_webtoons, items)
+
+
 async def _get_or_404_kakao(title_id: int) -> dict:
     wt = await asyncio.to_thread(repository.get_kakao_webtoon, title_id)
     if wt is None:
@@ -527,7 +489,7 @@ async def subscribe_kakao_webtoon(title_id: int, payload: KakaoWebtoonEntryIn):
     if not await asyncio.to_thread(repository.kakao_webtoon_exists, title_id):
         await asyncio.to_thread(
             repository.upsert_new_kakao_webtoon, title_id, payload.title, payload.thumbnail_url,
-            repository.STATUS_ACTIVE, payload.seo_id, payload.author_summary,
+            repository.STATUS_ACTIVE, payload.author_summary,
         )
     await asyncio.to_thread(repository.set_kakao_webtoon_status, title_id, repository.STATUS_ACTIVE)
     await asyncio.to_thread(repository.refresh_kakao_webtoon_author_summary, title_id, payload.author_summary)
@@ -546,7 +508,7 @@ async def exclude_kakao_webtoon(title_id: int, payload: KakaoWebtoonEntryIn):
     if not await asyncio.to_thread(repository.kakao_webtoon_exists, title_id):
         await asyncio.to_thread(
             repository.upsert_new_kakao_webtoon, title_id, payload.title, payload.thumbnail_url,
-            repository.STATUS_EXCLUDED, payload.seo_id, payload.author_summary,
+            repository.STATUS_EXCLUDED, payload.author_summary,
         )
     await asyncio.to_thread(repository.set_kakao_webtoon_status, title_id, repository.STATUS_EXCLUDED)
     await asyncio.to_thread(repository.refresh_kakao_webtoon_author_summary, title_id, payload.author_summary)
@@ -893,11 +855,12 @@ async def remove_kakao_watched_author(author_name: str):
 
 @router.get("/kakao/authors/candidates")
 async def list_kakao_author_candidates():
-    """네이버의 /authors/candidates와 동일한 역할 — 요일 7개+신작+완결을 통째로 훑어서
-    이름 후보를 즉시 뽑는다. 카탈로그가 커서(2000개 이상) 몇 초 걸릴 수 있다."""
+    """네이버의 /authors/candidates와 동일한 역할 — 지금 연재 중인 요일별 목록에서 저자 이름
+    후보를 뽑는다(요일별 목록은 10분 캐시라 대개 바로 나오고, 캐시가 없으면 몇 초 걸린다).
+    완결작 작가는 여기 안 나오지만, 이름을 직접 입력해 검색해서 등록하는 건 그대로 된다."""
     settings = get_settings()
     async with aiohttp.ClientSession() as session:
-        items = await kakao_api.fetch_full_catalog(session, settings.request_timeout_seconds)
+        items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds)
     return kakao_api.extract_candidate_author_names(items)
 
 

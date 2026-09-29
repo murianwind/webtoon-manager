@@ -81,10 +81,8 @@ function naverUrl(titleId) {
   return `https://comic.naver.com/webtoon/list?titleId=${titleId}`;
 }
 
-function kakaoContentUrl(titleId, seoId) {
-  // seoId가 없으면(구독 이력만 DB에 남아있고 지금 요일별 목록엔 없는 경우) 링크를
-  // 만들 수 없다 — 이럴 땐 호출부에서 그냥 텍스트로만 표시한다.
-  return seoId ? `https://webtoon.kakao.com/content/${encodeURIComponent(seoId)}/${titleId}` : "";
+function kakaoContentUrl(titleId) {
+  return `https://page.kakao.com/content/${titleId}`;
 }
 
 // 웹툰 뷰어 서버 주소가 설정되어 있는지 — 있으면 구독중 카드에 "뷰어에서 보기" 아이콘을 띄운다.
@@ -162,25 +160,12 @@ document.querySelectorAll(".main-tab").forEach((tab) => {
 
 // ── 공용 카드 빌더 ───────────────────────────────────────
 
-function kakaoRawThumbnailFallbackSrc(baseUrl) {
-  // 원본 배경 이미지 URL(합성 실패 시 최후 대안)엔 확장자가 없다(.webp/.png/.jpg 중
-  // 하나를 시도해봐야 실제로 뜬다) — 그냥 .webp를 기본으로 하나만 쓰고, 그것도
-  // 안 되면 자리표시자로 넘어간다(합성 캐시가 정상 동작하는 한 이 경로는 거의
-  // 안 타므로 너무 복잡하게 여러 확장자를 다 시도하진 않는다).
-  return `${baseUrl}.webp`;
-}
-
-function kakaoThumbnailImgTag(titleId, rawBackgroundUrl) {
-  // 배경 이미지 원본을 그냥 보여주면 흐릿한 배경만 나오고 실제 표지처럼 안 보여서,
-  // 서버가 배경+캐릭터+제목로고를 합성해서 캐싱해둔 결과를 쓴다(/api/kakao-thumbnail).
-  // 합성이 실패한 작품(소재가 없는 경우 등)은 그 엔드포인트가 404를 주므로, onerror로
-  // 원본 배경 이미지 -> 그래도 실패하면 자리표시자로 넘어간다.
-  const composedUrl = `/api/kakao-thumbnail/${titleId}`;
-  const rawFallback = rawBackgroundUrl ? escapeHtml(kakaoRawThumbnailFallbackSrc(rawBackgroundUrl)) : "";
-  const onerror = rawFallback
-    ? `if(!this.dataset.fallback){this.dataset.fallback='1';this.src='${rawFallback}';}else{this.onerror=null;this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb-placeholder'}));}`
-    : `this.onerror=null;this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb-placeholder'}));`;
-  return `<img src="${composedUrl}" alt="" loading="lazy" onerror="${onerror}" />`;
+function kakaoThumbnailImgTag(thumbnailUrl) {
+  // 카카오페이지 이미지 주소를 그대로 쓴다. Referer를 안 보내서(no-referrer) 다른 사이트에서의
+  // 이미지 직접 링크를 막아두었더라도 뜨게 하고, 그래도 안 뜨는 작품(옛 기록의 죽은 주소 등)은
+  // 자리표시자로 바꾼다.
+  if (!thumbnailUrl) return '<div class="thumb-placeholder"></div>';
+  return `<img src="${escapeHtml(thumbnailUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb-placeholder'}));" />`;
 }
 
 function buildWebtoonCard(w, context) {
@@ -216,15 +201,13 @@ function buildWebtoonCard(w, context) {
       ${checkboxHtml}
       ${platformBadge}
       ${platform === "kakao"
-        ? kakaoThumbnailImgTag(w.title_id, w.thumbnail_url)
+        ? kakaoThumbnailImgTag(w.thumbnail_url)
         : (w.thumbnail_url ? `<img src="${escapeHtml(w.thumbnail_url)}" alt="" loading="lazy" />` : '<div class="thumb-placeholder"></div>')}
     </div>
     <div class="webtoon-card-body">
       <div class="webtoon-card-title">${
         platform === "kakao"
-          ? (kakaoContentUrl(w.title_id, w.seo_id)
-              ? `<a href="${kakaoContentUrl(w.title_id, w.seo_id)}" target="_blank" rel="noopener">${escapeHtml(w.title)}</a>`
-              : escapeHtml(w.title))
+          ? `<a href="${kakaoContentUrl(w.title_id)}" target="_blank" rel="noopener">${escapeHtml(w.title)}</a>`
           : `<a href="${naverUrl(w.title_id)}" target="_blank" rel="noopener">${escapeHtml(w.title)}</a>`
       }</div>
       <div class="webtoon-card-meta">${escapeHtml(metaParts.join(" · "))}</div>
@@ -313,7 +296,7 @@ function restoreNaverListPrefs() {
   }
 }
 
-async function loadNaverList() {
+async function loadNaverList(forceRefresh) {
   const grid = document.getElementById("naver-list-grid");
   const emptyMsg = document.getElementById("naver-list-empty");
   const statusEl = document.getElementById("naver-list-refresh-status");
@@ -327,19 +310,22 @@ async function loadNaverList() {
 
   try {
     const naverItems = (await apiCall("/api/naver-list")).map((w) => ({ ...w, platform: "naver" }));
-    let kakaoItems = [];
+    // 카카오페이지는 요일마다 여러 페이지를 받아야 해서(처음엔 10초 안팎) 네이버보다 훨씬
+    // 느리다 — 네이버부터 먼저 화면에 보여주고 카카오는 이어서 붙인다. 카카오가 실패해도
+    // 네이버 목록 표시 자체는 막지 않는다.
+    naverListCache = naverItems;
+    renderNaverList();
     let kakaoError = "";
     if (kakaoWebtoonsEnabled) {
-      // 카카오는 요일 7개를 훑어야 해서 네이버보다 느릴 수 있다 — 그래도 실패해도
-      // 네이버 목록 표시 자체는 막지 않는다.
+      statusEl.textContent = "카카오페이지 목록을 불러오는 중...";
       try {
-        kakaoItems = (await apiCall("/api/kakao-list")).map((w) => ({ ...w, platform: "kakao" }));
+        const kakaoItems = (await apiCall(`/api/kakao-list${forceRefresh ? "?refresh=true" : ""}`)).map((w) => ({ ...w, platform: "kakao" }));
+        naverListCache = [...naverItems, ...kakaoItems];
+        renderNaverList();
       } catch (e) {
         kakaoError = ` (카카오 목록 조회 실패: ${e.message})`;
       }
     }
-    naverListCache = [...naverItems, ...kakaoItems];
-    renderNaverList();
     statusEl.textContent = `마지막 새로고침: ${formatKoreanTime(new Date().toISOString())} (${naverListCache.length}개)${kakaoError}`;
   } catch (e) {
     if (grid.children.length === 0) {
@@ -494,10 +480,10 @@ function _webtoonListActionUrl(platform, titleId, action) {
 }
 
 async function webtoonListAction(webtoon, action, platform, context, skipRender) {
-  const { title_id: titleId, title, thumbnail_url: thumbnailUrl, seo_id: seoId, author_summary: authorSummary } = webtoon;
+  const { title_id: titleId, title, thumbnail_url: thumbnailUrl, author_summary: authorSummary } = webtoon;
   const needsBody = action === "subscribe" || action === "exclude";
   const body = platform === "kakao"
-    ? { title, thumbnail_url: thumbnailUrl || "", seo_id: seoId || "", author_summary: authorSummary || "" }
+    ? { title, thumbnail_url: thumbnailUrl || "", author_summary: authorSummary || "" }
     : { title, thumbnail_url: thumbnailUrl || "" };
   try {
     const updated = await apiCall(_webtoonListActionUrl(platform, titleId, action), {
@@ -545,7 +531,7 @@ async function kakaoSubscribeWithHint(webtoon, context) {
   await webtoonListAction(webtoon, "subscribe", "kakao", context);
 }
 
-document.getElementById("btn-refresh-naver-list").addEventListener("click", loadNaverList);
+document.getElementById("btn-refresh-naver-list").addEventListener("click", () => loadNaverList(true));
 document.getElementById("naver-list-search").addEventListener("input", renderNaverList);
 document.getElementById("naver-list-filter-status").addEventListener("change", () => {
   saveNaverListPrefs();
@@ -1737,14 +1723,27 @@ document.getElementById("btn-run-report").addEventListener("click", async () => 
   await refreshJobStatus();
 });
 
-document.getElementById("btn-cleanup-kakao-thumb-cache").addEventListener("click", async () => {
-  const btn = document.getElementById("btn-cleanup-kakao-thumb-cache");
-  const resultEl = document.getElementById("kakao-thumb-cleanup-result");
+const LEGACY_STATUS_LABELS = { active: "구독중", unsubscribed: "구독해제", excluded: "제외됨", unregistered: "목록" };
+const LEGACY_UNMATCHED_SHOW_LIMIT = 30;
+
+document.getElementById("btn-migrate-legacy-kakao").addEventListener("click", async () => {
+  const btn = document.getElementById("btn-migrate-legacy-kakao");
+  const resultEl = document.getElementById("migrate-legacy-kakao-result");
+  const unmatchedEl = document.getElementById("migrate-legacy-kakao-unmatched");
   btn.disabled = true;
-  resultEl.textContent = "정리 중...";
+  resultEl.textContent = "이전 중... (카카오페이지 목록을 받느라 10초 안팎 걸립니다)";
+  unmatchedEl.textContent = "";
   try {
-    const result = await apiCall("/api/kakao-thumbnail-cache/cleanup", { method: "POST" });
-    resultEl.textContent = `${result.deleted}개 정리했습니다.`;
+    const result = await apiCall("/api/kakao-webtoons/migrate-legacy", { method: "POST" });
+    resultEl.textContent = `${result.migrated}개 이전했습니다.`;
+    if (result.unmatched.length > 0) {
+      const shown = result.unmatched
+        .slice(0, LEGACY_UNMATCHED_SHOW_LIMIT)
+        .map((u) => `${u.title}(${LEGACY_STATUS_LABELS[u.status] || u.status})`)
+        .join(", ");
+      const rest = result.unmatched.length - LEGACY_UNMATCHED_SHOW_LIMIT;
+      unmatchedEl.textContent = `옮기지 못한 ${result.unmatched.length}개(그대로 남아 있습니다): ${shown}${rest > 0 ? ` 외 ${rest}개` : ""}`;
+    }
   } catch (e) {
     resultEl.textContent = e.message;
   } finally {

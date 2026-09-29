@@ -1,290 +1,280 @@
 """
-카카오웹툰 API 클라이언트. 네이버와 결정적으로 다른 점: 작가에게 고유 ID가 없고
-이름 문자열만 있다(실제 HAR 응답 3곳 — 요일별 목록, 작품 상세, 검색 — 전부 확인함).
-그래서 "이 작가의 모든 작품"은 이름으로 검색하는 방식으로만 구할 수 있다 —
-다행히 검색 API가 실제로 완결작까지 전부 포함해서 준다(강풀 작가로 실제 검증:
-2000년대 완결작 "순정만화"/"바보"까지 13개 전부 나옴).
+카카오페이지 API 클라이언트 (카카오웹툰이 카카오페이지로 통합되면서 옛 gateway-kw.kakao.com
+API를 대체한다). 실제 브라우저 캡처(HAR/cURL)로 확인한 것들:
 
-검색/작품 조회 API는 실제로 로그인 쿠키 없이도 200으로 응답한다(HAR에서 확인) —
-이번 신작 알림 기능 범위에서는 쿠키가 필요 없다.
+- 로그인 쿠키 없이도 200으로 응답한다(캡처에 islogin: "n"으로 확인됨) — 쿠키는 안 쓴다.
+- 웹툰과 웹소설/책이 같은 서비스라 목록/검색 결과에 섞여 나온다 → category_uid == 10(웹툰)만 쓴다.
+- 작품 ID는 series_id, 회차 ID는 product_id.
+- 요일별 목록은 요일 탭(tab_uid 1~7 = 월~일, 11 = 신작, 12 = 완결)마다 25개씩 page=0,1,2…로
+  이어 받는다(사이트는 무한 스크롤이지만 실제로는 이 page 값을 올려 호출하는 것).
+  응답의 is_end가 true가 될 때까지 넘긴다.
+- badge: "BT02" = 새 회차(UP), "BT03" = 신작 (사이트 화면과 대조해서 확인됨).
+- on_issue: "Y" = 연재 중, "P" = 휴재(장기 미갱신 작품에 붙음), "N" = 완결.
+- 저자는 authors 필드에 역할 구분 없는 "A,B,C" 문자열 하나로 온다(글/그림/원작은 별도의
+  content/about API에서만 구분됨 — 지금은 쓰지 않는다).
 """
 
 import asyncio
 import logging
+import time
 
 import aiohttp
 
 log = logging.getLogger(__name__)
 
-KAKAO_SEARCH_URL = "https://gateway-kw.kakao.com/search/v2/content"
-KAKAO_TIMETABLE_URL = "https://gateway-kw.kakao.com/section/v2/timetables/days"
+_BFF = "https://bff-page.kakao.com/api/gateway"
+KAKAO_DAYOFWEEK_URL = f"{_BFF}/view/v2/landing/dayofweek"
+KAKAO_PRODUCT_LIST_URL = f"{_BFF}/api/v2/content/product/list"
+KAKAO_SEARCH_URL = f"{_BFF}/api/v2/search/series"
 
-# 네이버의 "요일별 전체목록" 하나에 대응하는 것 — 카카오는 이걸 한 번에 주는 API가
-# 없어서, 요일 7개 + 신작 + 완결을 전부 따로 불러서 합쳐야 전체 카탈로그가 된다.
-# 실제 HAR로 확인: timetable_completed 하나만 해도 2055개(완결 전체), timetable_tue는
-# 147개 — 둘 다 접미사 없는 버전이 필터 없는 전체 목록이다.
-_CATALOG_PLACEMENTS = [
-    "timetable_mon", "timetable_tue", "timetable_wed", "timetable_thu",
-    "timetable_fri", "timetable_sat", "timetable_sun",
-    "timetable_new", "timetable_completed",
-]
+# 뷰어(회차) 바로가기 — 실제 사이트 주소 형태
+KAKAO_VIEWER_URL_TMPL = "https://page.kakao.com/content/{series_id}/viewer/{product_id}"
+# 이미지는 kid 값만 있으면 API 호출 없이 바로 조합되는 직접 URL이다(카드에 쓰기 충분한 384px)
+KAKAO_IMAGE_URL_TMPL = "https://page-images.kakaoentcdn.com/download/resource?kid={kid}&filename=o1/dims/resize/384"
 
-# 저자 목록(authors)의 type 값 — 대부분은 그냥 "AUTHOR"인데, 원작 기반 작품은
-# 그림/원작이 나뉘어서 "ILLUSTRATOR"/"ORIGINAL_STORY"로만 들어오는 경우가 실제로
-# 있다(예: "아기님 캐시로 로판 달린다" — AUTHOR 타입이 아예 없고 ILLUSTRATOR/
-# ORIGINAL_STORY/PUBLISHER만 있음, 실제 HAR로 확인). "AUTHOR"만 보면 이런 작품은
-# 저자가 통째로 안 뽑혀서 화면에 아무것도 안 나온다 — PUBLISHER(플랫폼/출판사)는
-# 창작자가 아니라서 제외한다.
-_AUTHOR_LIKE_TYPES = {"AUTHOR", "ILLUSTRATOR", "ORIGINAL_STORY"}
+WEBTOON_CATEGORY_UID = 10
+_WEEKDAY_TAB_UIDS = (1, 2, 3, 4, 5, 6, 7)  # 월~일
+_SCREEN_UID = 52  # 요일연재 화면
+_MAX_PAGES_PER_TAB = 40  # is_end가 안 오는 이상 응답에 대비한 안전 상한(요일당 200~250개 수준이 정상)
+_MAX_SEARCH_PAGES = 10
+_TAB_CONCURRENCY = 3  # 요일 탭 동시 조회 수 — 예전에 서버에서 연달아 조회하면 HTTP 403이 났던 전례가 있어 낮게
+_REQUEST_INTERVAL_SECONDS = 0.3  # 같은 탭 안에서 페이지를 넘길 때 쉬는 간격
+_CATALOG_CACHE_TTL_SECONDS = 600
 
+_BADGE_UP = "BT02"
+_BADGE_NEW = "BT03"
+_ON_ISSUE_PAUSED = "P"
+_ADULT_AGE_GRADE = 19
 
-def _extract_author_names(authors: list[dict]) -> list[str]:
-    """화면 표시용 저자 이름 목록(중복 제거, 순서 유지) — 같은 사람/스튜디오가 그림+글
-    둘 다처럼 여러 역할로 동시에 credit되어 있으면 authors 배열에 이름이 역할 수만큼
-    반복해서 들어있다(실제로 "넥스트레벨스튜디오"가 두 번 나오는 경우가 있었음).
-    그대로 join하면 "A, A, B"처럼 같은 이름이 중복 표시되므로, dict.fromkeys로
-    순서는 유지한 채 중복만 없앤다."""
-    return list(dict.fromkeys(a.get("name") for a in authors if a.get("type") in _AUTHOR_LIKE_TYPES and a.get("name")))
-
-# "웹툰 전체목록"에 보여줄 건 신작/완결까지 다 필요 없고, 지금 연재 중인(요일 배정된)
-# 것만이면 된다 — 요일 7개만 따로 뽑아둔다(위 _CATALOG_PLACEMENTS의 부분집합).
-_WEEKDAY_PLACEMENTS = _CATALOG_PLACEMENTS[:7]
-
-KAKAO_EPISODE_LIST_URL_TMPL = "https://gateway-kw.kakao.com/episode/v2/views/content-home/contents/{content_id}/episodes"
-KAKAO_VIEWER_URL_TMPL = "https://webtoon.kakao.com/viewer/{episode_seo_id}/{episode_id}"
-
+# 실제로 동작이 확인된 브라우저 요청의 헤더를 그대로 따른다(쿠키는 제외). 예전 카카오웹툰
+# API에서 진짜 브라우저 헤더(sec-ch-ua*, sec-fetch-*)가 없으면 이따금 HTTP 403이 났던
+# 경험이 있어서, 처음부터 갖춰서 보낸다.
 _HEADERS = {
     "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "ko",
-    "Accept-Encoding": "gzip, deflate",  # aiohttp가 자동으로 풀어주는 인코딩만 명시(br/zstd는 별도 패키지 없이는 못 풀어서 뺌)
-    "Origin": "https://webtoon.kakao.com",
-    "Referer": "https://webtoon.kakao.com/",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate",  # aiohttp가 자동으로 풀어주는 인코딩만(br/zstd는 별도 패키지가 필요)
+    "Origin": "https://page.kakao.com",
+    "Referer": "https://page.kakao.com/",
     "DNT": "1",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    # 아래 sec-ch-ua*/sec-fetch-* 는 실제 크롬 브라우저만 자동으로 붙이는 헤더들이다
-    # (스크립트로 직접 만드는 요청엔 원래 없음) — 실제로 확인해보니 회차 목록 조회
-    # (episodes) 엔드포인트가 HTTP 403을 낼 때 이 헤더들이 통째로 빠져있었던 게
-    # 유력한 원인으로 보인다(요일별 목록 조회는 이 헤더 없이도 계속 잘 됐던 것과 대비됨
-    # — episodes 쪽만 더 엄격하게 "진짜 브라우저인지" 확인하는 것으로 추정). User-Agent가
-    # Windows Chrome이므로 sec-ch-ua* 값도 그것과 어긋나지 않게 맞춘다(플랫폼이
-    # 서로 다르면 그 자체가 또 다른 이상 신호가 될 수 있어서).
-    "sec-ch-ua": '"Chromium";v="120", "Google Chrome";v="120", "Not.A/Brand";v="24"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"Windows"',
+    "User-Agent": (
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 "
+        "(KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1"
+    ),
+    "sec-ch-ua": '"Google Chrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"',
+    "sec-ch-ua-mobile": "?1",
+    "sec-ch-ua-platform": '"iOS"',
     "Sec-Fetch-Dest": "empty",
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Site": "same-site",
 }
 
-
-async def search_by_author(
-    session: aiohttp.ClientSession, author_name: str, timeout_seconds: int
-) -> list[dict]:
-    """
-    작가 이름으로 검색해서, 실제로 그 이름이 작가로 걸린 작품만 골라 반환한다.
-    검색어가 제목에도 우연히 걸릴 수 있어서(예: 작가 이름이 흔한 단어와 겹치는 경우),
-    searchCategory=="AUTHOR"인 것만 먼저 거르고, authors 목록에 그 이름이 실제로
-    있는지 한 번 더 확인한다(이중 검증 — 과거 다른 곳에서 느슨한 필터로 문제가 있었던
-    전례가 있어서 여기는 처음부터 엄격하게 간다).
-
-    반환값은 원본 dict 리스트 그대로 준다(title_id, title_name, is_adult 정도만
-    호출부에서 뽑아 쓰면 됨) — 완결/연재 상태를 구분할 필요가 지금은 없어서
-    파싱을 최소화했다.
-    """
-    async with session.get(
-        KAKAO_SEARCH_URL,
-        params={"limit": 30, "offset": 0, "word": author_name},
-        headers=_HEADERS,
-        timeout=aiohttp.ClientTimeout(total=timeout_seconds),
-    ) as response:
-        if response.status != 200:
-            log.warning("카카오 검색 실패 (author=%s): HTTP %s", author_name, response.status)
-            return []
-        data = await response.json()
-
-    items = (data.get("data") or {}).get("content") or []
-    results = []
-    for item in items:
-        if item.get("searchCategory") != "AUTHOR":
-            continue
-        author_names_in_item = {a.get("name") for a in item.get("authors") or []}
-        if author_name not in author_names_in_item:
-            continue
-        title_id = item.get("id")
-        if title_id is None:
-            continue
-        results.append(
-            {
-                "title_id": int(title_id),
-                "title_name": item.get("title", ""),
-                "is_adult": bool(item.get("adult")),
-            }
-        )
-    return results
+_catalog_cache: dict = {"at": 0.0, "items": None}
+_catalog_lock = asyncio.Lock()
 
 
-async def _fetch_placement_cards(session: aiohttp.ClientSession, placement: str, timeout_seconds: int) -> list[dict]:
-    """한 placement의 원본 카드 리스트(파싱 전)를 그대로 반환한다. 실패하면 빈 리스트 —
-    호출부가 "이 placement 하나 실패해도 나머지는 계속" 정책을 그대로 유지할 수 있게."""
-    try:
-        async with session.get(
-            KAKAO_TIMETABLE_URL,
-            params={"placement": placement},
-            headers=_HEADERS,
-            timeout=aiohttp.ClientTimeout(total=timeout_seconds),
-        ) as response:
-            if response.status != 200:
-                log.warning("카카오 목록 조회 실패 (placement=%s): HTTP %s", placement, response.status)
-                return []
-            data = await response.json()
-    except Exception as e:
-        log.warning("카카오 목록 조회 예외 (placement=%s): %s", placement, e)
-        return []
-
-    cards = []
-    for group in data.get("data") or []:
-        for card_group in group.get("cardGroups") or []:
-            cards.extend(card_group.get("cards") or [])
-    return cards
-
-
-async def fetch_weekday_catalog(session: aiohttp.ClientSession, timeout_seconds: int) -> list[dict]:
-    """"웹툰 전체목록"에 보여줄 것 — 요일 7개(지금 연재 중인 것)만 훑는다. 신작/완결
-    placement는 안 써서 fetch_full_catalog보다 훨씬 가볍다.
-
-    UP/신작/휴재 전부 이 한 번의 조회(placement당 한 번, 접미사 없는 "전체")로 뽑을 수
-    있다 — badges에 type=="UP"이면 새 회차, type=="NEW"면 신작, title=="EPISODES_NOT_PUBLISHING"
-    이면 휴재(실제 HAR로 셋 다 같은 응답 안에서 확인함: 화요일 캡처엔 UP이 하나도 없어서
-    한동안 "UP은 다른 placement에만 있다"고 잘못 판단했었는데, 목요일 캡처엔 UP/신작/휴재
-    배지가 전부 이 접미사 없는 placement 응답에 같이 들어있었다 — 그날 그 요일에 해당하는
-    게 마침 없었을 뿐, placement 자체의 제약이 아니었다)."""
-    all_items: dict[int, dict] = {}
-    for placement in _WEEKDAY_PLACEMENTS:
-        for card in await _fetch_placement_cards(session, placement, timeout_seconds):
-            content = card.get("content") or {}
-            title_id = content.get("id")
-            if title_id is None:
-                continue
-            badges = content.get("badges") or []
-            badge_types = {b.get("type") for b in badges}
-            badge_titles = {b.get("title") for b in badges}
-            all_items[title_id] = {
-                "title_id": title_id,
-                "title_name": content.get("title", ""),
-                "seo_id": content.get("seoId", ""),
-                "is_adult": bool(content.get("adult")),
-                "author_names": _extract_author_names(content.get("authors") or []),
-                "has_update": "UP" in badge_types,
-                "is_new": "NEW" in badge_types,
-                "is_paused": "EPISODES_NOT_PUBLISHING" in badge_titles,
-                "thumbnail_url": content.get("backgroundImage") or "",
-            }
-    return list(all_items.values())
-
-
-async def fetch_latest_episode_url(
-    session: aiohttp.ClientSession, content_id: int, timeout_seconds: int
-) -> str | None:
-    """이 작품의 가장 최근 회차로 바로 가는 뷰어 URL을 만든다 — 회차 목록을
-    번호 내림차순(sort=-NO)으로 조회하면 앞쪽이 최신 회차다(실제 HAR로 확인).
-    "다운로드 리포트"에서 UP 배지가 있는 작품에만 이걸 조회하므로, 전체 카탈로그
-    규모와 무관하게 가볍다.
-
-    다만 맨 앞(번호가 가장 높은) 회차가 항상 "지금 읽을 수 있는" 회차는 아니다 —
-    카카오는 "유료 선공개"(useType: EARLY_ACCESS, readable: false) 회차가 정식
-    무료 공개보다 먼저 번호를 차지하고 있는 경우가 실제로 있다(HAR로 직접 확인:
-    39~45화가 EARLY_ACCESS/readable=false, 38화부터 FREE/readable=true). 그걸
-    그대로 링크로 주면 유료 결제 화면으로 보내는 셈이라, 앞에서부터 readable이
-    true인 첫 회차를 찾는다. 선공개 회차가 몰려있을 수 있어 넉넉히 20개까지 본다.
-
-    실제로 겪은 문제: 요청 헤더가 실제 브라우저와 완전히 같은데도(HAR로 직접
-    대조 확인함) 이 엔드포인트만 이따금 HTTP 403이 난다 — 유료/무료 구분 문제가
-    아니라(성인 표시 없는 일반 작품에서도 발생), 서버에서 짧은 시간에 여러 작품을
-    연달아 조회할 때만 생기는 걸로 보아 요청 빈도 제한이나 봇 탐지 쪽일 가능성이
-    높다. 원인을 완전히 확정할 순 없어서, 403/429/5xx는 잠깐 쉬었다가 한두 번 더
-    시도해보고, 그래도 안 되면 포기한다(그 작품 하나가 이번 리포트에서 빠질 뿐,
-    전체 리포트를 막지는 않아야 하므로)."""
+async def _get_json(
+    session: aiohttp.ClientSession, url: str, params: dict, timeout_seconds: int, label: str
+) -> dict | None:
+    """GET 후 JSON을 돌려준다. 실패하면 None(호출부가 알아서 계속 진행할 수 있게 예외를
+    던지지 않는다). HTTP 403/429/5xx는 잠깐 쉬었다가 최대 3번까지 시도한다 — 일시적인
+    요청 제한이면 이걸로 풀리는 경우가 있어서."""
     for attempt in range(3):
         try:
             async with session.get(
-                KAKAO_EPISODE_LIST_URL_TMPL.format(content_id=content_id),
-                params={"sort": "-NO", "offset": 0, "limit": 20},
-                headers=_HEADERS,
-                timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+                url, params=params, headers=_HEADERS, timeout=aiohttp.ClientTimeout(total=timeout_seconds)
             ) as response:
                 if response.status in (403, 429) or response.status >= 500:
                     if attempt < 2:
                         log.warning(
-                            "카카오 회차 목록 조회 실패 (content_id=%s): HTTP %s, %.1f초 뒤 재시도 (%d/3)",
-                            content_id, response.status, 2 * (attempt + 1), attempt + 1,
+                            "카카오페이지 조회 실패 (%s): HTTP %s, %d초 뒤 재시도 (%d/3)",
+                            label, response.status, 2 * (attempt + 1), attempt + 1,
                         )
                         await asyncio.sleep(2 * (attempt + 1))
                         continue
-                    log.warning("카카오 회차 목록 조회 실패 (content_id=%s): HTTP %s (재시도 소진)", content_id, response.status)
+                    log.warning("카카오페이지 조회 실패 (%s): HTTP %s (재시도 소진)", label, response.status)
                     return None
                 if response.status != 200:
-                    log.warning("카카오 회차 목록 조회 실패 (content_id=%s): HTTP %s", content_id, response.status)
+                    log.warning("카카오페이지 조회 실패 (%s): HTTP %s", label, response.status)
                     return None
-                data = await response.json()
-                break
+                return await response.json()
         except Exception as e:
-            log.warning("카카오 회차 목록 조회 예외 (content_id=%s): %s", content_id, e)
+            log.warning("카카오페이지 조회 예외 (%s): %s", label, e)
             return None
+    return None
 
-    episodes = ((data.get("data") or {}).get("episodes")) or []
-    latest = next((ep for ep in episodes if ep.get("readable")), None)
+
+def _split_author_names(authors: str | None) -> list[str]:
+    """"A,B, C" → ["A","B","C"] (공백 정리, 중복 제거, 순서 유지)."""
+    return list(dict.fromkeys(n.strip() for n in (authors or "").split(",") if n.strip()))
+
+
+def _thumbnail_url(card: dict) -> str:
+    """사이트가 요일연재 카드에 쓰는 이미지 순서 — card_set.background_img가 있으면 그것,
+    옛 방식 작품은 card_img, 그것도 없으면 배너 배경."""
+    asset = card.get("asset_property") or {}
+    kid = (
+        (asset.get("card_set") or {}).get("background_img")
+        or asset.get("card_img")
+        or (asset.get("banner_set") or {}).get("background_img")
+    )
+    return KAKAO_IMAGE_URL_TMPL.format(kid=kid) if kid else ""
+
+
+def _card_to_item(card: dict) -> dict | None:
+    series_id = card.get("series_id")
+    if series_id is None or card.get("category_uid") != WEBTOON_CATEGORY_UID:
+        return None
+    badge = card.get("badge")
+    return {
+        "title_id": series_id,
+        "title_name": card.get("title", ""),
+        "is_adult": (card.get("age_grade") or 0) >= _ADULT_AGE_GRADE,
+        "author_names": _split_author_names(card.get("authors")),
+        "has_update": badge == _BADGE_UP,
+        "is_new": badge == _BADGE_NEW,
+        "is_paused": card.get("on_issue") == _ON_ISSUE_PAUSED,
+        "thumbnail_url": _thumbnail_url(card),
+    }
+
+
+async def _fetch_weekday_tab(
+    session: aiohttp.ClientSession, tab_uid: int, timeout_seconds: int
+) -> tuple[list[dict], bool]:
+    """요일 탭 하나의 카드 전부(페이지를 is_end까지 넘김). 두 번째 값은 끝까지 성공했는지."""
+    cards: list[dict] = []
+    for page in range(_MAX_PAGES_PER_TAB):
+        # 사이트가 실제로 보내는 형태 그대로 — 첫 페이지엔 bm/subcategory_uid가 없고 이후엔 붙는다
+        params = {"category_uid": WEBTOON_CATEGORY_UID, "page": page}
+        if page > 0:
+            params.update({"bm": "A", "subcategory_uid": 0})
+        params.update({"tab_uid": tab_uid, "screen_uid": _SCREEN_UID})
+
+        data = await _get_json(session, KAKAO_DAYOFWEEK_URL, params, timeout_seconds, f"요일 tab_uid={tab_uid} page={page}")
+        if data is None:
+            return cards, False
+        result = data.get("result") or {}
+        page_cards = result.get("list") or []
+        cards.extend(page_cards)
+        if result.get("is_end") or not page_cards:
+            return cards, True
+        await asyncio.sleep(_REQUEST_INTERVAL_SECONDS)
+    log.warning("카카오페이지 요일 목록이 %d페이지를 넘어 중단함 (tab_uid=%s)", _MAX_PAGES_PER_TAB, tab_uid)
+    return cards, True
+
+
+async def _fetch_weekday_catalog_uncached(
+    session: aiohttp.ClientSession, timeout_seconds: int
+) -> tuple[list[dict], bool]:
+    semaphore = asyncio.Semaphore(_TAB_CONCURRENCY)
+
+    async def _one(tab_uid: int):
+        async with semaphore:
+            return await _fetch_weekday_tab(session, tab_uid, timeout_seconds)
+
+    tab_results = await asyncio.gather(*[_one(t) for t in _WEEKDAY_TAB_UIDS])
+
+    items: dict[int, dict] = {}  # 여러 요일에 걸린 작품("월, 화, 수")은 series_id로 한 번만
+    all_ok = True
+    for cards, ok in tab_results:
+        all_ok = all_ok and ok
+        for card in cards:
+            item = _card_to_item(card)
+            if item is not None:
+                items.setdefault(item["title_id"], item)
+    return list(items.values()), all_ok
+
+
+async def fetch_weekday_catalog(
+    session: aiohttp.ClientSession, timeout_seconds: int, *, use_cache: bool = True
+) -> list[dict]:
+    """"웹툰 전체목록"에 보여줄 것 — 요일 7개(지금 연재 중인 것)만 훑는다. 예전(카카오웹툰)엔
+    요일당 요청 1번이면 됐지만 지금은 요일당 5~10페이지라 전체 약 60번이 나가서, 결과를
+    10분간 메모리에 캐시한다(use_cache=False면 무시하고 새로 받아 캐시도 갱신 — 화면의
+    "새로고침"과 다운로드 리포트가 그렇게 쓴다). 일부 요일 조회가 실패했으면 있는 것만
+    돌려주되 캐시하지는 않는다(잘못된 부분 결과가 10분간 굳는 걸 막기 위해)."""
+    async with _catalog_lock:
+        cached = _catalog_cache["items"]
+        if use_cache and cached is not None and time.monotonic() - _catalog_cache["at"] < _CATALOG_CACHE_TTL_SECONDS:
+            return list(cached)
+        items, all_ok = await _fetch_weekday_catalog_uncached(session, timeout_seconds)
+        if items and all_ok:
+            _catalog_cache["items"] = items
+            _catalog_cache["at"] = time.monotonic()
+        return list(items)
+
+
+async def fetch_latest_episode_url(
+    session: aiohttp.ClientSession, series_id: int, timeout_seconds: int
+) -> str | None:
+    """이 작품의 가장 최근 회차로 바로 가는 뷰어 URL을 만든다 — 회차 목록을 최신순
+    (sort_type=desc)으로 받아 맨 앞(숨김 처리 안 된) 회차를 쓴다.
+
+    카카오페이지의 "기다리면 무료" 작품은 최신 회차가 전부 아직 안 풀린(is_free: false)
+    상태라서, 예전 카카오웹툰처럼 "지금 읽을 수 있는 최신 회차"로 거르면 몇 달 전 회차가
+    나와버린다 — UP(새 회차) 표시가 가리키는 건 바로 그 최신 회차라서, 잠겨 있어도
+    최신 회차로 보낸다(기다무 이용권/충전이 있으면 그 화면에서 바로 열 수 있다)."""
+    data = await _get_json(
+        session,
+        KAKAO_PRODUCT_LIST_URL,
+        {"series_id": series_id, "cursor_index": 0, "cursor_direction": "NEXT", "window_size": 25, "sort_type": "desc"},
+        timeout_seconds,
+        f"회차 목록 series_id={series_id}",
+    )
+    if data is None:
+        return None
+    episodes = [entry.get("item") or {} for entry in (data.get("result") or {}).get("list") or []]
+    latest = next((ep for ep in episodes if ep.get("product_id") is not None and not ep.get("hidden")), None)
     if latest is None:
-        # 조회한 범위(최신 20개) 전부가 아직 안 풀린 유료 선공개인 드문 경우 —
-        # 이럴 땐 링크를 잘못 주느니 그냥 이번 리포트에서 빠지는 쪽을 택한다.
-        log.warning("카카오 작품(content_id=%s) 최근 20개 회차가 전부 읽을 수 없음(선공개뿐) — 건너뜀", content_id)
         return None
-    episode_id = latest.get("id")
-    episode_seo_id = latest.get("seoId")
-    if episode_id is None or not episode_seo_id:
-        return None
-    return KAKAO_VIEWER_URL_TMPL.format(episode_seo_id=episode_seo_id, episode_id=episode_id)
+    return KAKAO_VIEWER_URL_TMPL.format(series_id=series_id, product_id=latest["product_id"])
 
 
-async def fetch_full_catalog(session: aiohttp.ClientSession, timeout_seconds: int) -> list[dict]:
-    """
-    요일 7개 + 신작 + 완결 placement를 전부 불러서 합친다 — 네이버의 "요일별 전체목록"에
-    대응하는, 카카오웹툰의 사실상 전체 카탈로그. 한 placement가 실패해도(네트워크 오류 등)
-    나머지는 계속 가져온다 — 완결 목록이 2000개가 넘어서 그것 하나만 잠깐 느려도 다른
-    요일 정보까지 전부 날아가면 안 되기 때문. fetch_weekday_catalog와 같은 저수준
-    조회 함수(_fetch_placement_cards)를 그대로 재사용한다.
-    """
-    all_items: dict[int, dict] = {}
-    for placement in _CATALOG_PLACEMENTS:
-        for card in await _fetch_placement_cards(session, placement, timeout_seconds):
-            content = card.get("content") or {}
-            title_id = content.get("id")
-            if title_id is None:
+async def search_by_author(
+    session: aiohttp.ClientSession, author_name: str, timeout_seconds: int
+) -> list[dict]:
+    """작가 이름으로 검색해서, 실제로 그 이름이 저자로 걸린 웹툰만 골라 반환한다. 검색어는
+    제목에도 걸릴 수 있고 웹소설/책도 섞여 나오므로, 웹툰 카테고리이면서 authors 목록에
+    그 이름이 정확히 있는 것만 남긴다(완결작 포함 — 검색은 완결 여부로 거르지 않는다).
+    반환은 title_id/title_name/is_adult만 담은 dict 리스트."""
+    results: list[dict] = []
+    for page in range(_MAX_SEARCH_PAGES):
+        data = await _get_json(
+            session,
+            KAKAO_SEARCH_URL,
+            {
+                "keyword": author_name, "category_uid": WEBTOON_CATEGORY_UID, "is_complete": "false",
+                "sort_type": "ACCURACY", "page": page, "size": 25,
+            },
+            timeout_seconds,
+            f"검색 author={author_name} page={page}",
+        )
+        if data is None:
+            break
+        result = data.get("result") or {}
+        entries = result.get("list") or []
+        for item in entries:
+            if item.get("category_uid") != WEBTOON_CATEGORY_UID or item.get("series_id") is None:
                 continue
-            authors = content.get("authors") or []
-            all_items[title_id] = {
-                "title_id": title_id,
-                "title_name": content.get("title", ""),
-                "is_adult": bool(content.get("adult")),
-                # 화면에 보여줄 때는(웹툰 전체목록 등) ILLUSTRATOR/ORIGINAL_STORY도
-                # 저자로 쳐야 한다(원작 기반 작품은 AUTHOR 타입이 아예 없는 경우가
-                # 실제로 있음 — fetch_weekday_catalog 참고). 다만 "작가/태그 관리"의
-                # 관심 작가 후보 추천(extract_candidate_author_names)은 원래부터
-                # AUTHOR 타입만 쓰려던 의도라서, 타입 정보를 그대로 authors에 남겨두고
-                # 그 함수가 스스로 좁혀서 쓰게 한다(용도가 다르면 같은 원본에서 각자
-                # 필요한 만큼만 걸러 쓰는 게 맞다).
-                "authors": authors,
-                "author_names": _extract_author_names(authors),
-            }
-    return list(all_items.values())
+            if author_name not in _split_author_names(item.get("authors")):
+                continue
+            results.append(
+                {
+                    "title_id": item["series_id"],
+                    "title_name": item.get("title", ""),
+                    "is_adult": (item.get("age_grade") or 0) >= _ADULT_AGE_GRADE,
+                }
+            )
+        if result.get("is_end") or not entries:
+            break
+        await asyncio.sleep(_REQUEST_INTERVAL_SECONDS)
+    return results
 
 
 def extract_candidate_author_names(items: list[dict]) -> list[str]:
-    """전체 카탈로그에서 AUTHOR 타입 이름만 뽑아 중복 제거한다 (PUBLISHER/ILLUSTRATOR/
-    ORIGINAL_STORY 전용 이름은 제외 — 그렇게 안 하면 "카카오웹툰 스튜디오" 같은 게
-    관심 작가 후보에 계속 낀다). fetch_full_catalog의 author_names는 화면 표시용으로
-    범위가 더 넓어서(ILLUSTRATOR/ORIGINAL_STORY 포함) 여기서는 못 쓰고, authors
-    원본에서 다시 좁혀서 뽑는다."""
+    """요일별 목록에서 저자 이름을 중복 없이 모은다("작가/태그 관리"의 관심 작가 후보). 카카오
+    페이지 목록은 저자가 글/그림/원작 구분 없이 이름만 나와서, 삽화가나 스튜디오 이름도
+    후보에 섞인다."""
     names: set[str] = set()
     for item in items:
-        names.update(a.get("name") for a in item.get("authors") or [] if a.get("type") == "AUTHOR" and a.get("name"))
+        names.update(item.get("author_names") or [])
     return sorted(names)

@@ -343,6 +343,14 @@
           <input type="checkbox" id="kakao-webtoons-enabled-toggle" /> 카카오웹툰 관리하기
         </label>
       </div>
+
+      <div class="field-group">
+        <label>예전 카카오웹툰 기록 이전</label>
+        <p class="field-hint">카카오웹툰이 카카오페이지로 통합되면서 작품 번호 체계가 달라져서, 예전에 구독/제외/구독해제해둔 기록이 새 목록과 맞지 않습니다. 이 버튼은 카카오페이지 요일별 목록에서 <strong>제목이 정확히 하나만 일치하는</strong> 작품으로 그 기록(상태와 구독 이력 그대로)을 옮깁니다. 제목이 바뀌었거나 지금 연재 중이 아닌 작품은 그대로 두고 아래에 목록으로 알려드립니다. 여러 번 눌러도 안전하고, 결과는 "웹툰 전체목록"을 새로고침하면 반영됩니다.</p>
+        <button id="btn-migrate-legacy-kakao">예전 기록 이전하기</button>
+        <span id="migrate-legacy-kakao-result" class="hint-inline"></span>
+        <p id="migrate-legacy-kakao-unmatched" class="field-hint"></p>
+      </div>
     </div>
 
     <div class="settings-card">
@@ -396,11 +404,8 @@
         <button id="btn-run-download">다운로드 실행</button>
         <button id="btn-run-metadata-sync">메타 동기화</button>
         <button id="btn-run-report">리포트 발송</button>
-        <button id="btn-cleanup-kakao-thumb-cache">카카오 썸네일 캐시 정리</button>
       </div>
-      <p class="hint">메타 동기화: 다운로드 폴더를 스캔해서 info.xml/커버 이미지가 없는 것만 다시 만듭니다.
-      카카오 썸네일 캐시 정리: 지금 요일별 목록에도 없고 구독/구독해제/미등록 이력도 없는(제외했거나 모르는) 작품의 캐시된 썸네일을 지웁니다.</p>
-      <span id="kakao-thumb-cleanup-result" class="hint-inline"></span>
+      <p class="hint">메타 동기화: 다운로드 폴더를 스캔해서 info.xml/커버 이미지가 없는 것만 다시 만듭니다.</p>
 
       <div class="job-status-block">
         <h3>신작 스캔 상태 <span id="discovery-status-badge" class="badge">idle</span></h3>

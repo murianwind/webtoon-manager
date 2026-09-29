@@ -27,7 +27,7 @@ from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app import archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, kakao_api, kakao_cover, naver_api, repository, schedule_config, tracker, webtoon_server_client
+from app import archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, kakao_api, naver_api, repository, schedule_config, tracker, webtoon_server_client
 from app import rclone_updater
 from app.config import Settings, get_settings
 from app.constants import NAVER_DETAIL_URL_TEMPLATES
@@ -373,33 +373,21 @@ async def _collect_unregistered_new_episodes(
 async def _collect_kakao_new_episodes(
     session: aiohttp.ClientSession, settings
 ) -> list[tuple[int, str, str, bool]]:
-    """"웹툰 전체목록"에 있는(=요일 7개, 목록제외 안 한) 카카오웹툰 중 새 회차(UP
+    """"웹툰 전체목록"에 있는(=요일 7개, 목록제외 안 한) 카카오페이지 웹툰 중 새 회차(UP
     표시)가 있는 것만 골라서 (title_id, title_name, 바로가기 URL, 구독 중 여부)로
     반환한다. 네이버의 _collect_unregistered_new_episodes와 비슷한 역할이지만, 카카오는
     "구독"이 다운로드를 뜻하지 않고 웹툰 뷰어 서버에 그 작품이 있다는 표시일 뿐이다 —
     그래서 지금 구독 중(active)이고 뷰어 서버 주소도 설정돼 있으면 그 뷰어의 바로가기
     URL을 먼저 시도하고, 조회에 실패하면(사용자가 실수로 뷰어에 없는 작품을
-    구독했을 수 있으므로) 카카오웹툰 자체 링크로 조용히 대체한다. 구독 중 여부는
+    구독했을 수 있으므로) 카카오페이지 자체 링크로 조용히 대체한다. 구독 중 여부는
     리포트에서 "목록 제외" 링크를 붙일지 정할 때 쓴다(이미 구독해서 챙겨보고 있는
     작품에 "제외" 링크를 붙이는 건 의미가 없다)."""
     try:
-        items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds)
+        # 리포트는 화면 캐시(10분)가 아니라 그 시점의 최신 목록으로 만든다
+        items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds, use_cache=False)
     except Exception as e:
         log.error("카카오 신규 에피소드 확인 중 목록 조회 실패(무시하고 계속): %s", e)
         return []
-
-    # 이미 요일별 목록을 조회한 김에, 더 이상 필요 없는 썸네일 캐시(요일별 목록에도
-    # 없고 구독/구독해제/미등록 이력도 없는 것)를 자동으로 같이 정리한다 — 정리만
-    # 하려고 카카오 서버에 또 목록을 물어보는 별도 요청을 안 만들려는 것. 실패해도
-    # (디스크 오류 등) 신규 에피소드 확인 자체는 계속 진행한다.
-    try:
-        cache_dir = kakao_cover.thumbnail_cache_dir(settings.database_path)
-        keep_ids = await asyncio.to_thread(kakao_cover.thumbnail_cache_keep_ids, items)
-        deleted = await asyncio.to_thread(kakao_cover.cleanup_thumbnail_cache_dir, cache_dir, keep_ids)
-        if deleted:
-            log.info("카카오 썸네일 캐시 %d개 정리함", deleted)
-    except Exception as e:
-        log.warning("카카오 썸네일 캐시 자동 정리 실패(무시하고 계속): %s", e)
 
     # "제외됨"뿐 아니라 "구독해제"도 후보에서 빼야 한다 — 구독해제는 "더 이상 안
     # 챙겨보고 싶다"는 뜻이라 목록제외와 사실상 같은 의도인데, 여태 제외됨만 걸러서
