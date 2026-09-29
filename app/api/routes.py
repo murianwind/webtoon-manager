@@ -26,7 +26,7 @@ from pathlib import Path
 import markdown
 import aiohttp
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, field_validator
 
 from app import (
@@ -42,6 +42,7 @@ from app import (
 )
 from app import scheduler as scheduler_mod
 from app import kakao_api
+from app import kakao_cover
 from app import webtoon_server_client
 from app import archiver
 from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
@@ -346,6 +347,40 @@ class KakaoWebtoonEntryIn(BaseModel):
     title: str
     thumbnail_url: str = ""
     author_summary: str = ""
+
+
+# 목록의 카카오 썸네일을 처음 볼 때 작품마다 카카오 API를 한 번씩 불러야 해서(요일 목록 카드에는 공식
+# 표지가 없다), 화면에 한꺼번에 보이는 수십 개가 동시에 요청되면 카카오 쪽에서 막힐 수 있다 — 서로 다른
+# 작품은 동시에 2개까지만 받고 나머지는 줄을 세운다. 같은 작품이 동시에 여러 번 요청돼도(화면을
+# 다시 그릴 때 등) 작품별 락으로 한 번만 받는다. 한 번 받은 표지는 파일로 저장해서 이후엔 카카오를
+# 안 부른다.
+_kakao_thumbnail_semaphore = asyncio.Semaphore(2)
+_kakao_thumbnail_locks: dict[int, asyncio.Lock] = {}
+_KAKAO_THUMBNAIL_BROWSER_CACHE = "public, max-age=86400"
+
+
+@router.get("/kakao-thumbnail/{series_id}")
+async def get_kakao_thumbnail(series_id: int):
+    """"웹툰 전체목록"의 카카오 카드 썸네일 — 카카오페이지 작품 페이지에 나오는 공식 표지(제목이 들어간
+    완성 이미지)를 줄인 크기로 받아 저장해두고 서빙한다. 요일 목록 카드의 이미지는 그 작품의 공식
+    표지와 다른 그림이라 이 방식을 쓴다. 받지 못하면 404 — 화면이 목록 카드 이미지로 대신 보여준다."""
+    cache_path = kakao_cover.thumbnail_cache_dir(get_settings().database_path) / f"{series_id}.jpg"
+    if not cache_path.is_file():
+        lock = _kakao_thumbnail_locks.setdefault(series_id, asyncio.Lock())
+        try:
+            async with lock:
+                if not cache_path.is_file():  # 줄 서서 기다리는 사이 같은 작품 요청이 이미 채웠을 수 있다
+                    async with _kakao_thumbnail_semaphore:
+                        jpeg_bytes = await asyncio.to_thread(
+                            kakao_cover.fetch_official_cover_bytes, str(series_id), filename=kakao_api.IMAGE_FILENAME_CARD
+                        )
+                    if jpeg_bytes is None:
+                        raise HTTPException(status_code=404, detail="카카오페이지 표지를 받지 못했습니다.")
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    cache_path.write_bytes(jpeg_bytes)
+        finally:
+            _kakao_thumbnail_locks.pop(series_id, None)
+    return FileResponse(cache_path, media_type="image/jpeg", headers={"Cache-Control": _KAKAO_THUMBNAIL_BROWSER_CACHE})
 
 
 @router.get("/kakao-list")
@@ -2105,7 +2140,7 @@ class BulkMoveIn(BaseModel):
     dest_path: str
     dest_local_root: str = "archive"
     filename_template_preset_id: int | None = None  # None이면 파일명을 안 건드리고 그대로 이동
-    regenerate_kakao_cover: bool = False  # 켜면 원본이 카카오웹툰이면(info.xml 판단) 표지를 새로 합성
+    regenerate_kakao_cover: bool = False  # 켜면 원본이 카카오페이지 작품이면(info.xml 판단) 공식 표지를 새로 받아서 교체
 
     @field_validator("source_type", "dest_type")
     @classmethod

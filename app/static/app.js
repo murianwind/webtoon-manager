@@ -160,12 +160,18 @@ document.querySelectorAll(".main-tab").forEach((tab) => {
 
 // ── 공용 카드 빌더 ───────────────────────────────────────
 
-function kakaoThumbnailImgTag(thumbnailUrl) {
-  // 카카오페이지 이미지 주소를 그대로 쓴다. Referer를 안 보내서(no-referrer) 다른 사이트에서의
-  // 이미지 직접 링크를 막아두었더라도 뜨게 하고, 그래도 안 뜨는 작품(옛 기록의 죽은 주소 등)은
-  // 자리표시자로 바꾼다.
-  if (!thumbnailUrl) return '<div class="thumb-placeholder"></div>';
-  return `<img src="${escapeHtml(thumbnailUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb-placeholder'}));" />`;
+function kakaoThumbnailImgTag(titleId, cardImageUrl) {
+  // 카카오페이지 작품 페이지에 나오는 공식 표지를 서버가 받아 저장해둔 것(/api/kakao-thumbnail)을
+  // 먼저 보여준다 — 요일 목록 카드의 이미지는 그 작품의 공식 표지와 다른 그림이라서. 그걸 못 받았거나
+  // (옛 기록 등 카카오페이지에 없는 작품) 실패하면 목록 카드 이미지로, 그것도 안 되면 자리표시자로
+  // 넘어간다. Referer를 안 보내서(no-referrer) 카드 이미지가 다른 사이트에서의 직접 링크 제한에
+  // 걸리는 일도 막는다.
+  const placeholder = "this.onerror=null;this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb-placeholder'}));";
+  const fallback = cardImageUrl ? escapeHtml(cardImageUrl) : "";
+  const onerror = fallback
+    ? `if(!this.dataset.fallback){this.dataset.fallback='1';this.src='${fallback}';}else{${placeholder}}`
+    : placeholder;
+  return `<img src="/api/kakao-thumbnail/${titleId}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="${onerror}" />`;
 }
 
 function buildWebtoonCard(w, context) {
@@ -201,7 +207,7 @@ function buildWebtoonCard(w, context) {
       ${checkboxHtml}
       ${platformBadge}
       ${platform === "kakao"
-        ? kakaoThumbnailImgTag(w.thumbnail_url)
+        ? kakaoThumbnailImgTag(w.title_id, w.thumbnail_url)
         : (w.thumbnail_url ? `<img src="${escapeHtml(w.thumbnail_url)}" alt="" loading="lazy" />` : '<div class="thumb-placeholder"></div>')}
     </div>
     <div class="webtoon-card-body">

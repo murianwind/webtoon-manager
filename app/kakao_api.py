@@ -29,8 +29,11 @@ KAKAO_SEARCH_URL = f"{_BFF}/api/v2/search/series"
 
 # 뷰어(회차) 바로가기 — 실제 사이트 주소 형태
 KAKAO_VIEWER_URL_TMPL = "https://page.kakao.com/content/{series_id}/viewer/{product_id}"
-# 이미지는 kid 값만 있으면 API 호출 없이 바로 조합되는 직접 URL이다(카드에 쓰기 충분한 384px)
-KAKAO_IMAGE_URL_TMPL = "https://page-images.kakaoentcdn.com/download/resource?kid={kid}&filename=o1/dims/resize/384"
+# 이미지는 kid 값만 있으면 API 호출 없이 바로 조합되는 직접 URL이다. filename으로 크기를 고른다 —
+# "o1"은 원본, "o1/dims/resize/384"는 가로 384px로 줄인 것(목록 카드용).
+KAKAO_IMAGE_URL_TMPL = "https://page-images.kakaoentcdn.com/download/resource?kid={kid}&filename={filename}"
+IMAGE_FILENAME_ORIGINAL = "o1"
+IMAGE_FILENAME_CARD = "o1/dims/resize/384"
 
 WEBTOON_CATEGORY_UID = 10
 _WEEKDAY_TAB_UIDS = (1, 2, 3, 4, 5, 6, 7)  # 월~일
@@ -49,7 +52,7 @@ _ADULT_AGE_GRADE = 19
 # 실제로 동작이 확인된 브라우저 요청의 헤더를 그대로 따른다(쿠키는 제외). 예전 카카오웹툰
 # API에서 진짜 브라우저 헤더(sec-ch-ua*, sec-fetch-*)가 없으면 이따금 HTTP 403이 났던
 # 경험이 있어서, 처음부터 갖춰서 보낸다.
-_HEADERS = {
+HEADERS = {
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
     "Accept-Encoding": "gzip, deflate",  # aiohttp가 자동으로 풀어주는 인코딩만(br/zstd는 별도 패키지가 필요)
@@ -68,6 +71,14 @@ _HEADERS = {
     "Sec-Fetch-Site": "same-site",
 }
 
+# 이미지 요청용 헤더 — 같은 브라우저 헤더에서 API 전용인 Origin/Accept만 이미지 요청답게 바꾼다
+IMAGE_HEADERS = {
+    **{k: v for k, v in HEADERS.items() if k != "Origin"},
+    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+    "Sec-Fetch-Dest": "image",
+    "Sec-Fetch-Mode": "no-cors",
+}
+
 _catalog_cache: dict = {"at": 0.0, "items": None}
 _catalog_lock = asyncio.Lock()
 
@@ -81,7 +92,7 @@ async def _get_json(
     for attempt in range(3):
         try:
             async with session.get(
-                url, params=params, headers=_HEADERS, timeout=aiohttp.ClientTimeout(total=timeout_seconds)
+                url, params=params, headers=HEADERS, timeout=aiohttp.ClientTimeout(total=timeout_seconds)
             ) as response:
                 if response.status in (403, 429) or response.status >= 500:
                     if attempt < 2:
@@ -117,7 +128,11 @@ def _thumbnail_url(card: dict) -> str:
         or asset.get("card_img")
         or (asset.get("banner_set") or {}).get("background_img")
     )
-    return KAKAO_IMAGE_URL_TMPL.format(kid=kid) if kid else ""
+    return image_url(kid, IMAGE_FILENAME_CARD) if kid else ""
+
+
+def image_url(kid: str, filename: str = IMAGE_FILENAME_ORIGINAL) -> str:
+    return KAKAO_IMAGE_URL_TMPL.format(kid=kid, filename=filename)
 
 
 def _card_to_item(card: dict) -> dict | None:
@@ -203,6 +218,18 @@ async def fetch_weekday_catalog(
         return list(items)
 
 
+def product_list_params(series_id: int) -> dict:
+    """회차 목록(최신순) 요청 파라미터. 이 응답 한 번으로 최신 회차와 작품의 공식 표지(series_item.
+    thumbnail)를 같이 얻는다 — 요일 목록 카드에는 공식 표지가 없어서 작품마다 이 호출이 필요하다."""
+    return {"series_id": series_id, "cursor_index": 0, "cursor_direction": "NEXT", "window_size": 25, "sort_type": "desc"}
+
+
+def thumbnail_kid(product_list_data: dict | None) -> str | None:
+    """회차 목록 응답에서 작품의 공식 표지 kid(작품 페이지에 나오는 제목 들어간 표지)를 꺼낸다."""
+    series_item = ((product_list_data or {}).get("result") or {}).get("series_item") or {}
+    return series_item.get("thumbnail") or None
+
+
 async def fetch_latest_episode_url(
     session: aiohttp.ClientSession, series_id: int, timeout_seconds: int
 ) -> str | None:
@@ -214,11 +241,7 @@ async def fetch_latest_episode_url(
     나와버린다 — UP(새 회차) 표시가 가리키는 건 바로 그 최신 회차라서, 잠겨 있어도
     최신 회차로 보낸다(기다무 이용권/충전이 있으면 그 화면에서 바로 열 수 있다)."""
     data = await _get_json(
-        session,
-        KAKAO_PRODUCT_LIST_URL,
-        {"series_id": series_id, "cursor_index": 0, "cursor_direction": "NEXT", "window_size": 25, "sort_type": "desc"},
-        timeout_seconds,
-        f"회차 목록 series_id={series_id}",
+        session, KAKAO_PRODUCT_LIST_URL, product_list_params(series_id), timeout_seconds, f"회차 목록 series_id={series_id}"
     )
     if data is None:
         return None

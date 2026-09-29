@@ -498,8 +498,8 @@ def _archive_title(
 
     if not keep_last:
         # 완결 처리(수동 "완결 처리로 이동"이든 완결 자동이동이든)일 때만 —
-        # 이 폴더가 카카오웹툰이면(info.xml의 <Web> 태그로 판단) 표지를 최신 합성
-        # 방식으로 새로 만들어 교체한다. 실패해도 아카이빙 자체는 계속 진행한다.
+        # 이 폴더가 카카오페이지 작품이면(info.xml의 <Web> 태그로 판단) 표지를 카카오페이지의
+        # 공식 표지로 새로 받아 교체한다. 실패해도 아카이빙 자체는 계속 진행한다.
         try:
             if kakao_cover.refresh_kakao_cover_if_applicable(title_dir):
                 if progress_callback:
@@ -864,9 +864,9 @@ def _archive_folder_target(
             elif "info.xml" in meta_names:
                 remote, path = src_ctx
                 xml_text = rclone_client.read_small_text_file(rclone_config_path, remote, path, "info.xml")
-                content_id = kakao_cover.parse_kakao_web_url(_extract_web_url_from_xml_text(xml_text) or "")
-                if content_id:
-                    regenerated_local_cover = _compose_kakao_cover_to_temp_file(content_id)
+                series_id = kakao_cover.parse_kakao_web_url(_extract_web_url_from_xml_text(xml_text) or "")
+                if series_id:
+                    regenerated_local_cover = _download_kakao_cover_to_temp_file(series_id)
                     if regenerated_local_cover and progress_callback:
                         progress_callback(f"[{display_name}] 카카오 표지 갱신함")
         except Exception as e:
@@ -980,13 +980,13 @@ def _extract_web_url_from_xml_text(xml_text: str | None) -> str | None:
         return None
 
 
-def _compose_kakao_cover_to_temp_file(content_id: str) -> str | None:
-    """rclone 원본용 — info.xml만 가볍게 읽어서 카카오로 판별된 뒤, 실제 표지 소재는
-    카카오 CDN에서 직접 받아 합성한다(원본 폴더 자체를 내려받지 않아도 됨).
-    합성 결과를 임시 로컬 파일로 저장하고 그 경로를 반환한다(실패 시 None)."""
+def _download_kakao_cover_to_temp_file(series_id: str) -> str | None:
+    """rclone 원본용 — info.xml만 가볍게 읽어서 카카오페이지로 판별된 뒤, 공식 표지는 카카오에서
+    직접 받는다(원본 폴더 자체를 내려받지 않아도 됨). 받은 표지를 임시 로컬 파일로 저장하고
+    그 경로를 반환한다(실패 시 None)."""
     import tempfile
 
-    jpeg_bytes = kakao_cover.compose_cover_bytes_for_content(content_id)
+    jpeg_bytes = kakao_cover.fetch_official_cover_bytes(series_id)
     if jpeg_bytes is None:
         return None
     fd, tmp_path = tempfile.mkstemp(suffix=".jpg", prefix="kakao_cover_")
@@ -1021,7 +1021,7 @@ def bulk_move_folder(
     그대로 옮긴다 — 일부 인식 안 되는 파일이 있다고 전체가 실패하지 않는다.
 
     regenerate_kakao_cover(선택, 기본 꺼짐): 켜면 원본 폴더가 카카오웹툰이면
-    (info.xml의 <Web> 태그로 판단) 표지를 최신 합성 방식으로 새로 만들어서 옮긴다
+    (info.xml의 <Web> 태그로 판단) 표지를 카카오페이지 공식 표지로 새로 받아서 옮긴다
     — 아카이빙 대상(완결 처리)과 같은 로직이지만, 일괄 이동은 "완결/주기" 구분이
     없는 1회성 이동이라 매번 강제로 하지 않고 옵션으로만 켤 수 있게 했다.
 
@@ -1034,7 +1034,7 @@ def bulk_move_folder(
     # 카카오 표지 갱신: 로컬 원본은 목록을 모으기 전에 그 자리에서 바로 새 cover.jpg로
     # 바꿔치기해두면, 아래 목록 조회에 자연스럽게 새 파일로 잡힌다(원본 폴더 안의
     # 파일을 실제로 바꾸는 것이므로 별도 처리가 필요 없음). 원격 원본은 폴더 전체를
-    # 내려받을 수 없으니, info.xml만 가볍게 읽어 판별한 뒤 합성 결과를 임시 파일로만
+    # 내려받을 수 없으니, info.xml만 가볍게 읽어 판별한 뒤 받은 표지를 임시 파일로만
     # 만들어두고, 아래 반복문에서 원본 cover.*를 이 파일로 교체해서 옮긴다.
     kakao_cover_temp_path = None
     if regenerate_kakao_cover:
@@ -1046,9 +1046,9 @@ def bulk_move_folder(
             else:
                 remote, path = _parse_rclone_target(source_path)
                 xml_text = rclone_client.read_small_text_file(rclone_config_path, remote, path, "info.xml")
-                content_id = kakao_cover.parse_kakao_web_url(_extract_web_url_from_xml_text(xml_text) or "")
-                if content_id:
-                    kakao_cover_temp_path = _compose_kakao_cover_to_temp_file(content_id)
+                series_id = kakao_cover.parse_kakao_web_url(_extract_web_url_from_xml_text(xml_text) or "")
+                if series_id:
+                    kakao_cover_temp_path = _download_kakao_cover_to_temp_file(series_id)
                     if kakao_cover_temp_path and progress_callback:
                         progress_callback("카카오 표지 갱신함")
         except Exception as e:
