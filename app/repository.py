@@ -463,11 +463,17 @@ def hard_delete_kakao_webtoon(title_id: int) -> None:
         conn.execute("DELETE FROM kakao_webtoons WHERE title_id = ?", (title_id,))
 
 
+def list_legacy_kakao_titles() -> list[str]:
+    """아직 옛 카카오웹툰 번호로 남아있는(=카카오페이지로 못 옮긴) 기록의 제목들."""
+    rows = fetchall("SELECT DISTINCT title FROM kakao_webtoons WHERE title_id < ?", (LEGACY_KAKAO_ID_LIMIT,))
+    return [r["title"] for r in rows]
+
+
 def migrate_legacy_kakao_webtoons(catalog_items: list[dict]) -> dict:
     """옛 카카오웹툰 기록(번호 체계가 달라 카카오페이지와 안 맞음)을 카카오페이지 작품으로
     옮긴다 — 카카오페이지 요일별 목록에서 제목이 정확히 하나만 일치하는 작품이 있을 때만
     번호를 새 series_id로 바꾸고(상태/구독 이력/생성 시각은 그대로), 그 외에는(제목이 다르거나
-    지금 연재 중이 아니거나 제목이 겹쳐 모호한 경우) 건드리지 않고 목록으로 돌려준다."""
+    카카오페이지에서 못 찾았거나 제목이 겹쳐 모호한 경우) 건드리지 않고 목록으로 돌려준다."""
     title_counts: dict[str, int] = {}
     for item in catalog_items:
         title_counts[item["title_name"]] = title_counts.get(item["title_name"], 0) + 1

@@ -127,6 +127,7 @@ def _thumbnail_url(card: dict) -> str:
         (asset.get("card_set") or {}).get("background_img")
         or asset.get("card_img")
         or (asset.get("banner_set") or {}).get("background_img")
+        or card.get("thumbnail")  # 검색 결과에는 카드 이미지 없이 공식 표지(thumbnail)만 있다
     )
     return image_url(kid, IMAGE_FILENAME_CARD) if kid else ""
 
@@ -252,45 +253,75 @@ async def fetch_latest_episode_url(
     return KAKAO_VIEWER_URL_TMPL.format(series_id=series_id, product_id=latest["product_id"])
 
 
-async def search_by_author(
-    session: aiohttp.ClientSession, author_name: str, timeout_seconds: int
+async def _search_webtoon_cards(
+    session: aiohttp.ClientSession, keyword: str, timeout_seconds: int, max_pages: int
 ) -> list[dict]:
-    """작가 이름으로 검색해서, 실제로 그 이름이 저자로 걸린 웹툰만 골라 반환한다. 검색어는
-    제목에도 걸릴 수 있고 웹소설/책도 섞여 나오므로, 웹툰 카테고리이면서 authors 목록에
-    그 이름이 정확히 있는 것만 남긴다(완결작 포함 — 검색은 완결 여부로 거르지 않는다).
-    반환은 title_id/title_name/is_adult만 담은 dict 리스트."""
-    results: list[dict] = []
-    for page in range(_MAX_SEARCH_PAGES):
+    """검색어로 검색해서 웹툰(웹소설/책 제외) 결과 카드를 최대 max_pages 페이지까지 모은다. 검색어는
+    제목과 저자 양쪽에 걸리고, 완결/휴재 작품도 요일 목록과 달리 전부 나온다. 실패하면 그때까지
+    모은 것만 돌려준다."""
+    cards: list[dict] = []
+    for page in range(max_pages):
         data = await _get_json(
             session,
             KAKAO_SEARCH_URL,
             {
-                "keyword": author_name, "category_uid": WEBTOON_CATEGORY_UID, "is_complete": "false",
+                "keyword": keyword, "category_uid": WEBTOON_CATEGORY_UID, "is_complete": "false",
                 "sort_type": "ACCURACY", "page": page, "size": 25,
             },
             timeout_seconds,
-            f"검색 author={author_name} page={page}",
+            f"검색 keyword={keyword} page={page}",
         )
         if data is None:
             break
         result = data.get("result") or {}
         entries = result.get("list") or []
-        for item in entries:
-            if item.get("category_uid") != WEBTOON_CATEGORY_UID or item.get("series_id") is None:
-                continue
-            if author_name not in _split_author_names(item.get("authors")):
-                continue
-            results.append(
-                {
-                    "title_id": item["series_id"],
-                    "title_name": item.get("title", ""),
-                    "is_adult": (item.get("age_grade") or 0) >= _ADULT_AGE_GRADE,
-                }
-            )
+        cards.extend(c for c in entries if c.get("category_uid") == WEBTOON_CATEGORY_UID and c.get("series_id") is not None)
         if result.get("is_end") or not entries:
             break
         await asyncio.sleep(_REQUEST_INTERVAL_SECONDS)
-    return results
+    return cards
+
+
+async def search_by_author(
+    session: aiohttp.ClientSession, author_name: str, timeout_seconds: int
+) -> list[dict]:
+    """작가 이름으로 검색해서, 실제로 그 이름이 저자로 걸린 웹툰만 골라 반환한다(검색어는 제목에도
+    걸릴 수 있어서 authors 목록에 그 이름이 정확히 있는 것만 남긴다. 완결작 포함). 반환은
+    title_id/title_name/is_adult만 담은 dict 리스트."""
+    cards = await _search_webtoon_cards(session, author_name, timeout_seconds, _MAX_SEARCH_PAGES)
+    return [
+        {
+            "title_id": c["series_id"],
+            "title_name": c.get("title", ""),
+            "is_adult": (c.get("age_grade") or 0) >= _ADULT_AGE_GRADE,
+        }
+        for c in cards
+        if author_name in _split_author_names(c.get("authors"))
+    ]
+
+
+def _normalize_title(title: str) -> str:
+    return " ".join((title or "").split())
+
+
+async def search_series_by_titles(
+    session: aiohttp.ClientSession, titles: list[str], timeout_seconds: int
+) -> list[dict]:
+    """제목 여러 개를 하나씩 검색해서, 제목이 정확히 같은 웹툰만 모아 반환한다(공백 차이는 무시).
+    요일 목록에는 없는 완결/장기 휴재 작품의 카카오페이지 작품 번호를 찾으려는 용도라, 제목당 검색
+    첫 페이지(25개)만 본다 — 정확히 같은 제목은 검색 정확도순 맨 앞에 나온다. 반환 항목은 요일 목록
+    항목(_card_to_item)과 같은 모양이다. 한 제목의 검색이 실패해도 나머지는 계속한다."""
+    found: list[dict] = []
+    for index, title in enumerate(titles):
+        if index > 0:
+            await asyncio.sleep(_REQUEST_INTERVAL_SECONDS)
+        wanted = _normalize_title(title)
+        for card in await _search_webtoon_cards(session, title, timeout_seconds, 1):
+            if _normalize_title(card.get("title", "")) == wanted:
+                item = _card_to_item(card)
+                if item is not None:
+                    found.append(item)
+    return found
 
 
 def extract_candidate_author_names(items: list[dict]) -> list[str]:

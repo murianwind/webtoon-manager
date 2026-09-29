@@ -1737,7 +1737,7 @@ document.getElementById("btn-migrate-legacy-kakao").addEventListener("click", as
   const resultEl = document.getElementById("migrate-legacy-kakao-result");
   const unmatchedEl = document.getElementById("migrate-legacy-kakao-unmatched");
   btn.disabled = true;
-  resultEl.textContent = "이전 중... (카카오페이지 목록을 받느라 10초 안팎 걸립니다)";
+  resultEl.textContent = "이전 중... (옮길 작품 수에 따라 10초에서 수십 초 걸릴 수 있습니다)";
   unmatchedEl.textContent = "";
   try {
     const result = await apiCall("/api/kakao-webtoons/migrate-legacy", { method: "POST" });

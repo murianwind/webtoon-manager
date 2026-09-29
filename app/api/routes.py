@@ -497,15 +497,24 @@ async def list_kakao_webtoons(status: str | None = None):
 @router.post("/kakao-webtoons/migrate-legacy")
 async def migrate_legacy_kakao_webtoons():
     """카카오웹툰이 카카오페이지로 통합되면서 작품 번호 체계가 바뀌어서, 예전에 구독/제외/
-    구독해제해둔 기록이 새 목록과 안 맞는다 — 카카오페이지 요일별 목록에서 제목이 정확히
-    하나만 일치하는 작품으로 그 기록을 옮긴다(상태와 구독 이력은 그대로). 못 옮긴 것(제목이
-    달라졌거나 지금 연재 중이 아닌 것 등)은 건드리지 않고 목록으로 돌려준다. 눌렀을 때만
-    실행되는 수동 작업이라, 여러 번 눌러도 이미 옮긴 건 다시 안 건드린다."""
+    구독해제해둔 기록이 새 목록과 안 맞는다 — 그 기록을 제목이 정확히 하나만 일치하는 카카오
+    페이지 작품으로 옮긴다(상태와 구독 이력은 그대로). 먼저 요일별 목록(지금 연재 중인 작품)에서
+    찾고, 거기 없는 제목(완결/장기 휴재 등)만 카카오페이지 검색으로 찾는다. 못 옮긴 것(제목이
+    달라졌거나 못 찾았거나 같은 제목이 여러 개인 것)은 건드리지 않고 목록으로 돌려준다. 눌렀을
+    때만 실행되는 수동 작업이라, 여러 번 눌러도 이미 옮긴 건 다시 안 건드리고 남은 것만 다시
+    시도한다."""
     settings = get_settings()
     async with aiohttp.ClientSession() as session:
         items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds, use_cache=False)
-    if not items:
-        raise HTTPException(status_code=502, detail="카카오페이지 목록을 가져오지 못해 이전하지 못했습니다. 잠시 뒤 다시 시도해주세요.")
+        if not items:
+            raise HTTPException(status_code=502, detail="카카오페이지 목록을 가져오지 못해 이전하지 못했습니다. 잠시 뒤 다시 시도해주세요.")
+        in_catalog = {item["title_name"] for item in items}
+        legacy_titles = await asyncio.to_thread(repository.list_legacy_kakao_titles)
+        not_in_catalog = sorted(t for t in legacy_titles if t not in in_catalog)
+        searched = await kakao_api.search_series_by_titles(session, not_in_catalog, settings.request_timeout_seconds)
+
+    known_ids = {item["title_id"] for item in items}
+    items = items + [item for item in searched if item["title_id"] not in known_ids]
     return await asyncio.to_thread(repository.migrate_legacy_kakao_webtoons, items)
 
 
