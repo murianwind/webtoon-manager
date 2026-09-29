@@ -43,6 +43,8 @@ from app import (
 from app import scheduler as scheduler_mod
 from app import kakao_api
 from app import kakao_cover
+from app import kakao_page_auth
+from app import kakao_page_download
 from app import webtoon_server_client
 from app import archiver
 from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
@@ -341,6 +343,9 @@ class KakaoWebtoonOut(BaseModel):
     is_new: bool = False
     is_paused: bool = False
     has_new_episode: bool = False
+    download_enabled: bool = False
+    start_no: int | None = None
+    last_downloaded_no: int = 0
 
 
 class KakaoWebtoonEntryIn(BaseModel):
@@ -419,6 +424,7 @@ async def browse_kakao_list(refresh: bool = False):
                 "has_new_episode": item["has_update"],
                 "status": tracked["status"] if tracked else None,
                 "ever_subscribed": tracked["ever_subscribed"] if tracked else False,
+                "download_enabled": tracked["download_enabled"] if tracked else False,
             }
         )
 
@@ -440,6 +446,7 @@ async def browse_kakao_list(refresh: bool = False):
                     "has_new_episode": False,
                     "status": wt["status"],
                     "ever_subscribed": wt["ever_subscribed"],
+                    "download_enabled": wt["download_enabled"],
                 }
             )
     return result
@@ -516,6 +523,189 @@ async def migrate_legacy_kakao_webtoons():
     known_ids = {item["title_id"] for item in items}
     items = items + [item for item in searched if item["title_id"] not in known_ids]
     return await asyncio.to_thread(repository.migrate_legacy_kakao_webtoons, items)
+
+
+# ── 카카오페이지 로그인 쿠키 / 다운로드 ─────────────────────────────────
+
+class KakaoPageLoginIn(BaseModel):
+    cookies_json: str
+
+
+class KakaoDownloadSettingsIn(BaseModel):
+    enabled: bool
+    start_no: int | None = None  # 이 회차 이상만 받는다. 비우면(켤 때) 지금 최신 회차 다음부터(=앞으로 나오는 새 회차만)
+
+
+# "지금 받기" 한 번에 받는 최대 회차 수 — 오래 걸리는 작업이라 한 번에 너무 많이 잡지 않게(더 받으려면 다시 누르면 된다)
+_KAKAO_MANUAL_DOWNLOAD_LIMIT = 10
+_kakao_download_state: dict = {"running": False, "title_id": None, "lines": [], "result": None}
+_kakao_download_task: asyncio.Task | None = None  # 진행 중 작업이 중간에 정리되지 않게 참조를 잡아둔다
+
+
+def _kakao_page_session() -> aiohttp.ClientSession:
+    # 쿠키는 KakaoPageClient가 직접 관리하므로 세션엔 쿠키 저장소를 두지 않는다
+    return aiohttp.ClientSession(cookie_jar=aiohttp.DummyCookieJar())
+
+
+@router.get("/settings/kakao-page-login")
+async def get_kakao_page_login():
+    return kakao_page_auth.cookie_status(await asyncio.to_thread(kakao_page_auth.load_cookies))
+
+
+@router.post("/settings/kakao-page-login")
+async def set_kakao_page_login(payload: KakaoPageLoginIn):
+    try:
+        cookies = kakao_page_auth.parse_cookie_export(payload.cookies_json)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await asyncio.to_thread(kakao_page_auth.save_cookies, cookies)
+    return kakao_page_auth.cookie_status(cookies)
+
+
+@router.delete("/settings/kakao-page-login")
+async def delete_kakao_page_login():
+    await asyncio.to_thread(kakao_page_auth.delete_cookies)
+    return kakao_page_auth.cookie_status(None)
+
+
+_KAKAO_LOGIN_CHECK_MESSAGES = {
+    True: "로그인되어 있습니다.",
+    False: "로그인이 풀려 있습니다. 쿠키를 다시 export해서 붙여넣어 주세요.",
+    None: "카카오페이지에 연결하지 못했거나 요청이 막혀서 로그인 상태를 확인하지 못했습니다. 잠시 뒤 다시 시도해주세요.",
+}
+
+
+@router.post("/settings/kakao-page-login/check")
+async def check_kakao_page_login():
+    """저장된 쿠키로 실제로 로그인이 되는지 확인한다. 풀려 있으면(또는 만료가 며칠 안 남았으면) 디스코드로 알린다."""
+    settings = get_settings()
+    async with _kakao_page_session() as session:
+        client = kakao_page_download.client_from_saved_cookies(session, settings.request_timeout_seconds)
+        if client is None:
+            raise HTTPException(status_code=400, detail="저장된 카카오페이지 쿠키가 없습니다. 먼저 쿠키를 붙여넣어 저장해주세요.")
+        logged_in = await client.check_login()
+        kakao_page_download.persist_refreshed_cookies(client)
+        status = kakao_page_auth.cookie_status(kakao_page_auth.load_cookies())
+        await kakao_page_auth.notify_if_needed(session, settings, logged_in, status["days_left"])
+    return {**status, "logged_in": logged_in, "message": _KAKAO_LOGIN_CHECK_MESSAGES[logged_in]}
+
+
+def _kakao_download_settings_out(wt: dict) -> dict:
+    return {"download_enabled": wt["download_enabled"], "start_no": wt["start_no"], "last_downloaded_no": wt["last_downloaded_no"]}
+
+
+async def _list_kakao_episodes(title_id: int):
+    """회차 목록(저장된 쿠키가 있으면 로그인 상태로 — 대여 중인 회차를 구분하려면 필요). 못 받으면 502."""
+    settings = get_settings()
+    async with _kakao_page_session() as session:
+        client = kakao_page_download.client_from_saved_cookies(session, settings.request_timeout_seconds)
+        if client is None:
+            client = kakao_page_download.KakaoPageClient(session, {}, settings.request_timeout_seconds)
+        listing = await client.list_episodes(title_id)
+        kakao_page_download.persist_refreshed_cookies(client)
+    if listing is None:
+        raise HTTPException(status_code=502, detail="카카오페이지에서 회차 목록을 가져오지 못했습니다. 잠시 뒤 다시 시도해주세요.")
+    return listing[1]
+
+
+@router.get("/kakao-webtoons/{title_id}/download-settings")
+async def get_kakao_download_settings(title_id: int):
+    return _kakao_download_settings_out(await _get_or_404_kakao(title_id))
+
+
+@router.post("/kakao-webtoons/{title_id}/download-settings")
+async def set_kakao_download_settings(title_id: int, payload: KakaoDownloadSettingsIn):
+    wt = await _get_or_404_kakao(title_id)
+    start_no = payload.start_no
+    if start_no is not None and start_no < 1:
+        raise HTTPException(status_code=400, detail="시작 회차는 1 이상이어야 합니다.")
+    if payload.enabled and start_no is None:
+        # 비워두면 "앞으로 나오는 새 회차부터" — 지금 최신 회차 다음 번호로 정한다
+        numbers = [e.number for e in await _list_kakao_episodes(title_id) if e.number is not None and not e.hidden]
+        start_no = max(numbers) + 1 if numbers else 1
+    elif start_no is None:
+        start_no = wt["start_no"]  # 끄기만 할 때는 예전 값을 그대로 둔다
+    await asyncio.to_thread(repository.set_kakao_download_settings, title_id, payload.enabled, start_no)
+    return _kakao_download_settings_out(await _get_or_404_kakao(title_id))
+
+
+@router.post("/kakao-webtoons/{title_id}/download-preview")
+async def preview_kakao_download(title_id: int):
+    """받으면 어떻게 되는지만 보여준다 — 아무것도 받지 않고 대여권도 쓰지 않는다."""
+    wt = await _get_or_404_kakao(title_id)
+    start_no = wt["start_no"] or 1
+    episodes = await _list_kakao_episodes(title_id)
+    folder = Path(get_settings().download_root) / remove_forbidden_str_kakao(wt["title"])
+    existing = await asyncio.to_thread(kakao_page_download.scan_existing_numbers, folder)
+    plan = kakao_page_download.plan_downloads(
+        episodes, start_no=start_no, last_downloaded_no=wt["last_downloaded_no"], existing_numbers=existing
+    )
+    return {
+        "start_no": start_no, "start_no_set": wt["start_no"] is not None, "last_downloaded_no": wt["last_downloaded_no"],
+        "to_download": [e.number for e in plan.to_download], "locked": [e.number for e in plan.locked],
+        "skipped_existing": plan.skipped_existing, "unnumbered": plan.unnumbered,
+        "cookie_saved": await asyncio.to_thread(kakao_page_auth.load_cookies) is not None,
+    }
+
+
+async def _run_kakao_download_task(wt: dict) -> None:
+    state = _kakao_download_state
+
+    def log_line(text: str) -> None:
+        state["lines"] = (state["lines"] + [text])[-50:]
+
+    settings = get_settings()
+    try:
+        async with _kakao_page_session() as session:
+            client = kakao_page_download.client_from_saved_cookies(session, settings.request_timeout_seconds)
+            if client is None:
+                state["result"] = {"error": "저장된 카카오페이지 쿠키가 없습니다. 먼저 쿠키를 붙여넣어 저장해주세요."}
+                return
+            log_line("로그인 확인 중...")
+            logged_in = await client.check_login()
+            status = kakao_page_auth.cookie_status(kakao_page_auth.load_cookies())
+            await kakao_page_auth.notify_if_needed(session, settings, logged_in, status["days_left"])
+            if logged_in is False:
+                state["result"] = {"error": "카카오페이지 로그인이 풀려 있어서 받지 않았습니다. 쿠키를 다시 export해서 붙여넣어 주세요."}
+                return
+            result = await kakao_page_download.run_download(
+                client, series_id=wt["title_id"], title=wt["title"], start_no=wt["start_no"],
+                last_downloaded_no=wt["last_downloaded_no"], download_root=settings.download_root,
+                max_episodes=_KAKAO_MANUAL_DOWNLOAD_LIMIT, on_progress=log_line,
+            )
+            kakao_page_download.persist_refreshed_cookies(client)
+        if result.downloaded:
+            await asyncio.to_thread(repository.update_kakao_last_downloaded_no, wt["title_id"], max(result.downloaded))
+        state["result"] = {
+            "downloaded": result.downloaded, "failed": result.failed,
+            "locked": [e.number for e in result.plan.locked], "error": result.error,
+        }
+    except Exception as e:
+        log.exception("카카오페이지 다운로드 중 예외")
+        state["result"] = {"error": f"예기치 못한 오류: {e}"}
+    finally:
+        state["running"] = False
+
+
+@router.post("/kakao-webtoons/{title_id}/download-now")
+async def start_kakao_download(title_id: int):
+    """이 작품에서 지금 읽을 수 있는 회차를 순서대로 받는다(백그라운드 — 진행은 download-status로 본다)."""
+    global _kakao_download_task
+    wt = await _get_or_404_kakao(title_id)
+    if wt["start_no"] is None:
+        raise HTTPException(status_code=400, detail="먼저 시작 회차를 정해서 저장해주세요(모르면 비워서 저장하면 앞으로 나오는 새 회차부터 받습니다).")
+    if await asyncio.to_thread(kakao_page_auth.load_cookies) is None:
+        raise HTTPException(status_code=400, detail="카카오페이지 로그인 쿠키가 없습니다. 설정에서 쿠키를 먼저 저장해주세요.")
+    if _kakao_download_state["running"]:
+        raise HTTPException(status_code=409, detail="이미 다른 카카오페이지 다운로드가 진행 중입니다.")
+    _kakao_download_state.update(running=True, title_id=title_id, lines=[], result=None)
+    _kakao_download_task = asyncio.create_task(_run_kakao_download_task(wt))
+    return dict(_kakao_download_state)
+
+
+@router.get("/kakao-webtoons/download-status")
+async def get_kakao_download_status():
+    return {**_kakao_download_state, "lines": _kakao_download_state["lines"][-30:]}
 
 
 async def _get_or_404_kakao(title_id: int) -> dict:

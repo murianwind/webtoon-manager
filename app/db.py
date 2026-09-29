@@ -76,6 +76,11 @@ CREATE TABLE IF NOT EXISTS kakao_webtoons (
     ever_subscribed INTEGER NOT NULL DEFAULT 0,
     thumbnail_url TEXT NOT NULL DEFAULT '',
     author_summary TEXT NOT NULL DEFAULT '',
+    -- 카카오페이지 다운로드 설정: 켜기 여부(기본 꺼짐 — 예전에 뷰어 표시용으로 구독해둔 기록이 갑자기
+    -- 대여권을 쓰기 시작하면 안 되므로), 시작 회차(이 번호 이상만 받음), 마지막으로 받은 회차 번호
+    download_enabled INTEGER NOT NULL DEFAULT 0,
+    start_no INTEGER,
+    last_downloaded_no INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -168,6 +173,9 @@ _MIGRATIONS = [
     ("archive_targets", "source_dest_type", "ALTER TABLE archive_targets ADD COLUMN source_dest_type TEXT NOT NULL DEFAULT 'local'"),
     ("archive_targets", "source_path", "ALTER TABLE archive_targets ADD COLUMN source_path TEXT NOT NULL DEFAULT ''"),
     ("kakao_webtoons", "author_summary", "ALTER TABLE kakao_webtoons ADD COLUMN author_summary TEXT NOT NULL DEFAULT ''"),
+    ("kakao_webtoons", "download_enabled", "ALTER TABLE kakao_webtoons ADD COLUMN download_enabled INTEGER NOT NULL DEFAULT 0"),
+    ("kakao_webtoons", "start_no", "ALTER TABLE kakao_webtoons ADD COLUMN start_no INTEGER"),
+    ("kakao_webtoons", "last_downloaded_no", "ALTER TABLE kakao_webtoons ADD COLUMN last_downloaded_no INTEGER NOT NULL DEFAULT 0"),
     ("archive_targets", "display_name", "ALTER TABLE archive_targets ADD COLUMN display_name TEXT NOT NULL DEFAULT ''"),
     ("archive_targets", "filename_template_preset_id", "ALTER TABLE archive_targets ADD COLUMN filename_template_preset_id INTEGER"),
 ]

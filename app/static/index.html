@@ -345,6 +345,18 @@
       </div>
 
       <div class="field-group">
+        <label for="kp-cookie-json">카카오페이지 로그인 쿠키 (다운로드용)</label>
+        <p class="field-hint">카카오페이지 작품을 받으려면 로그인 쿠키가 필요합니다. 크롬에서 page.kakao.com에 로그인한 뒤 <strong>Cookie-Editor</strong> 확장에서 Export → JSON으로 복사해서 아래에 그대로 붙여넣으세요. 필수 쿠키: _kau, _kpwtkn, _T_ANO, _karmt, _kahai, _kawlt, _kpdid. 보통 약 30일 유지되고, 로그인이 풀리거나 만료가 가까워지면 디스코드로 알려드립니다. 쿠키는 암호화해서 저장하며 백업에는 포함되지 않습니다(복원한 뒤에는 다시 붙여넣어야 합니다).</p>
+        <textarea id="kp-cookie-json" rows="4" spellcheck="false" placeholder='[{"domain": ".kakao.com", "name": "_kau", ...}, ...]'></textarea>
+        <div class="registry-add-row">
+          <button id="btn-kp-cookie-save">쿠키 저장</button>
+          <button id="btn-kp-cookie-check">로그인 확인</button>
+          <button id="btn-kp-cookie-delete">쿠키 삭제</button>
+        </div>
+        <span id="kp-cookie-status" class="hint-inline"></span>
+      </div>
+
+      <div class="field-group">
         <label>예전 카카오웹툰 기록 이전</label>
         <p class="field-hint">카카오웹툰이 카카오페이지로 통합되면서 작품 번호 체계가 달라져서, 예전에 구독/제외/구독해제해둔 기록이 새 목록과 맞지 않습니다. 이 버튼은 카카오페이지에서 <strong>제목이 정확히 하나만 일치하는</strong> 작품을 찾아 그 기록(상태와 구독 이력 그대로)을 옮깁니다. 지금 연재 중인 작품은 요일별 목록에서, 완결/휴재 작품은 카카오페이지 검색으로 찾습니다. 제목이 바뀌었거나 못 찾았거나 같은 제목이 여러 개인 작품은 그대로 두고 아래에 목록으로 알려드립니다. 여러 번 눌러도 안전하고, 결과는 "웹툰 전체목록"을 새로고침하면 반영됩니다.</p>
         <button id="btn-migrate-legacy-kakao">예전 기록 이전하기</button>
@@ -592,6 +604,30 @@
     </div>
     </div>
   </section>
+
+  <!-- 카카오페이지 작품별 다운로드 설정/미리보기/받기 창 -->
+  <div id="kakao-download-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <h2 id="kakao-download-title">다운로드</h2>
+      <p class="hint">이번 버전의 "지금 받기"는 <strong>무료이거나 이미 대여 중인 회차</strong>만 받고, 대여권은 쓰지 않습니다(잠긴 회차는 "대여권 필요"로만 알려드립니다).</p>
+      <div class="field-group">
+        <label class="checkbox-label"><input type="checkbox" id="kakao-download-enabled" /> 이 작품 자동 다운로드 켜기</label>
+        <p class="field-hint">※ 자동 실행은 다음 업데이트에서 연결됩니다. 지금은 설정만 저장해두고, 아래 "지금 받기"로 직접 받습니다.</p>
+      </div>
+      <div class="field-group">
+        <label for="kakao-download-start">몇 화부터 받을까요?</label>
+        <input id="kakao-download-start" type="number" min="1" placeholder="비우면 앞으로 나오는 새 회차부터" />
+        <p id="kakao-download-last" class="field-hint"></p>
+      </div>
+      <div class="registry-add-row">
+        <button id="btn-kakao-download-save">저장</button>
+        <button id="btn-kakao-download-preview">미리보기</button>
+        <button id="btn-kakao-download-start">지금 받기</button>
+        <button id="btn-kakao-download-close">닫기</button>
+      </div>
+      <pre id="kakao-download-output" class="modal-output"></pre>
+    </div>
+  </div>
 
   <script src="/app.js"></script>
 </body>

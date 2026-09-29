@@ -391,6 +391,8 @@ def _row_to_kakao_webtoon(row) -> dict:
         "title_id": row["title_id"], "title": row["title"], "status": row["status"],
         "ever_subscribed": bool(row["ever_subscribed"]), "thumbnail_url": row["thumbnail_url"],
         "author_summary": row["author_summary"],
+        "download_enabled": bool(row["download_enabled"]), "start_no": row["start_no"],
+        "last_downloaded_no": row["last_downloaded_no"],
     }
 
 
@@ -461,6 +463,23 @@ def hard_delete_kakao_webtoon(title_id: int) -> None:
     """"목록으로"(구독 이력 없음) — DB 기록 자체를 지운다. 네이버 hard_delete와 같은 역할."""
     with write_transaction() as conn:
         conn.execute("DELETE FROM kakao_webtoons WHERE title_id = ?", (title_id,))
+
+
+def set_kakao_download_settings(title_id: int, enabled: bool, start_no: int | None) -> None:
+    with write_transaction() as conn:
+        conn.execute(
+            "UPDATE kakao_webtoons SET download_enabled = ?, start_no = ?, updated_at = ? WHERE title_id = ?",
+            (int(enabled), start_no, _now(), title_id),
+        )
+
+
+def update_kakao_last_downloaded_no(title_id: int, episode_no: int) -> None:
+    """마지막으로 받은 회차 번호를 올린다(내려가지는 않는다)."""
+    with write_transaction() as conn:
+        conn.execute(
+            "UPDATE kakao_webtoons SET last_downloaded_no = MAX(last_downloaded_no, ?), updated_at = ? WHERE title_id = ?",
+            (episode_no, _now(), title_id),
+        )
 
 
 def list_legacy_kakao_titles() -> list[str]:
@@ -948,7 +967,8 @@ def delete_episode_history_older_than(days: int) -> int:
 
 # ── 백업/복원 ───────────────────────────────────────────────────────
 
-_SECRET_SETTING_KEYS = {"discord_webhook_url", "discord_bot_token", "discord_notify_channel_id"}
+# 카카오페이지 로그인 쿠키(kakao_page_cookies)도 비밀값이라 백업에 넣지 않는다(복원 후엔 다시 붙여넣기)
+_SECRET_SETTING_KEYS = {"discord_webhook_url", "discord_bot_token", "discord_notify_channel_id", "kakao_page_cookies"}
 
 
 def export_all() -> dict:
@@ -986,7 +1006,8 @@ _WATCHED_AUTHOR_COLUMNS = ("author_id", "author_name", "enabled", "platform", "c
 _WATCHED_TAG_COLUMNS = ("tag_id", "tag_name", "enabled", "created_at", "updated_at")
 _KAKAO_SEEN_TITLE_COLUMNS = ("author_name", "title_id", "title_name", "seen_at")
 _KAKAO_WEBTOON_COLUMNS = (
-    "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "author_summary", "created_at", "updated_at",
+    "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "author_summary",
+    "download_enabled", "start_no", "last_downloaded_no", "created_at", "updated_at",
 )
 _FILENAME_TEMPLATE_PRESET_COLUMNS = ("id", "name", "template", "created_at", "updated_at")
 _ARCHIVE_TARGET_COLUMNS = (

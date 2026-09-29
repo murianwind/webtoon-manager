@@ -931,3 +931,22 @@ select {
 .markdown-body a { color: inherit; text-decoration: underline; }
 .markdown-body hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
 
+
+/* 카카오페이지 다운로드 창 */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 1000; padding: 16px;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-overlay.hidden { display: none; }
+.modal-box {
+  width: min(560px, 100%); max-height: 90vh; overflow: auto;
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px;
+}
+.modal-box h2 { margin: 0 0 8px; font-size: 17px; }
+.modal-box .field-group { margin: 12px 0; }
+.modal-output {
+  margin: 12px 0 0; padding: 8px; min-height: 40px; white-space: pre-wrap; font-size: 12px;
+  border: 1px solid var(--border); border-radius: 6px; background: #fafafa;
+}
+#kp-cookie-json { width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; }

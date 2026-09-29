@@ -230,6 +230,7 @@ function buildWebtoonCard(w, context) {
         // "뷰어에서 계속 챙겨보고 싶다"는 표시) — 워크플로 자체는 네이버와 동일.
         if (w.status === "active") {
           actions.appendChild(makeButton("구독해제", () => webtoonListAction(w, "unsubscribe", "kakao", context)));
+          actions.appendChild(makeButton(w.download_enabled ? "다운로드 ✓" : "다운로드", () => openKakaoDownloadDialog(w)));
           const viewerBtn = makeIconButton(READER_ICON_SVG, "뷰어에서 보기", () => openInWebtoonServer(w.title, "kakao"));
           viewerBtn.dataset.viewerCheckTitle = w.title; // 렌더링 뒤에 실제로 뷰어에 있는지 확인해서 없으면 지운다
           viewerBtn.dataset.viewerCheckPlatform = "kakao";
@@ -1512,6 +1513,7 @@ async function loadSettingsPage() {
   loadAppPublicBaseUrl();
   loadUnregisteredNewEpisodesToggle();
   loadKakaoWebtoonsEnabledToggle();
+  loadKakaoPageCookieStatus();
   loadAuthorAutoRegisterSetting();
   loadUnsubscribeHistoryList();
 }
@@ -1727,6 +1729,199 @@ document.getElementById("btn-run-metadata-sync").addEventListener("click", async
 document.getElementById("btn-run-report").addEventListener("click", async () => {
   await apiCall("/api/jobs/report/run", { method: "POST" });
   await refreshJobStatus();
+});
+
+// ── 카카오페이지 로그인 쿠키 (설정) ─────────────────────────────
+
+function renderKakaoPageCookieStatus(st) {
+  const el = document.getElementById("kp-cookie-status");
+  if (!st.saved) {
+    el.textContent = "저장된 쿠키가 없습니다.";
+    return;
+  }
+  const parts = ["쿠키 저장됨"];
+  if (st.missing && st.missing.length) parts.push(`필수 쿠키 누락: ${st.missing.join(", ")}`);
+  if (st.days_left !== null && st.days_left !== undefined) {
+    parts.push(st.days_left < 0 ? "만료됨(다시 export해서 붙여넣어 주세요)" : `만료까지 약 ${st.days_left}일`);
+  }
+  el.textContent = parts.join(" · ");
+}
+
+async function loadKakaoPageCookieStatus() {
+  try {
+    renderKakaoPageCookieStatus(await apiCall("/api/settings/kakao-page-login"));
+  } catch (e) {
+    document.getElementById("kp-cookie-status").textContent = e.message;
+  }
+}
+
+document.getElementById("btn-kp-cookie-save").addEventListener("click", async () => {
+  const box = document.getElementById("kp-cookie-json");
+  const statusEl = document.getElementById("kp-cookie-status");
+  try {
+    const st = await apiCall("/api/settings/kakao-page-login", { method: "POST", body: JSON.stringify({ cookies_json: box.value }) });
+    box.value = ""; // 저장했으면 화면에 쿠키가 남아 있지 않게 비운다
+    renderKakaoPageCookieStatus(st);
+  } catch (e) {
+    statusEl.textContent = e.message;
+  }
+});
+
+document.getElementById("btn-kp-cookie-check").addEventListener("click", async () => {
+  const btn = document.getElementById("btn-kp-cookie-check");
+  const statusEl = document.getElementById("kp-cookie-status");
+  btn.disabled = true;
+  statusEl.textContent = "확인 중...";
+  try {
+    const r = await apiCall("/api/settings/kakao-page-login/check", { method: "POST" });
+    renderKakaoPageCookieStatus(r);
+    statusEl.textContent = `${r.message} (${statusEl.textContent})`;
+  } catch (e) {
+    statusEl.textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById("btn-kp-cookie-delete").addEventListener("click", async () => {
+  if (!confirm("저장된 카카오페이지 로그인 쿠키를 삭제할까요? 삭제하면 카카오페이지 다운로드를 할 수 없습니다.")) return;
+  try {
+    renderKakaoPageCookieStatus(await apiCall("/api/settings/kakao-page-login", { method: "DELETE" }));
+  } catch (e) {
+    document.getElementById("kp-cookie-status").textContent = e.message;
+  }
+});
+
+// ── 카카오페이지 작품별 다운로드 창 ────────────────────────────────
+
+let kakaoDownloadTarget = null;
+let kakaoDownloadPollTimer = null;
+const KAKAO_DOWNLOAD_POLL_MS = 2000;
+
+function kakaoDownloadOutput(text) {
+  document.getElementById("kakao-download-output").textContent = text;
+}
+
+function setKakaoDownloadButtonsDisabled(disabled) {
+  for (const id of ["btn-kakao-download-save", "btn-kakao-download-preview", "btn-kakao-download-start"]) {
+    document.getElementById(id).disabled = disabled;
+  }
+}
+
+function fillKakaoDownloadSettings(s) {
+  document.getElementById("kakao-download-enabled").checked = !!s.download_enabled;
+  document.getElementById("kakao-download-start").value = s.start_no ?? "";
+  document.getElementById("kakao-download-last").textContent =
+    s.last_downloaded_no > 0 ? `마지막으로 받은 회차: ${s.last_downloaded_no}화` : "아직 이 프로그램으로 받은 회차가 없습니다.";
+}
+
+async function openKakaoDownloadDialog(webtoon) {
+  kakaoDownloadTarget = webtoon;
+  document.getElementById("kakao-download-title").textContent = `다운로드 — ${webtoon.title}`;
+  kakaoDownloadOutput("");
+  setKakaoDownloadButtonsDisabled(false);
+  document.getElementById("kakao-download-modal").classList.remove("hidden");
+  try {
+    fillKakaoDownloadSettings(await apiCall(`/api/kakao-webtoons/${webtoon.title_id}/download-settings`));
+    const status = await apiCall("/api/kakao-webtoons/download-status");
+    if (status.running && status.title_id === webtoon.title_id) pollKakaoDownload();
+  } catch (e) {
+    kakaoDownloadOutput(e.message);
+  }
+}
+
+function closeKakaoDownloadDialog() {
+  clearTimeout(kakaoDownloadPollTimer);
+  kakaoDownloadTarget = null;
+  document.getElementById("kakao-download-modal").classList.add("hidden");
+}
+
+async function saveKakaoDownloadSettings() {
+  const startRaw = document.getElementById("kakao-download-start").value.trim();
+  const saved = await apiCall(`/api/kakao-webtoons/${kakaoDownloadTarget.title_id}/download-settings`, {
+    method: "POST",
+    body: JSON.stringify({
+      enabled: document.getElementById("kakao-download-enabled").checked,
+      start_no: startRaw === "" ? null : Number(startRaw),
+    }),
+  });
+  fillKakaoDownloadSettings(saved);
+  kakaoDownloadTarget.download_enabled = saved.download_enabled;
+  return saved;
+}
+
+function describeKakaoDownloadResult(result) {
+  if (result.error) return `실패: ${result.error}`;
+  const parts = [];
+  parts.push(result.downloaded.length ? `받음: ${result.downloaded.map((n) => `${n}화`).join(", ")}` : "이번에 새로 받은 회차가 없습니다.");
+  if (result.failed) parts.push(`${result.failed}화 받기 실패 — 여기서 멈췄습니다(다음에 이 회차부터 다시 시도).`);
+  if (result.locked.length) parts.push(`대여권이 필요한 회차: ${result.locked.map((n) => `${n}화`).join(", ")} (이번 버전은 대여권을 쓰지 않습니다)`);
+  return parts.join("\n");
+}
+
+async function pollKakaoDownload() {
+  clearTimeout(kakaoDownloadPollTimer);
+  if (!kakaoDownloadTarget) return;
+  try {
+    const status = await apiCall("/api/kakao-webtoons/download-status");
+    if (status.title_id !== kakaoDownloadTarget.title_id) return;
+    const lines = status.lines.join("\n");
+    if (status.running) {
+      setKakaoDownloadButtonsDisabled(true);
+      kakaoDownloadOutput(lines || "받는 중...");
+      kakaoDownloadPollTimer = setTimeout(pollKakaoDownload, KAKAO_DOWNLOAD_POLL_MS);
+      return;
+    }
+    setKakaoDownloadButtonsDisabled(false);
+    kakaoDownloadOutput([lines, status.result ? describeKakaoDownloadResult(status.result) : ""].filter(Boolean).join("\n\n"));
+    fillKakaoDownloadSettings(await apiCall(`/api/kakao-webtoons/${kakaoDownloadTarget.title_id}/download-settings`));
+  } catch (e) {
+    setKakaoDownloadButtonsDisabled(false);
+    kakaoDownloadOutput(e.message);
+  }
+}
+
+document.getElementById("btn-kakao-download-close").addEventListener("click", closeKakaoDownloadDialog);
+
+document.getElementById("btn-kakao-download-save").addEventListener("click", async () => {
+  try {
+    await saveKakaoDownloadSettings();
+    kakaoDownloadOutput("저장했습니다.");
+  } catch (e) {
+    kakaoDownloadOutput(e.message);
+  }
+});
+
+document.getElementById("btn-kakao-download-preview").addEventListener("click", async () => {
+  kakaoDownloadOutput("확인 중...");
+  try {
+    await saveKakaoDownloadSettings();
+    const r = await apiCall(`/api/kakao-webtoons/${kakaoDownloadTarget.title_id}/download-preview`, { method: "POST" });
+    const fmt = (nums) => (nums.length ? nums.map((n) => `${n}화`).join(", ") + ` (${nums.length}개)` : "없음");
+    const lines = [
+      `${r.start_no}화부터 계산했습니다.`,
+      `지금 받을 수 있는 회차: ${fmt(r.to_download)}`,
+      `대여권이 필요한 회차: ${fmt(r.locked)}`,
+    ];
+    if (r.skipped_existing) lines.push(`이미 받은 회차 ${r.skipped_existing}개는 건너뜁니다.`);
+    if (r.unnumbered) lines.push(`"N화"가 없는 회차(프롤로그/외전 등) ${r.unnumbered}개는 받지 않습니다.`);
+    if (!r.cookie_saved) lines.push("※ 로그인 쿠키가 없어 무료 회차 기준으로만 확인했습니다.");
+    kakaoDownloadOutput(lines.join("\n"));
+  } catch (e) {
+    kakaoDownloadOutput(e.message);
+  }
+});
+
+document.getElementById("btn-kakao-download-start").addEventListener("click", async () => {
+  try {
+    await saveKakaoDownloadSettings();
+    await apiCall(`/api/kakao-webtoons/${kakaoDownloadTarget.title_id}/download-now`, { method: "POST" });
+    setKakaoDownloadButtonsDisabled(true);
+    kakaoDownloadOutput("받기를 시작했습니다...");
+    pollKakaoDownload();
+  } catch (e) {
+    kakaoDownloadOutput(e.message);
+  }
 });
 
 const LEGACY_STATUS_LABELS = { active: "구독중", unsubscribed: "구독해제", excluded: "제외됨", unregistered: "목록" };
