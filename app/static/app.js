@@ -877,13 +877,14 @@ async function kakaoManualStart(query) {
     `;
     const cardActions = card.querySelector(".webtoon-card-actions");
     cardActions.appendChild(makeButton("이 작품 분석", () => runKakaoManualAnalyze(m.title_id)));
-    const subscribeBtn = makeButton("구독", async () => {
+    const alreadySubscribed = m.subscription === "active";
+    const subscribeBtn = makeButton(alreadySubscribed ? "구독 중" : "구독", async () => {
       try {
         await apiCall(`/api/kakao-webtoons/${m.title_id}/subscribe`, {
           method: "POST",
           body: JSON.stringify({ title: m.title, thumbnail_url: m.thumbnail_url || "", author_summary: m.authors || "" }),
         });
-        subscribeBtn.textContent = "구독함";
+        subscribeBtn.textContent = "구독 중";
         subscribeBtn.disabled = true;
         kakaoListVersion = null;
         naverListLoadedAt = 0;
@@ -891,6 +892,7 @@ async function kakaoManualStart(query) {
         alert(e.message);
       }
     });
+    subscribeBtn.disabled = alreadySubscribed; // 이미 구독 중이면 누를 수 없다(해제는 전체목록에서)
     cardActions.appendChild(subscribeBtn);
     resultsEl.appendChild(card);
   }

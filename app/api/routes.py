@@ -645,10 +645,13 @@ async def kakao_manual_search(query: str):
     settings = get_settings()
     async with aiohttp.ClientSession() as session:
         items = await kakao_api.search_series(session, query.strip(), settings.request_timeout_seconds)
+    tracked_map = await asyncio.to_thread(repository.get_kakao_webtoons_map)
     return [
         {
             "title_id": item["title_id"], "title": item["title_name"], "thumbnail_url": item["thumbnail_url"],
             "authors": ", ".join(item["author_names"]), "status": _kakao_series_status_label(item),
+            # 이 프로그램의 구독 상태(active 등, 없으면 None) — 카드가 이미 구독한 작품을 "구독"으로 보여주지 않게
+            "subscription": (tracked_map.get(item["title_id"]) or {}).get("status"),
         }
         for item in items[:10]
     ]
