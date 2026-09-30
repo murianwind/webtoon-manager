@@ -1,0 +1,7 @@
+{
+  "name": "webtoon-manager-ui-tests",
+  "private": true,
+  "description": "화면(app/static/js/*.js) 로직 테스트 — jsdom으로 index.html과 스크립트들을 브라우저처럼 순서대로 로드해서 확인한다",
+  "scripts": { "test": "node run.js" },
+  "devDependencies": { "jsdom": "^25.0.0" }
+}

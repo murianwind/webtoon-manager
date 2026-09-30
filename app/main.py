@@ -15,29 +15,12 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 from starlette.types import Scope
 
-from app import discord_config
 from app.api.routes import router as api_router
 from app.discord_bot import start_bot, stop_bot
+from app.log_redaction import RedactingFilter
 from app import kakao_catalog, repository
 from app.scheduler import create_scheduler
 from app.tracker import ensure_default_tags_seeded
-
-
-class RedactingFilter(logging.Filter):
-    """디스코드 웹훅 URL/봇 토큰을 로그 메시지에서 마스킹한다 (매 호출마다 현재 값 조회)."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        secrets = [discord_config.get_bot_token(), discord_config.get_webhook_url()]
-        secrets = [s for s in secrets if s]
-        if not secrets:
-            return True
-        message = record.getMessage()
-        for secret in secrets:
-            if secret in message:
-                message = message.replace(secret, "***REDACTED***")
-        record.msg = message
-        record.args = ()
-        return True
 
 
 def _configure_logging() -> None:
@@ -72,7 +55,7 @@ app = FastAPI(title="웹툰 구독 관리", lifespan=lifespan)
 app.include_router(api_router)
 class NoCacheStaticFiles(StaticFiles):
     """
-    app.js/style.css/index.html에 파일명 해시가 없어서, 브라우저가 자체 판단으로
+    js/*.js / style.css / index.html에 파일명 해시가 없어서, 브라우저가 자체 판단으로
     캐싱해버리면 서버는 최신 버전인데 화면은 예전 버전을 계속 보여주는 문제가
     실제로 있었다(고쳤다고 안내드려도 브라우저 캐시 때문에 반영이 안 보임) —
     매번 서버에 검증(If-None-Match)하도록 강제해서, 실제로 안 바뀌었으면

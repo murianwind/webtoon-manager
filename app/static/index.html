@@ -646,6 +646,22 @@
     </div>
   </section>
 
-  <script src="/app.js"></script>
+  <!-- 클래식 스크립트를 이름 순서대로 로드한다(최상위 선언을 전역으로 공유). 99-main.js는 다른 파일의 함수를 즉시 참조하므로 반드시 마지막. -->
+<script src="/js/00-core.js"></script>
+  <script src="/js/10-tabs.js"></script>
+  <script src="/js/20-cards.js"></script>
+  <script src="/js/30-naver-list.js"></script>
+  <script src="/js/40-subscriptions.js"></script>
+  <script src="/js/50-manual-download.js"></script>
+  <script src="/js/60-registry.js"></script>
+  <script src="/js/70-settings-schedule.js"></script>
+  <script src="/js/71-settings-discord-backup.js"></script>
+  <script src="/js/72-settings-jobs.js"></script>
+  <script src="/js/73-settings-kakao-roots.js"></script>
+  <script src="/js/80-history.js"></script>
+  <script src="/js/90-archive.js"></script>
+  <script src="/js/91-archive-presets.js"></script>
+  <script src="/js/92-archive-targets.js"></script>
+  <script src="/js/99-main.js"></script>
 </body>
 </html>

@@ -217,6 +217,19 @@ Windows에서 rclone으로 마운트한 드라이브/폴더는 **Docker Desktop�
 **Q. 이 프로그램을 외부(인터넷)에서도 접속하고 싶어요.**
 설정 화면에 별도 로그인/인증이 없으니, 리버스 프록시 등으로 앞단에 인증을 붙이시는 걸 권장합니다.
 
+## 개발자용: 코드 구조와 테스트
+
+**구조**
+- `app/api/routes.py`는 도메인별 라우터를 `/api` 아래로 묶기만 합니다. 실제 엔드포인트는 `app/api/` 안의 모듈에 있습니다: `webtoons`(네이버 구독 목록), `kakao_webtoons`(카카오 전체목록/구독), `kakao_download`(카카오 로그인/수동 다운로드), `registry`(작가/태그), `manual_download`(네이버 수동 다운로드), `schedule`(실행 스케줄), `discord`, `app_settings`(일반 설정/다운로드 폴더), `jobs`(실행/진행상황), `history`, `system`(백업/복원/도움말), `archive`(아카이빙). 둘 이상의 모듈이 쓰는 모델/헬퍼만 `common.py`에 있고, 모듈끼리는 서로 가져오지 않습니다(모듈 → common 방향만).
+- 화면 스크립트는 `app/static/js/`의 파일들로 나뉘어 있고 `index.html`이 **파일 이름 순서대로** 로드합니다(클래식 스크립트라 최상위 선언을 전역으로 공유). `99-main.js`는 다른 파일의 함수를 즉시 참조하므로 반드시 마지막이어야 합니다. 새 파일을 추가할 땐 번호 접두사로 순서를 정하세요.
+- 로그 마스킹(`app/log_redaction.py`): 디스코드 웹훅/봇 토큰, 카카오페이지 서명 주소의 `token`/`signature`/`credential` 값, 저장된 카카오 로그인 쿠키 값을 로그에서 가립니다.
+
+**테스트** (`tests/`)
+- 백엔드: `python tests/run_backend.py [이름조각] [--coverage]` — 테스트마다 새 임시 폴더(DB/다운로드/보관/쿠키)로 별도 프로세스에서 돌립니다. 실제 카카오/네이버 서버는 부르지 않고, 응답 형태는 `tests/fixtures/`의 실제 캡처에서 뽑은 샘플을 씁니다.
+- 화면: `cd tests/js && npm install && npm test` — jsdom으로 `index.html`과 스크립트들을 브라우저처럼 순서대로 로드해서 확인하고, 스크립트 오류(파일 사이 로드 순서 문제 포함)는 실패로 처리합니다.
+- 테스트 실행에 필요한 패키지: 백엔드는 `requirements.txt`와 같고, 화면 테스트만 Node.js가 필요합니다.
+- **커버리지가 낮은 곳(리팩터링 전에 특성 테스트가 필요)**: `archiver._archive_folder_target`, `archiver.bulk_move_folder`, `scheduler._download_new_episodes_for_one`, `scheduler._run_report_job_impl`, `manual_download.download_selected`는 현재 테스트가 거의 거치지 않습니다(`--coverage`로 확인).
+
 ---
 
 문제가 있거나 궁금한 점이 있으면 언제든 알려주세요.
