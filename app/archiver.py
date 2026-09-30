@@ -487,11 +487,21 @@ def resolve_webtoon_source(title_id: str) -> "WebtoonSource | None":
             return None
         if record is None:
             return None
-        # 카카오페이지 목록은 작가 이름만 알려줘서(역할 구분 없이) {author}에는 그 이름들을 그대로 쓴다
-        names = [n.strip() for n in (record["author_summary"] or "").split(",") if n.strip()]
+        # {author}는 네이버처럼 "글" 작가 — 작품 정보에서 저장해 둔 글 작가를 쓰고, 아직 저장 전이면(예전에 구독만 하고 받은 적이
+        # 없는 작품) 목록이 주는 작가 이름(역할 구분 없음)으로 대신한다
+        names = record["writer_names"] or [n.strip() for n in (record["author_summary"] or "").split(",") if n.strip()]
         return WebtoonSource(title=record["title"], writer_names=names, kakao=True)
     wt = repository.get(title_id)
     return None if wt is None else WebtoonSource(title=wt.title, writer_names=wt.writer_names, kakao=False)
+
+
+def queue_finish_archive_if_applicable(title_id: str, is_finished: bool) -> bool:
+    """완결 작품을 구독해제했고 "완결 구독해제 시 자동 이동"이 켜져 있으면 이동 대기열에 넣는다(실제 이동은 다음 아카이빙 주기 때).
+    네이버(title_id)와 카카오페이지("kakao_<번호>") 모두 같은 규칙이다. 넣었으면 True."""
+    if is_finished and is_finish_unsubscribe_archiving_enabled():
+        repository.add_pending_finish_archive(title_id)
+        return True
+    return False
 
 
 def _title_folder(download_root: str, title_name: str, kakao: bool) -> Path:
@@ -662,6 +672,7 @@ def manual_archive_now(
 def process_pending_finish_archives(
     archive_root: str, download_root: str, rclone_config_path: str = "",
     progress_callback=None, conflict_log: list | None = None, failure_log: list | None = None,
+    kakao_download_root: str | None = None,
 ) -> int:
     """완결 구독해제로 대기열에 쌓인 웹툰들을 처리한다 — 아카이빙 주기가 돌 때
     run_periodic_archive와 함께 호출된다(즉시 실행 대신 같은 주기에 묶임)."""
@@ -670,10 +681,11 @@ def process_pending_finish_archives(
 
     total = 0
     for title_id in repository.list_pending_finish_archive():
-        wt = repository.get(title_id)
-        if wt is None:
+        source = resolve_webtoon_source(title_id)
+        if source is None:
             repository.remove_pending_finish_archive(title_id)
             continue
+        root = (kakao_download_root or download_root) if source.kakao else download_root
 
         target = repository.get_archive_target(title_id)
         if target is not None and target.enabled:
@@ -688,18 +700,18 @@ def process_pending_finish_archives(
 
         policy = get_conflict_policy()
         total += _archive_title(
-            archive_root, download_root, title_id, wt.title,
+            archive_root, root, title_id, source.title,
             base_path, policy, "finish_unsubscribe", keep_last=False,
             dest_type=dest_type, rclone_config_path=rclone_config_path,
             progress_callback=progress_callback, conflict_log=conflict_log, failure_log=failure_log,
-            writer_names=wt.writer_names,
+            writer_names=source.writer_names,
             filename_template_preset_id=target.filename_template_preset_id if target else None,
+            kakao=source.kakao,
         )
         # 완결 전체이동은 마지막 파일도 예외 없이 옮기므로, 다 옮기고 나면 다운로드
         # 쪽 웹툰 폴더엔 아무 것도 안 남는 게 정상이다 — 파일이 하나라도 남아있으면
         # (예: 이동 중 일부 실패) 안전하게 그대로 두고, 완전히 비었을 때만 지운다.
-        title_dir = Path(download_root) / remove_forbidden_str(wt.title)
-        _cleanup_empty_dirs(title_dir)
+        _cleanup_empty_dirs(_title_folder(root, source.title, source.kakao))
         repository.remove_pending_finish_archive(title_id)
     return total
 

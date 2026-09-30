@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS kakao_webtoons (
     ever_subscribed INTEGER NOT NULL DEFAULT 0,
     thumbnail_url TEXT NOT NULL DEFAULT '',
     author_summary TEXT NOT NULL DEFAULT '',
+    writer_names TEXT NOT NULL DEFAULT '[]',      -- JSON 배열: 작품 정보의 "글" 작가(파일명 템플릿의 {author}에 쓴다)
     is_finished INTEGER NOT NULL DEFAULT 0,      -- 완결이고 받을 회차를 다 받음(완결 확인 알림 대상)
     finish_notified INTEGER NOT NULL DEFAULT 0,  -- 완결 확인 디스코드 메시지를 보냄
     finish_ack INTEGER NOT NULL DEFAULT 0,       -- "알람 제외"를 누름(구독은 유지)
@@ -176,6 +177,7 @@ _MIGRATIONS = [
     ("archive_targets", "source_dest_type", "ALTER TABLE archive_targets ADD COLUMN source_dest_type TEXT NOT NULL DEFAULT 'local'"),
     ("archive_targets", "source_path", "ALTER TABLE archive_targets ADD COLUMN source_path TEXT NOT NULL DEFAULT ''"),
     ("kakao_webtoons", "author_summary", "ALTER TABLE kakao_webtoons ADD COLUMN author_summary TEXT NOT NULL DEFAULT ''"),
+    ("kakao_webtoons", "writer_names", "ALTER TABLE kakao_webtoons ADD COLUMN writer_names TEXT NOT NULL DEFAULT '[]'"),
     ("kakao_webtoons", "is_finished", "ALTER TABLE kakao_webtoons ADD COLUMN is_finished INTEGER NOT NULL DEFAULT 0"),
     ("kakao_webtoons", "finish_notified", "ALTER TABLE kakao_webtoons ADD COLUMN finish_notified INTEGER NOT NULL DEFAULT 0"),
     ("kakao_webtoons", "finish_ack", "ALTER TABLE kakao_webtoons ADD COLUMN finish_ack INTEGER NOT NULL DEFAULT 0"),

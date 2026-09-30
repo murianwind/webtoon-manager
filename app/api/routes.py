@@ -170,11 +170,9 @@ async def unsubscribe(title_id: str):
     wt = await asyncio.to_thread(_get_or_404, title_id)
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_UNSUBSCRIBED)
 
-    if wt.is_finished and archiver.is_finish_unsubscribe_archiving_enabled():
-        # 즉시 옮기지 않고 대기열에만 넣는다 — 실제 이동은 다음 아카이빙 스케줄이
-        # 돌 때(run_archive_job) 같이 처리된다. 다운로드 도중과 안 겹치게 하는
-        # 기존 안전장치(10분 간격 검증 등)를 이 트리거도 그대로 타게 하기 위함.
-        await asyncio.to_thread(repository.add_pending_finish_archive, title_id)
+    # 즉시 옮기지 않고 대기열에만 넣는다 — 실제 이동은 다음 아카이빙 스케줄이 돌 때(run_archive_job) 같이 처리된다.
+    # 다운로드 도중과 안 겹치게 하는 기존 안전장치(10분 간격 검증 등)를 이 트리거도 그대로 타게 하기 위함.
+    await asyncio.to_thread(archiver.queue_finish_archive_if_applicable, title_id, wt.is_finished)
 
     return _to_out(await asyncio.to_thread(repository.get, title_id))
 
@@ -793,18 +791,18 @@ async def _get_or_404_kakao(title_id: int) -> dict:
     return wt
 
 
-async def _kakao_authors_to_register(series_id: int) -> list[str]:
+async def _kakao_about(series_id: int) -> dict | None:
+    """작품 "정보"(글/그림/원작 작가 등). 못 받으면 None — 호출부가 등록/저장을 건너뛴다."""
     settings = get_settings()
     try:
         async with _kakao_page_session() as session:
             client = kakao_page_download.client_from_saved_cookies(session, settings.request_timeout_seconds) or (
                 kakao_page_download.KakaoPageClient(session, {}, settings.request_timeout_seconds)
             )
-            about = await client.fetch_about(series_id)
+            return await client.fetch_about(series_id)
     except Exception as e:
-        log.warning("카카오 작품 정보(series_id=%s) 조회 실패 — 작가 등록을 건너뜁니다: %s", series_id, e)
-        return []
-    return kakao_page_download.authors_to_register(about)
+        log.warning("카카오 작품 정보(series_id=%s) 조회 실패 — 작가 등록/저장을 건너뜁니다: %s", series_id, e)
+        return None
 
 
 @router.post("/kakao-webtoons/{title_id}/subscribe", response_model=KakaoWebtoonOut)
@@ -819,19 +817,24 @@ async def subscribe_kakao_webtoon(title_id: int, payload: KakaoWebtoonEntryIn):
         )
     await asyncio.to_thread(repository.set_kakao_webtoon_status, title_id, repository.STATUS_ACTIVE)
     await asyncio.to_thread(repository.refresh_kakao_webtoon_author_summary, title_id, payload.author_summary)
+    about = await _kakao_about(title_id)
+    # 글 작가를 저장해 둔다 — 아카이빙 파일명 템플릿의 {author}가 네이버처럼 "글" 작가가 되게(작품 정보를 못 받으면 받을 때 채워진다)
+    await asyncio.to_thread(repository.set_kakao_writer_names, title_id, kakao_page_download.split_authors(about)[0])
     if await asyncio.to_thread(_is_author_auto_register_enabled):
         # 구독하면 그 작품의 작가를 관심 작가로 자동 등록한다(네이버와 같은 설정, 같은 규칙): 작품 "정보" 탭의 글/그림/원작
         # 구분으로 원작자가 있으면 원작자를, 없으면 글 작가를 등록한다. 정보 탭을 못 받으면 등록하지 않는다(그림 작가 등을
         # 잘못 등록하지 않도록 이름 전부를 등록하는 대신 건너뛴다).
-        for author_name in await _kakao_authors_to_register(title_id):
+        for author_name in kakao_page_download.authors_to_register(about):
             await asyncio.to_thread(repository.upsert_watched_author, author_name, author_name, True, "kakao")
     return KakaoWebtoonOut(**await asyncio.to_thread(repository.get_kakao_webtoon, title_id))
 
 
 @router.post("/kakao-webtoons/{title_id}/unsubscribe", response_model=KakaoWebtoonOut)
 async def unsubscribe_kakao_webtoon(title_id: int):
-    await _get_or_404_kakao(title_id)
+    webtoon = await _get_or_404_kakao(title_id)
     await asyncio.to_thread(repository.set_kakao_webtoon_status, title_id, repository.STATUS_UNSUBSCRIBED)
+    # 완결이고 받을 회차를 다 받은 작품을 구독해제하면 네이버와 같이 이동 대기열에 넣는다(설정이 켜져 있을 때)
+    await asyncio.to_thread(archiver.queue_finish_archive_if_applicable, f"{archiver.KAKAO_TARGET_PREFIX}{title_id}", webtoon["is_finished"])
     return KakaoWebtoonOut(**await asyncio.to_thread(repository.get_kakao_webtoon, title_id))
 
 
@@ -2429,7 +2432,7 @@ async def run_archive_now(payload: ArchiveRunIn):
 
                 pending_moved = await asyncio.to_thread(
                     archiver.process_pending_finish_archives, settings.archive_root, download_roots.naver_root(settings), settings.rclone_config_path,
-                    lambda msg: job_status.log_line("archive", msg),
+                    lambda msg: job_status.log_line("archive", msg), None, None, download_roots.kakao_root(settings),
                 )
                 job_status.log_line("archive", f"완결 구독해제 대기열 {pending_moved}개 파일 이동 완료")
 

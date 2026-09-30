@@ -719,6 +719,7 @@ async def write_series_metadata(series_item: dict, series_id: int, folder: Path,
     """받은 뒤 작품 폴더에 info.xml을 쓰고(네이버와 같이 받을 때마다 최신 정보로 덮어씀), 표지(cover)가 없으면
     카카오페이지 공식 표지를 받아 저장한다. 실패해도 다운로드 결과에는 영향을 주지 않는다."""
     try:
+        repository.set_kakao_writer_names(series_id, split_authors(about)[0])  # 파일명 템플릿 {author}용 — 받을 때마다 최신으로
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "info.xml").write_text(comicinfo.build_kakao_comicinfo_xml(series_item, series_id, about), encoding="utf-8")
         if not any(folder.glob("cover.*")):

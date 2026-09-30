@@ -644,7 +644,7 @@ async def run_archive_job() -> None:
 
             pending_moved = await asyncio.to_thread(
                 archiver.process_pending_finish_archives, settings.archive_root, download_roots.naver_root(settings), settings.rclone_config_path,
-                lambda msg: job_status.log_line("archive", msg), conflicts, failures,
+                lambda msg: job_status.log_line("archive", msg), conflicts, failures, download_roots.kakao_root(settings),
             )
             job_status.log_line("archive", f"완결 구독해제 대기열 {pending_moved}개 파일 이동 완료")
             _cleanup_old_archive_history()

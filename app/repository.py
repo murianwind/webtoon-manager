@@ -410,9 +410,18 @@ def _row_to_kakao_webtoon(row) -> dict:
     return {
         "title_id": row["title_id"], "title": row["title"], "status": row["status"],
         "ever_subscribed": bool(row["ever_subscribed"]), "thumbnail_url": row["thumbnail_url"],
-        "author_summary": row["author_summary"], "is_finished": bool(row["is_finished"]),
+        "author_summary": row["author_summary"], "writer_names": json.loads(row["writer_names"] or "[]"),
+        "is_finished": bool(row["is_finished"]),
         "finish_notified": bool(row["finish_notified"]), "finish_ack": bool(row["finish_ack"]),
     }
+
+
+def set_kakao_writer_names(title_id: int, writer_names: list[str]) -> None:
+    """작품 정보의 "글" 작가 이름들(파일명 템플릿 {author}용). 추적 중인 작품일 때만 저장하고, 빈 목록은 기존 값을 지우지 않는다."""
+    if not writer_names:
+        return
+    with write_transaction() as conn:
+        conn.execute("UPDATE kakao_webtoons SET writer_names = ? WHERE title_id = ?", (json.dumps(writer_names, ensure_ascii=False), title_id))
 
 
 def set_kakao_finished(title_id: int, finished: bool) -> None:
@@ -1068,7 +1077,7 @@ _WATCHED_AUTHOR_COLUMNS = ("author_id", "author_name", "enabled", "platform", "c
 _WATCHED_TAG_COLUMNS = ("tag_id", "tag_name", "enabled", "created_at", "updated_at")
 _KAKAO_SEEN_TITLE_COLUMNS = ("author_name", "title_id", "title_name", "seen_at")
 _KAKAO_WEBTOON_COLUMNS = (
-    "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "author_summary",
+    "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "author_summary", "writer_names",
     "is_finished", "finish_notified", "finish_ack", "created_at", "updated_at",
 )
 _FILENAME_TEMPLATE_PRESET_COLUMNS = ("id", "name", "template", "created_at", "updated_at")

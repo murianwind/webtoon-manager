@@ -14,7 +14,7 @@ import logging
 
 import discord
 
-from app import discord_config, repository
+from app import archiver, discord_config, repository
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +67,7 @@ class CompletionBotClient(discord.Client):
             await interaction.response.send_message("이미 처리된 웹툰입니다.", ephemeral=True)
             return
         await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_UNSUBSCRIBED)
+        await asyncio.to_thread(archiver.queue_finish_archive_if_applicable, title_id, webtoon.is_finished)
         await interaction.response.edit_message(
             content=f"✅ **{webtoon.title}** 구독해제했습니다.", view=None
         )
@@ -88,6 +89,7 @@ class CompletionBotClient(discord.Client):
             return
         if unsubscribe:
             await asyncio.to_thread(repository.set_kakao_webtoon_status, series_id, repository.STATUS_UNSUBSCRIBED)
+            await asyncio.to_thread(archiver.queue_finish_archive_if_applicable, f"{archiver.KAKAO_TARGET_PREFIX}{series_id}", webtoon["is_finished"])
             content = f"✅ **[카카오] {webtoon['title']}** 구독해제했습니다."
         else:
             await asyncio.to_thread(repository.acknowledge_kakao_finish, series_id)
