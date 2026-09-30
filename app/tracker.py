@@ -18,7 +18,7 @@ from pathlib import Path
 
 import aiohttp
 
-from app import download_roots, comicinfo, discord_notify, job_status, kakao_api, naver_api, repository
+from app import download_roots, comicinfo, discord_notify, job_status, kakao_api, kakao_page_download, naver_api, repository
 from app.file_utils import remove_forbidden_str
 from app.config import Settings
 from app.discord_notify import send_webhook_notification
@@ -366,9 +366,54 @@ async def resync_registry(session: aiohttp.ClientSession, settings: Settings) ->
             )
             job_status.log_line("registry", f"[{wt.title}] {message}")
             await asyncio.sleep(settings.delay_seconds)
-            return success and message.startswith("작가 등록") and register_authors_enabled
+            return success and message.startswith(("작가 등록", "원작자 등록")) and register_authors_enabled
 
     results = await asyncio.gather(*(_run_one(wt) for wt in targets))
+    return sum(1 for r in results if r)
+
+
+async def resync_kakao_registry(client: kakao_page_download.KakaoPageClient, settings: Settings) -> int:
+    """
+    지금 추적 중인 모든 카카오페이지 웹툰(구독/구독해제/목록/제외됨 전부)의 작품 "정보"(글/그림/원작)를 받아서
+    ① 아카이빙 파일명 템플릿 {author}용 글 작가를 저장하고 ② 관심 작가로 등록한다(네이버 재동기화와 같은 규칙):
+    원작자가 있으면 원작자, 없으면 글 작가(그림 작가는 안 함). 제외된 작품의 작가는 "전체 작가 목록"에만 올리고(꺼진 채)
+    관심 작가로 켜지 않는다. 이미 있는 항목의 켜짐/꺼짐은 그대로 둔다(사용자가 꺼 둔 걸 되돌리지 않음). 구독할 때 작품 정보를
+    못 받았거나, 이 기능이 생기기 전에 구독해 둔 작품을 채우는 수동 트리거다.
+    작품 하나가 실패해도(조회 실패/예외) 나머지는 계속하고, 결과를 작품마다 실행 이력에 남긴다. 처리된(제외 아님) 작품 수를 돌려준다.
+    """
+    rows = list(repository.get_kakao_webtoons_map().values())
+    if not rows:
+        job_status.log_line("registry", "재동기화 대상 카카오 웹툰이 없습니다")
+        return 0
+
+    semaphore = asyncio.Semaphore(settings.artist_scan_concurrency)
+
+    async def _run_one(row: dict) -> bool:
+        async with semaphore:
+            title = row["title"]
+            try:
+                about = await client.fetch_about(row["title_id"])
+            except Exception as e:
+                log.warning("카카오 작품 정보(series_id=%s) 조회 예외: %s", row["title_id"], e)
+                about = None
+            await asyncio.sleep(settings.delay_seconds)
+            if about is None:
+                job_status.log_line("registry", f"[카카오] {title} — 작품 정보 조회 실패")
+                return False
+            writers, _, originals = kakao_page_download.split_authors(about)
+            repository.set_kakao_writer_names(row["title_id"], writers)
+            names = kakao_page_download.authors_to_register(about)
+            if not names:
+                job_status.log_line("registry", f"[카카오] {title} — 작가 정보 없음")
+                return False
+            registered = row["status"] != repository.STATUS_EXCLUDED
+            for name in names:
+                repository.upsert_watched_author(name, name, enabled=registered, platform="kakao")
+            label = ("원작자 등록" if originals else "작가 등록") + ("" if registered else "(전체 작가 목록만)")
+            job_status.log_line("registry", f"[카카오] {title} — {label}: {', '.join(names)}")
+            return registered
+
+    results = await asyncio.gather(*(_run_one(row) for row in rows))
     return sum(1 for r in results if r)
 
 

@@ -511,6 +511,11 @@ def client_from_saved_cookies(session: aiohttp.ClientSession, timeout_seconds: i
     return KakaoPageClient(session, kakao_page_auth.cookie_map(cookies), timeout_seconds)
 
 
+def client_or_anonymous(session: aiohttp.ClientSession, timeout_seconds: int) -> KakaoPageClient:
+    """저장된 로그인 쿠키가 있으면 그걸로, 없으면 쿠키 없이 부르는 클라이언트(작품 정보처럼 로그인이 필요 없는 조회용)."""
+    return client_from_saved_cookies(session, timeout_seconds) or KakaoPageClient(session, {}, timeout_seconds)
+
+
 def persist_refreshed_cookies(client: KakaoPageClient) -> None:
     """서버가 로그인 유지를 위해 새로 내려준 쿠키가 있으면 저장해서, 다음 실행에도 이어지게 한다."""
     if client.cookies_changed:

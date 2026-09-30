@@ -796,10 +796,7 @@ async def _kakao_about(series_id: int) -> dict | None:
     settings = get_settings()
     try:
         async with _kakao_page_session() as session:
-            client = kakao_page_download.client_from_saved_cookies(session, settings.request_timeout_seconds) or (
-                kakao_page_download.KakaoPageClient(session, {}, settings.request_timeout_seconds)
-            )
-            return await client.fetch_about(series_id)
+            return await kakao_page_download.client_or_anonymous(session, settings.request_timeout_seconds).fetch_about(series_id)
     except Exception as e:
         log.warning("카카오 작품 정보(series_id=%s) 조회 실패 — 작가 등록/저장을 건너뜁니다: %s", series_id, e)
         return None
@@ -1276,7 +1273,8 @@ async def search_authors(name: str):
 
 @router.post("/registry/resync")
 async def resync_registry():
-    """지금 추적 중인 모든 웹툰을 훑어서 작가/태그 레지스트리를 즉시 채운다."""
+    """지금 추적 중인 모든 웹툰을 훑어서 작가/태그 레지스트리를 즉시 채운다. 카카오웹툰 관리를 켰으면 카카오페이지 작품의
+    작가(글/원작 구분)도 같은 규칙으로 함께 채운다."""
     async def _run():
         settings = get_settings()
         job_status.start("registry")
@@ -1284,7 +1282,14 @@ async def resync_registry():
         try:
             async with aiohttp.ClientSession() as session:
                 count = await tracker.resync_registry(session, settings)
-            job_status.log_line("registry", f"{count}개 웹툰 처리 완료")
+            kakao_count = None
+            if await asyncio.to_thread(repository.get_setting, "kakao_webtoons_enabled") == "1":
+                job_status.log_line("registry", "카카오 작가 재동기화 시작")
+                async with _kakao_page_session() as kakao_session:
+                    kakao_client = kakao_page_download.client_or_anonymous(kakao_session, settings.request_timeout_seconds)
+                    kakao_count = await tracker.resync_kakao_registry(kakao_client, settings)
+                    kakao_page_download.persist_refreshed_cookies(kakao_client)
+            job_status.log_line("registry", f"{count}개 웹툰 처리 완료" + ("" if kakao_count is None else f", 카카오 {kakao_count}개 처리 완료"))
             job_status.finish("registry", success=True)
         except Exception as e:
             job_status.log_line("registry", f"오류: {e}")

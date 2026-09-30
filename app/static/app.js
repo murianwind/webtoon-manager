@@ -1271,6 +1271,7 @@ async function refreshRegistryJobStatuses() {
   if (statuses.registry?.status !== "running") {
     loadAuthorList();
     loadTagList();
+    if (kakaoWebtoonsEnabled) loadKakaoAuthorList(); // 카카오 작가도 함께 채워졌으니 목록을 새로 불러온다
     stopRegistryPolling();
   }
 }
