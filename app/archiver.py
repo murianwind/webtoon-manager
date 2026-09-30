@@ -61,20 +61,20 @@ def _parse_zip_filename_for_template(stem: str, title_name: str) -> tuple[str, s
     return None
 
 
-_KAKAO_STYLE_FILENAME_RE = re.compile(r"^(\d+)_(.+)#(\d+)$")
+_KAKAO_STYLE_FILENAME_RE = re.compile(r"^(\d+)_(.+?)(?:#(\d+))?$")
 
 
-def _parse_kakao_style_filename(stem: str) -> tuple[str, str, int] | None:
-    """'{번호}_{부제목}#{페이지수}' 구조(제목이 파일명에 없음 — 이 앱이 아닌 다른
-    도구로 받은 카카오웹툰 등에서 흔한 형태)를 인식한다. 맞으면
-    (회차 번호 문자열, 부제목, 파일명에 적힌 페이지수)를 반환하고, 아니면 None.
-    이 구조는 페이지수가 파일명에 이미 있어서 zip을 열어보지 않고도 알 수 있다 —
-    그래서 원본이 rclone이라 zip 내용에 접근 못 하는 경우에도 템플릿을 적용할 수 있다."""
+def _parse_kakao_style_filename(stem: str) -> tuple[str, str, int | None] | None:
+    """'{번호}_{부제목}' 또는 '{번호}_{부제목}#{페이지수}' 구조(제목이 파일명에 없음 — 카카오페이지 다운로드가 만드는
+    이름이고, 예전 도구로 받은 파일은 뒤에 #페이지수가 붙어 있다)를 인식한다. 맞으면
+    (회차 번호 문자열, 부제목, 파일명에 적힌 페이지수 — 없으면 None)를 반환하고, 아니면 None.
+    페이지수가 파일명에 있으면 zip을 열어보지 않고도 알 수 있어서, 원본이 rclone이라 zip 내용에 접근 못 하는 경우에도
+    템플릿을 적용할 수 있다. 없으면(새 이름) {page_count}가 필요한 템플릿은 zip을 열어 세고, 열 수 없으면 적용하지 않는다."""
     match = _KAKAO_STYLE_FILENAME_RE.match(stem)
     if not match:
         return None
     episode_no, subtitle, page_count = match.group(1), match.group(2), match.group(3)
-    return episode_no, subtitle, int(page_count)
+    return episode_no, subtitle, int(page_count) if page_count is not None else None
 
 
 def _list_episode_files_sorted(title_dir: Path) -> list[tuple[int, Path]]:

@@ -90,6 +90,10 @@
   <!-- 수동 다운로드 -->
   <section id="page-manual-download" class="page hidden">
     <div class="toolbar">
+      <select id="manual-platform" class="hidden">
+        <option value="naver">네이버</option>
+        <option value="kakao">카카오페이지</option>
+      </select>
       <input id="manual-query" type="text" placeholder="titleId 또는 웹툰 제목" />
       <button id="btn-manual-analyze">분석</button>
     </div>
@@ -107,6 +111,23 @@
         <table id="manual-table">
           <thead><tr><th></th><th>#</th><th>부제</th><th>상태</th></tr></thead>
           <tbody id="manual-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="kakao-manual-result" class="hidden">
+      <h3 id="kakao-manual-title"></h3>
+      <div id="kakao-manual-summary" class="kakao-manual-summary"></div>
+      <div class="manual-actions">
+        <button id="btn-kakao-manual-select-all">전체선택</button>
+        <button id="btn-kakao-manual-select-missing">받을 회차만 선택</button>
+        <button id="btn-kakao-manual-select-none">선택해제</button>
+        <button id="btn-kakao-manual-download">선택 다운로드</button>
+      </div>
+      <div class="scroll-table-wrapper" id="kakao-manual-table-wrapper">
+        <table id="kakao-manual-table">
+          <thead><tr><th></th><th>번호</th><th>제목</th><th>상태</th><th>대여 만료</th><th>진행</th></tr></thead>
+          <tbody id="kakao-manual-tbody"></tbody>
         </table>
       </div>
     </div>
@@ -131,8 +152,9 @@
 
     <div class="settings-card">
       <h2>작가</h2>
-      <p class="hint">구독중인 웹툰들의 저자가 자동으로 "선택됨"에 뜹니다. "사용 가능"은 네이버 연재중
-      작품 목록에서 뽑은 이름 후보입니다(추가 조회 없이 즉시 표시) — 클릭하면 정확한 검색으로 등록됩니다.</p>
+      <p class="hint">구독중인 웹툰들의 저자가 자동으로 "선택됨"에 뜹니다. 작품에 작가와 원작자가 따로 있으면 <strong>원작자가 등록되고</strong>
+      ("(원작)"으로 표시), 원작자가 없으면 작가가 등록됩니다. "사용 가능"에는 아직 선택하지 않은 작가/원작자와, 네이버 연재중
+      작품 목록에서 뽑은 이름 후보가 나옵니다(추가 조회 없이 즉시 표시) — 클릭하면 등록됩니다.</p>
       <div class="chip-section">
         <div class="chip-column">
           <h4>선택됨</h4>
@@ -285,6 +307,7 @@
       </div>
       <div class="schedule-block" data-job="download_job">
         <h3>다운로드</h3>
+        <p class="hint">다운로드 스케줄은 여러 개 등록할 수 있고, 스케줄마다 받을 대상(네이버 / 카카오페이지 / 둘 다)을 고릅니다(카카오페이지 관리를 켜면 대상 선택이 나타납니다). 카카오페이지는 다운로드 폴더를 보고 아직 받지 않은 회차만 받습니다.</p>
         <div class="schedule-controls"></div>
       </div>
       <div class="schedule-block" data-job="archive_job">
@@ -346,7 +369,7 @@
 
       <div class="field-group">
         <label for="kp-cookie-json">카카오페이지 로그인 쿠키 (다운로드용)</label>
-        <p class="field-hint">카카오페이지 작품을 받으려면 로그인 쿠키가 필요합니다. 크롬에서 page.kakao.com에 로그인한 뒤 <strong>Cookie-Editor</strong> 확장에서 Export → JSON으로 복사해서 아래에 그대로 붙여넣으세요. 필수 쿠키: _kau, _kpwtkn, _T_ANO, _karmt, _kahai, _kawlt, _kpdid. 보통 약 30일 유지되고, 로그인이 풀리거나 만료가 가까워지면 디스코드로 알려드립니다. 쿠키는 암호화해서 저장하며 백업에는 포함되지 않습니다(복원한 뒤에는 다시 붙여넣어야 합니다).</p>
+        <p class="field-hint">카카오페이지 작품을 받으려면 로그인 쿠키가 필요합니다. 크롬에서 page.kakao.com에 로그인한 뒤 <strong>Cookie-Editor</strong> 확장에서 Export → JSON으로 복사해서 아래에 그대로 붙여넣으세요. 필수 쿠키: _kau, _kpwtkn, _T_ANO, _kahai, _kawlt, _kpdid (선택: _karmt — 있으면 같이 쓰고, 없어도 됩니다). 보통 약 30일 유지되고, 로그인이 풀리거나 만료가 가까워지면 디스코드로 알려드립니다. 쿠키는 암호화해서 저장하며 백업에는 포함되지 않습니다(복원한 뒤에는 다시 붙여넣어야 합니다).</p>
         <textarea id="kp-cookie-json" rows="4" spellcheck="false" placeholder='[{"domain": ".kakao.com", "name": "_kau", ...}, ...]'></textarea>
         <div class="registry-add-row">
           <button id="btn-kp-cookie-save">쿠키 저장</button>
@@ -354,6 +377,16 @@
           <button id="btn-kp-cookie-delete">쿠키 삭제</button>
         </div>
         <span id="kp-cookie-status" class="hint-inline"></span>
+      </div>
+
+      <div class="field-group">
+        <label for="kakao-download-root">카카오페이지 다운로드 폴더</label>
+        <p class="field-hint">네이버와 다른 폴더에 받고 싶을 때 지정합니다. 비우면 네이버와 같은 다운로드 폴더를 씁니다. 받을 회차는 이 폴더 안의 작품 폴더를 보고 정합니다(폴더가 없으면 처음부터 전부, 파일이 여러 개면 누락된 회차, 파일이 하나뿐이면 그 파일 이후부터). 컨테이너에 마운트되어 있는 기존 폴더만 지정할 수 있고, 없는 폴더는 자동으로 만들지 않습니다.</p>
+        <div class="registry-add-row">
+          <input id="kakao-download-root" type="text" placeholder="예: /webtoon_download_kakao (비우면 기본 폴더)" />
+          <button id="btn-kakao-download-root-save">저장</button>
+        </div>
+        <span id="kakao-download-root-status" class="hint-inline"></span>
       </div>
 
       <div class="field-group">
@@ -413,7 +446,13 @@
     <div class="settings-card">
       <div class="manual-run-buttons">
         <button id="btn-run-discovery">신작 스캔 실행</button>
-        <button id="btn-run-download">다운로드 실행</button>
+        <select id="run-download-target" class="run-target-select">
+            <option value="">스케줄에 등록된 대상</option>
+            <option value="naver">네이버만</option>
+            <option value="kakao">카카오페이지만</option>
+            <option value="both">네이버 + 카카오페이지</option>
+          </select>
+          <button id="btn-run-download">다운로드 실행</button>
         <button id="btn-run-metadata-sync">메타 동기화</button>
         <button id="btn-run-report">리포트 발송</button>
       </div>
@@ -604,30 +643,6 @@
     </div>
     </div>
   </section>
-
-  <!-- 카카오페이지 작품별 다운로드 설정/미리보기/받기 창 -->
-  <div id="kakao-download-modal" class="modal-overlay hidden">
-    <div class="modal-box">
-      <h2 id="kakao-download-title">다운로드</h2>
-      <p class="hint">이번 버전의 "지금 받기"는 <strong>무료이거나 이미 대여 중인 회차</strong>만 받고, 대여권은 쓰지 않습니다(잠긴 회차는 "대여권 필요"로만 알려드립니다).</p>
-      <div class="field-group">
-        <label class="checkbox-label"><input type="checkbox" id="kakao-download-enabled" /> 이 작품 자동 다운로드 켜기</label>
-        <p class="field-hint">※ 자동 실행은 다음 업데이트에서 연결됩니다. 지금은 설정만 저장해두고, 아래 "지금 받기"로 직접 받습니다.</p>
-      </div>
-      <div class="field-group">
-        <label for="kakao-download-start">몇 화부터 받을까요?</label>
-        <input id="kakao-download-start" type="number" min="1" placeholder="비우면 앞으로 나오는 새 회차부터" />
-        <p id="kakao-download-last" class="field-hint"></p>
-      </div>
-      <div class="registry-add-row">
-        <button id="btn-kakao-download-save">저장</button>
-        <button id="btn-kakao-download-preview">미리보기</button>
-        <button id="btn-kakao-download-start">지금 받기</button>
-        <button id="btn-kakao-download-close">닫기</button>
-      </div>
-      <pre id="kakao-download-output" class="modal-output"></pre>
-    </div>
-  </div>
 
   <script src="/app.js"></script>
 </body>

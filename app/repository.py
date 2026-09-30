@@ -10,6 +10,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from app.db import LEGACY_KAKAO_ID_LIMIT, fetchall, fetchone, read_lock, write_transaction
+from app.file_utils import title_key
 from app.models import ArchiveTarget, FilenameTemplatePreset, WatchedAuthor, WatchedTag, WebtoonRecord
 
 STATUS_ACTIVE = "active"
@@ -195,18 +196,37 @@ def update_writer_ids_and_names(title_id: str, writer_ids: list[str], writer_nam
         )
 
 
+def update_origin_ids_and_names(title_id: str, origin_ids: list[str], origin_names: list[str]) -> None:
+    """원작자(있는 작품만)의 id/이름을 저장한다. 작가(writer_*)와 별개로 두는 이유: 카드에 표시하는 작가 정보는
+    그대로 두고, 관심 작가 후보 목록에만 원작자를 더하기 위해서다."""
+    with write_transaction() as conn:
+        conn.execute(
+            "UPDATE webtoons SET origin_ids = ?, origin_names = ?, updated_at = ? WHERE title_id = ?",
+            (json.dumps(origin_ids), json.dumps(origin_names), _now(), title_id),
+        )
+
+
+def list_origin_author_ids() -> set[str]:
+    """DB의 웹툰 어딘가에서 원작자로 나온 적 있는 작가 id들(화면에서 "원작"으로 표시하려는 용도)."""
+    ids: set[str] = set()
+    for row in fetchall("SELECT origin_ids FROM webtoons"):
+        ids.update(json.loads(row["origin_ids"] or "[]"))
+    return ids
+
+
 def list_all_writer_id_name_pairs() -> dict[str, str]:
-    """상태와 무관하게 DB에 있는 모든 웹툰에서 (author_id -> author_name)을 모은다.
-    watched_authors에 이름 없이 등록된 경우 이걸로 보정한다."""
-    rows = fetchall("SELECT writer_ids, writer_names FROM webtoons")
+    """상태와 무관하게 DB에 있는 모든 웹툰에서 (author_id -> author_name)을 모은다(작가와 원작자 모두).
+    watched_authors에 이름 없이 등록된 경우 이걸로 보정하고, 관심 작가 후보 목록도 이걸로 채운다."""
+    rows = fetchall("SELECT writer_ids, writer_names, origin_ids, origin_names FROM webtoons")
     result: dict[str, str] = {}
     for row in rows:
-        ids = json.loads(row["writer_ids"] or "[]")
-        names = json.loads(row["writer_names"] or "[]")
-        for i, author_id in enumerate(ids):
-            name = names[i] if i < len(names) else ""
-            if name and not result.get(author_id):
-                result[author_id] = name
+        for ids_key, names_key in (("writer_ids", "writer_names"), ("origin_ids", "origin_names")):
+            ids = json.loads(row[ids_key] or "[]")
+            names = json.loads(row[names_key] or "[]")
+            for i, author_id in enumerate(ids):
+                name = names[i] if i < len(names) else ""
+                if name and not result.get(author_id):
+                    result[author_id] = name
     return result
 
 
@@ -391,8 +411,6 @@ def _row_to_kakao_webtoon(row) -> dict:
         "title_id": row["title_id"], "title": row["title"], "status": row["status"],
         "ever_subscribed": bool(row["ever_subscribed"]), "thumbnail_url": row["thumbnail_url"],
         "author_summary": row["author_summary"],
-        "download_enabled": bool(row["download_enabled"]), "start_no": row["start_no"],
-        "last_downloaded_no": row["last_downloaded_no"],
     }
 
 
@@ -409,6 +427,21 @@ def get_kakao_webtoon(title_id: int) -> dict | None:
 def list_kakao_webtoons_by_status(status: str) -> list[dict]:
     rows = fetchall("SELECT * FROM kakao_webtoons WHERE status = ?", (status,))
     return [_row_to_kakao_webtoon(r) for r in rows]
+
+
+def get_kakao_webtoons_map() -> dict[int, dict]:
+    """추적 중인 카카오 작품 전부(title_id → 기록). 목록 800여 개를 그릴 때 작품마다 DB를 따로 부르지 않고 한 번에 읽는다."""
+    return {r["title_id"]: _row_to_kakao_webtoon(r) for r in fetchall("SELECT * FROM kakao_webtoons")}
+
+
+def delete_unmatched_legacy_excluded() -> int:
+    """카카오페이지로 못 옮긴 옛 기록 중 "제외됨"인 것을 지운다 — 완결/휴재라 지금 목록에 없는 작품이거나 제목이 달라진
+    작품인데, 어차피 지금도 연재 중인 작품이면 전체목록에 다시 나타난다. 구독해제/구독중 기록은 이력이라 남긴다."""
+    with write_transaction() as conn:
+        cursor = conn.execute(
+            "DELETE FROM kakao_webtoons WHERE title_id < ? AND status = ?", (LEGACY_KAKAO_ID_LIMIT, STATUS_EXCLUDED)
+        )
+        return cursor.rowcount
 
 
 def get_kakao_excluded_title_ids() -> set[int]:
@@ -465,38 +498,19 @@ def hard_delete_kakao_webtoon(title_id: int) -> None:
         conn.execute("DELETE FROM kakao_webtoons WHERE title_id = ?", (title_id,))
 
 
-def set_kakao_download_settings(title_id: int, enabled: bool, start_no: int | None) -> None:
-    with write_transaction() as conn:
-        conn.execute(
-            "UPDATE kakao_webtoons SET download_enabled = ?, start_no = ?, updated_at = ? WHERE title_id = ?",
-            (int(enabled), start_no, _now(), title_id),
-        )
-
-
-def update_kakao_last_downloaded_no(title_id: int, episode_no: int) -> None:
-    """마지막으로 받은 회차 번호를 올린다(내려가지는 않는다)."""
-    with write_transaction() as conn:
-        conn.execute(
-            "UPDATE kakao_webtoons SET last_downloaded_no = MAX(last_downloaded_no, ?), updated_at = ? WHERE title_id = ?",
-            (episode_no, _now(), title_id),
-        )
-
-
 def list_legacy_kakao_titles() -> list[str]:
     """아직 옛 카카오웹툰 번호로 남아있는(=카카오페이지로 못 옮긴) 기록의 제목들."""
     rows = fetchall("SELECT DISTINCT title FROM kakao_webtoons WHERE title_id < ?", (LEGACY_KAKAO_ID_LIMIT,))
     return [r["title"] for r in rows]
 
 
-def migrate_legacy_kakao_webtoons(catalog_items: list[dict]) -> dict:
-    """옛 카카오웹툰 기록(번호 체계가 달라 카카오페이지와 안 맞음)을 카카오페이지 작품으로
-    옮긴다 — 카카오페이지 요일별 목록에서 제목이 정확히 하나만 일치하는 작품이 있을 때만
-    번호를 새 series_id로 바꾸고(상태/구독 이력/생성 시각은 그대로), 그 외에는(제목이 다르거나
-    카카오페이지에서 못 찾았거나 제목이 겹쳐 모호한 경우) 건드리지 않고 목록으로 돌려준다."""
-    title_counts: dict[str, int] = {}
+def migrate_legacy_kakao_webtoons(catalog_items: list[dict], candidates: dict[str, list[dict]] | None = None) -> dict:
+    """옛 카카오웹툰 기록(번호 체계가 달라 카카오페이지와 안 맞음)을 카카오페이지 작품으로 옮긴다 — 제목이
+    같은 작품(공백/문장부호 차이는 무시)이 정확히 하나만 있을 때 번호를 새 series_id로 바꾸고(상태/구독
+    이력/생성 시각은 그대로), 그 외에는 건드리지 않고 이유와 후보를 붙여 목록으로 돌려준다."""
+    by_key: dict[str, list[dict]] = {}
     for item in catalog_items:
-        title_counts[item["title_name"]] = title_counts.get(item["title_name"], 0) + 1
-    unique_by_title = {i["title_name"]: i for i in catalog_items if title_counts[i["title_name"]] == 1}
+        by_key.setdefault(title_key(item["title_name"]), []).append(item)
 
     migrated = 0
     unmatched: list[dict] = []
@@ -505,12 +519,22 @@ def migrate_legacy_kakao_webtoons(catalog_items: list[dict]) -> dict:
             "SELECT title_id, title, status FROM kakao_webtoons WHERE title_id < ?", (LEGACY_KAKAO_ID_LIMIT,)
         ).fetchall()
         for row in legacy_rows:
-            item = unique_by_title.get(row["title"])
+            matches = by_key.get(title_key(row["title"]), []) if title_key(row["title"]) else []
+            item = matches[0] if len(matches) == 1 else None
             taken = item is not None and conn.execute(
                 "SELECT 1 FROM kakao_webtoons WHERE title_id = ?", (item["title_id"],)
             ).fetchone()
             if item is None or taken:
-                unmatched.append({"title": row["title"], "status": row["status"]})
+                if len(matches) > 1:
+                    reason = "같은 제목의 작품이 여러 개라 어느 것인지 정할 수 없음"
+                    shown = [{"title_id": m["title_id"], "title_name": m["title_name"]} for m in matches[:3]]
+                elif taken:
+                    reason = "이미 다른 기록이 그 작품으로 등록돼 있음"
+                    shown = [{"title_id": item["title_id"], "title_name": item["title_name"]}]
+                else:
+                    reason = "카카오페이지에서 같은 제목의 작품을 못 찾음"
+                    shown = (candidates or {}).get(row["title"], [])
+                unmatched.append({"title": row["title"], "status": row["status"], "reason": reason, "candidates": shown})
                 continue
             conn.execute(
                 "UPDATE kakao_webtoons SET title_id = ?, thumbnail_url = ?, author_summary = ?, updated_at = ? "
@@ -967,8 +991,10 @@ def delete_episode_history_older_than(days: int) -> int:
 
 # ── 백업/복원 ───────────────────────────────────────────────────────
 
-# 카카오페이지 로그인 쿠키(kakao_page_cookies)도 비밀값이라 백업에 넣지 않는다(복원 후엔 다시 붙여넣기)
-_SECRET_SETTING_KEYS = {"discord_webhook_url", "discord_bot_token", "discord_notify_channel_id", "kakao_page_cookies"}
+# 백업에 넣지 않는 설정: 비밀값(카카오페이지 로그인 쿠키는 복원 후 다시 붙여넣기)과, 크고 언제든 다시 채워지는 목록 캐시
+_SECRET_SETTING_KEYS = {
+    "discord_webhook_url", "discord_bot_token", "discord_notify_channel_id", "kakao_page_cookies", "kakao_catalog_snapshot",
+}
 
 
 def export_all() -> dict:
@@ -1000,14 +1026,13 @@ _WEBTOON_COLUMNS = (
     "title_id", "title", "status", "is_adult", "writer_ids", "added_source",
     "last_downloaded_no", "is_finished", "finish_ack", "thumbnail_url",
     "finish_notified", "genres", "tags", "latest_episode_no", "is_paused",
-    "writer_names", "ever_subscribed", "is_new", "has_update", "created_at", "updated_at",
+    "writer_names", "ever_subscribed", "is_new", "has_update", "origin_ids", "origin_names", "created_at", "updated_at",
 )
 _WATCHED_AUTHOR_COLUMNS = ("author_id", "author_name", "enabled", "platform", "created_at", "updated_at")
 _WATCHED_TAG_COLUMNS = ("tag_id", "tag_name", "enabled", "created_at", "updated_at")
 _KAKAO_SEEN_TITLE_COLUMNS = ("author_name", "title_id", "title_name", "seen_at")
 _KAKAO_WEBTOON_COLUMNS = (
-    "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "author_summary",
-    "download_enabled", "start_no", "last_downloaded_no", "created_at", "updated_at",
+    "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "author_summary", "created_at", "updated_at",
 )
 _FILENAME_TEMPLATE_PRESET_COLUMNS = ("id", "name", "template", "created_at", "updated_at")
 _ARCHIVE_TARGET_COLUMNS = (

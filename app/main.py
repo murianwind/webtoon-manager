@@ -18,6 +18,7 @@ from starlette.types import Scope
 from app import discord_config
 from app.api.routes import router as api_router
 from app.discord_bot import start_bot, stop_bot
+from app import kakao_catalog, repository
 from app.scheduler import create_scheduler
 from app.tracker import ensure_default_tags_seeded
 
@@ -58,6 +59,10 @@ async def lifespan(app: FastAPI):
     scheduler = create_scheduler()
     scheduler.start()
     app.state.scheduler = scheduler
+    # 프로그램이 (업데이트 등으로) 시작될 때마다 카카오 목록을 항상 새로 채운다 — 저장돼 있던 캐시는 새로 채워질 때까지
+    # 화면에 바로 보여주는 용도일 뿐이라, 캐시가 예전 것으로 굳어버리는 일이 없다. 화면은 기다리지 않는다.
+    if repository.get_setting("kakao_webtoons_enabled") == "1":
+        kakao_catalog.start_refresh()
     yield
     scheduler.shutdown(wait=False)
     await stop_bot()

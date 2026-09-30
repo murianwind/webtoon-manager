@@ -68,6 +68,7 @@ def _parse_title_info(raw: dict, title_id: str) -> TitleInfo:
     writer_id_name_pairs: list[tuple[str, str]] = []
     painter_names: list[str] = []
     novel_origin_names: list[str] = []
+    origin_id_name_pairs: list[tuple[str, str]] = []
     writer_ids: set[str] = set()
 
     for artist in raw.get("communityArtists") or []:
@@ -84,6 +85,7 @@ def _parse_title_info(raw: dict, title_id: str) -> TitleInfo:
         if "ARTIST_NOVEL_ORIGIN" in artist_types and artist_name:
             # 소설 등 원작자 — ComicInfo 표준엔 전용 태그가 없어서 Notes에 별도로 적어준다.
             novel_origin_names.append(artist_name)
+            origin_id_name_pairs.append((str(artist_id), artist_name))
 
     genre_codes = list(gfp.get("genreTypes") or [])
     genres_ko = [_GENRE_CODE_TO_KOREAN.get(code, code) for code in genre_codes]
@@ -99,6 +101,7 @@ def _parse_title_info(raw: dict, title_id: str) -> TitleInfo:
         writer_names=[name for _id, name in writer_id_name_pairs if name],
         painter_names=painter_names,
         novel_origin_names=novel_origin_names,
+        origin_id_name_pairs=origin_id_name_pairs,
         writer_ids=writer_ids,
         writer_id_name_pairs=writer_id_name_pairs,
         genres=genre_codes,

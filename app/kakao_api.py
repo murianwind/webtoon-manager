@@ -20,6 +20,8 @@ import time
 
 import aiohttp
 
+from app.file_utils import title_key
+
 log = logging.getLogger(__name__)
 
 _BFF = "https://bff-page.kakao.com/api/gateway"
@@ -40,6 +42,7 @@ _WEEKDAY_TAB_UIDS = (1, 2, 3, 4, 5, 6, 7)  # 월~일
 _SCREEN_UID = 52  # 요일연재 화면
 _MAX_PAGES_PER_TAB = 40  # is_end가 안 오는 이상 응답에 대비한 안전 상한(요일당 200~250개 수준이 정상)
 _MAX_SEARCH_PAGES = 10
+_MAX_TITLE_SEARCH_PAGES = 2  # 제목 검색은 정확히 같은 제목이 앞쪽에 나오므로 2페이지(50개)면 충분
 _TAB_CONCURRENCY = 3  # 요일 탭 동시 조회 수 — 예전에 서버에서 연달아 조회하면 HTTP 403이 났던 전례가 있어 낮게
 _REQUEST_INTERVAL_SECONDS = 0.3  # 같은 탭 안에서 페이지를 넘길 때 쉬는 간격
 _CATALOG_CACHE_TTL_SECONDS = 600
@@ -47,6 +50,7 @@ _CATALOG_CACHE_TTL_SECONDS = 600
 _BADGE_UP = "BT02"
 _BADGE_NEW = "BT03"
 _ON_ISSUE_PAUSED = "P"
+_ON_ISSUE_FINISHED = "N"
 _ADULT_AGE_GRADE = 19
 
 # 실제로 동작이 확인된 브라우저 요청의 헤더를 그대로 따른다(쿠키는 제외). 예전 카카오웹툰
@@ -149,6 +153,7 @@ def _card_to_item(card: dict) -> dict | None:
         "has_update": badge == _BADGE_UP,
         "is_new": badge == _BADGE_NEW,
         "is_paused": card.get("on_issue") == _ON_ISSUE_PAUSED,
+        "is_finished": card.get("on_issue") == _ON_ISSUE_FINISHED,
         "thumbnail_url": _thumbnail_url(card),
     }
 
@@ -198,6 +203,19 @@ async def _fetch_weekday_catalog_uncached(
             if item is not None:
                 items.setdefault(item["title_id"], item)
     return list(items.values()), all_ok
+
+
+async def fetch_weekday_catalog_checked(
+    session: aiohttp.ClientSession, timeout_seconds: int
+) -> tuple[list[dict], bool]:
+    """캐시 없이 새로 받아서 (목록, 요일 7개가 전부 성공했는지)를 돌려준다 — 목록 캐시(kakao_catalog)가 일부만 받은
+    결과로 멀쩡한 예전 캐시를 덮어쓰지 않으려고 성공 여부를 같이 본다."""
+    async with _catalog_lock:
+        items, all_ok = await _fetch_weekday_catalog_uncached(session, timeout_seconds)
+        if items and all_ok:
+            _catalog_cache["items"] = items
+            _catalog_cache["at"] = time.monotonic()
+        return list(items), all_ok
 
 
 async def fetch_weekday_catalog(
@@ -282,6 +300,13 @@ async def _search_webtoon_cards(
     return cards
 
 
+async def search_series(session: aiohttp.ClientSession, keyword: str, timeout_seconds: int) -> list[dict]:
+    """"수동 다운로드"에서 제목/작가로 웹툰을 찾는다(검색 결과 첫 페이지, 완결/휴재 포함). 항목은 요일 목록
+    항목(_card_to_item)과 같은 모양이다."""
+    cards = await _search_webtoon_cards(session, _normalize_title(keyword), timeout_seconds, 1)
+    return [item for item in (_card_to_item(c) for c in cards) if item is not None]
+
+
 async def search_by_author(
     session: aiohttp.ClientSession, author_name: str, timeout_seconds: int
 ) -> list[dict]:
@@ -306,22 +331,32 @@ def _normalize_title(title: str) -> str:
 
 async def search_series_by_titles(
     session: aiohttp.ClientSession, titles: list[str], timeout_seconds: int
-) -> list[dict]:
-    """제목 여러 개를 하나씩 검색해서, 제목이 정확히 같은 웹툰만 모아 반환한다(공백 차이는 무시).
-    요일 목록에는 없는 완결/장기 휴재 작품의 카카오페이지 작품 번호를 찾으려는 용도라, 제목당 검색
-    첫 페이지(25개)만 본다 — 정확히 같은 제목은 검색 정확도순 맨 앞에 나온다. 반환 항목은 요일 목록
-    항목(_card_to_item)과 같은 모양이다. 한 제목의 검색이 실패해도 나머지는 계속한다."""
+) -> tuple[list[dict], dict[str, list[dict]]]:
+    """제목 여러 개를 하나씩 검색해서 (제목이 같은 웹툰들, 못 찾은 제목별 후보)를 돌려준다. 제목 비교는
+    공백/문장부호/대소문자를 무시한다(file_utils.title_key) — 옛 기록의 제목 끝에 공백이 붙어 있거나 문장부호가
+    조금 다른 경우도 같은 작품으로 본다. 검색어는 공백을 정리해서 보낸다. 요일 목록에는 없는 완결/장기 휴재
+    작품의 카카오페이지 작품 번호를 찾으려는 용도다. 반환 항목은 요일 목록 항목(_card_to_item)과 같은 모양이다.
+    같은 제목이 둘 이상 나오면 전부 돌려주므로 호출부가 모호한 경우로 다룬다. 못 찾은 제목에는 검색 결과 상위
+    3개를 후보로 붙인다. 한 제목의 검색이 실패해도 나머지는 계속한다."""
     found: list[dict] = []
+    candidates: dict[str, list[dict]] = {}
     for index, title in enumerate(titles):
+        wanted = title_key(title)
+        if not wanted:
+            continue
         if index > 0:
             await asyncio.sleep(_REQUEST_INTERVAL_SECONDS)
-        wanted = _normalize_title(title)
-        for card in await _search_webtoon_cards(session, title, timeout_seconds, 1):
-            if _normalize_title(card.get("title", "")) == wanted:
+        cards = await _search_webtoon_cards(session, _normalize_title(title), timeout_seconds, _MAX_TITLE_SEARCH_PAGES)
+        matched = False
+        for card in cards:
+            if title_key(card.get("title", "")) == wanted:
                 item = _card_to_item(card)
                 if item is not None:
                     found.append(item)
-    return found
+                    matched = True
+        if not matched:
+            candidates[title] = [{"title_id": c["series_id"], "title_name": c.get("title", "")} for c in cards[:3]]
+    return found, candidates
 
 
 def extract_candidate_author_names(items: list[dict]) -> list[str]:

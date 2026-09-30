@@ -17,10 +17,13 @@ LAN 전용, 인증 없음. 입력값 검증 실패 시 크래시 대신 명확�
 """
 
 import asyncio
+import hashlib
 import html
 import json
+from datetime import datetime, timezone
 import logging
 import re
+import tempfile
 from pathlib import Path
 
 import markdown
@@ -42,12 +45,13 @@ from app import (
 )
 from app import scheduler as scheduler_mod
 from app import kakao_api
+from app import kakao_catalog
 from app import kakao_cover
 from app import kakao_page_auth
 from app import kakao_page_download
 from app import webtoon_server_client
 from app import archiver
-from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
+from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao, title_key
 from app import rclone_client
 from app import rclone_updater
 from app.config import get_settings
@@ -343,9 +347,6 @@ class KakaoWebtoonOut(BaseModel):
     is_new: bool = False
     is_paused: bool = False
     has_new_episode: bool = False
-    download_enabled: bool = False
-    start_no: int | None = None
-    last_downloaded_no: int = 0
 
 
 class KakaoWebtoonEntryIn(BaseModel):
@@ -390,66 +391,66 @@ async def get_kakao_thumbnail(series_id: int):
 
 @router.get("/kakao-list")
 async def browse_kakao_list(refresh: bool = False):
-    """"웹툰 전체목록"에 카카오페이지 웹툰을 같이 보여주기 위한 목록 — 요일 7개(연재 중인 것)를
-    훑고(요청이 많아서 10분간 캐시하고, refresh=true면 캐시를 무시하고 새로 받는다), 추적 중(구독/구독해제/제외)인 것이 있으면 그 상태를 같이 붙인다. 네이버의
-    browse_naver_list와 같은 구조 — "제외됨"만 걸러내고, 요일별 목록에서 사라진(휴재
-    장기화 등) 구독 이력 있는 작품은 DB 기록으로 보완해서 계속 보여준다."""
-    settings = get_settings()
-    async with aiohttp.ClientSession() as session:
-        items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds, use_cache=not refresh)
+    """"웹툰 전체목록"에 카카오페이지 웹툰을 같이 보여주기 위한 목록. **캐시에서만 읽어서 바로 돌려준다**(네트워크를
+    기다리지 않음) — 목록은 프로그램 시작 때, 3시간마다, 그리고 refresh=true(새로고침 버튼)일 때 백그라운드로
+    다시 채워진다(kakao_catalog 참고). 응답의 refreshing이 true면 채우는 중이라는 뜻이고, 화면은 조금 뒤 다시
+    불러서 version이 바뀌었을 때만 화면을 갱신한다.
+    추적 중(구독/구독해제/제외)인 것은 그 상태를 같이 붙이고, "제외됨"은 걸러낸다. 요일별 목록에서 사라진(장기
+    휴재 등) 구독 이력 있는 작품은 DB 기록으로 보완해서 계속 보여준다."""
+    if refresh:
+        kakao_catalog.start_refresh()
+    else:
+        kakao_catalog.ensure_fresh()
+    # 목록과 "갱신 중인지"는 같은 순간에 읽는다 — 이 아래에서 기다리는 사이 갱신이 끝나도, 응답 안에서 서로 어긋나
+    # 지 않게(어긋나면 화면이 "끝났다"고 보고 다시 확인하지 않는다).
+    items, fetched_at = kakao_catalog.snapshot()
+    refreshing = kakao_catalog.is_refreshing()
+    tracked_map = await asyncio.to_thread(repository.get_kakao_webtoons_map)
 
     seen_ids: set[int] = set()
     result = []
+    author_updates: dict[int, str] = {}
     for item in items:
         seen_ids.add(item["title_id"])
-        tracked = await asyncio.to_thread(repository.get_kakao_webtoon, item["title_id"])
+        tracked = tracked_map.get(item["title_id"])
         if tracked is not None and tracked["status"] == repository.STATUS_EXCLUDED:
             continue
         author_summary = ", ".join(item["author_names"])
         if tracked is not None and author_summary and author_summary != tracked["author_summary"]:
-            # 추적 중인(구독/구독해제/미등록) 작품이면, 요일별 목록에서 받은 최신
-            # 작가 정보로 DB 기록도 슬쩍 갱신해둔다 — 이걸 안 하면 "구독해제"/
-            # "제외됨" 탭(요일별 목록을 다시 안 훑음)에서는 예전에 저장된(혹은 이
-            # 기능이 생기기 전이라 비어있는) 작가 정보만 계속 보이게 된다.
-            await asyncio.to_thread(repository.refresh_kakao_webtoon_author_summary, item["title_id"], author_summary)
+            # 추적 중인 작품이면, 목록에서 받은 최신 작가 정보로 DB 기록도 갱신해둔다 — 요일별 목록을 다시 안
+            # 훑는 "구독해제"/"제외됨" 탭이 예전(혹은 비어있던) 작가 정보만 계속 보이지 않게.
+            author_updates[item["title_id"]] = author_summary
         result.append(
             {
-                "title_id": item["title_id"],
-                "title": item["title_name"],
-                "thumbnail_url": item["thumbnail_url"],
-                "is_adult": item["is_adult"],
-                "author_summary": author_summary,
-                "is_new": item["is_new"],
-                "is_paused": item["is_paused"],
-                "has_new_episode": item["has_update"],
+                "title_id": item["title_id"], "title": item["title_name"], "thumbnail_url": item["thumbnail_url"],
+                "is_adult": item["is_adult"], "author_summary": author_summary, "is_new": item["is_new"],
+                "is_paused": item["is_paused"], "has_new_episode": item["has_update"],
                 "status": tracked["status"] if tracked else None,
                 "ever_subscribed": tracked["ever_subscribed"] if tracked else False,
-                "download_enabled": tracked["download_enabled"] if tracked else False,
             }
         )
+    for title_id, summary in author_updates.items():
+        await asyncio.to_thread(repository.refresh_kakao_webtoon_author_summary, title_id, summary)
 
-    # 요일별 목록엔 지금 연재 중인 것만 나오므로, 장기 휴재 등으로 거기서 빠진 구독
-    # 이력 있는 작품은 DB 기록으로 보완해서 계속 보여준다(제외됨은 계속 숨김).
-    for status in (repository.STATUS_ACTIVE, repository.STATUS_UNSUBSCRIBED, repository.STATUS_UNREGISTERED):
-        for wt in await asyncio.to_thread(repository.list_kakao_webtoons_by_status, status):
-            if wt["title_id"] in seen_ids:
-                continue
-            result.append(
-                {
-                    "title_id": wt["title_id"],
-                    "title": wt["title"],
-                    "thumbnail_url": wt["thumbnail_url"],
-                    "is_adult": False,
-                    "author_summary": wt["author_summary"],
-                    "is_new": False,
-                    "is_paused": False,
-                    "has_new_episode": False,
-                    "status": wt["status"],
-                    "ever_subscribed": wt["ever_subscribed"],
-                    "download_enabled": wt["download_enabled"],
-                }
-            )
-    return result
+    # 요일별 목록엔 지금 연재 중인 것만 나오므로, 장기 휴재 등으로 거기서 빠진 구독 이력 있는 작품은 DB 기록으로
+    # 보완해서 계속 보여준다(제외됨은 계속 숨김). 카탈로그가 아직 비어 있는 첫 실행 중에는 이 보완이 목록 전체가 된다.
+    for wt in tracked_map.values():
+        if wt["title_id"] in seen_ids or wt["status"] not in (
+            repository.STATUS_ACTIVE, repository.STATUS_UNSUBSCRIBED, repository.STATUS_UNREGISTERED,
+        ):
+            continue
+        result.append(
+            {
+                "title_id": wt["title_id"], "title": wt["title"], "thumbnail_url": wt["thumbnail_url"], "is_adult": False,
+                "author_summary": wt["author_summary"], "is_new": False, "is_paused": False, "has_new_episode": False,
+                "status": wt["status"], "ever_subscribed": wt["ever_subscribed"],
+            }
+        )
+    version = hashlib.sha1(json.dumps(result, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+    return {
+        "items": result, "version": version, "refreshing": refreshing,
+        "refreshed_at": datetime.fromtimestamp(fetched_at, tz=timezone.utc).isoformat() if fetched_at else None,
+    }
 
 
 @router.get("/kakao-webtoons", response_model=list[KakaoWebtoonOut])
@@ -470,14 +471,9 @@ async def list_kakao_webtoons(status: str | None = None):
     if not rows:
         return []
 
-    settings = get_settings()
-    try:
-        async with aiohttp.ClientSession() as session:
-            catalog_items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds)
-        catalog_by_id = {item["title_id"]: item for item in catalog_items}
-    except Exception as e:
-        log.warning("카카오 목록(%s) 배지/저자 보강 실패(그대로 표시): %s", status, e)
-        catalog_by_id = {}
+    # 배지(UP/신작/휴재)와 작가 정보는 캐시된 요일별 목록에서 보강한다 — 이 탭을 열 때 카카오를 부르지 않는다.
+    kakao_catalog.ensure_fresh()
+    catalog_by_id = {item["title_id"]: item for item in kakao_catalog.snapshot()[0]}
 
     result = []
     for r in rows:
@@ -515,14 +511,21 @@ async def migrate_legacy_kakao_webtoons():
         items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds, use_cache=False)
         if not items:
             raise HTTPException(status_code=502, detail="카카오페이지 목록을 가져오지 못해 이전하지 못했습니다. 잠시 뒤 다시 시도해주세요.")
-        in_catalog = {item["title_name"] for item in items}
+        in_catalog = {title_key(item["title_name"]) for item in items}
         legacy_titles = await asyncio.to_thread(repository.list_legacy_kakao_titles)
-        not_in_catalog = sorted(t for t in legacy_titles if t not in in_catalog)
-        searched = await kakao_api.search_series_by_titles(session, not_in_catalog, settings.request_timeout_seconds)
+        not_in_catalog = sorted(t for t in legacy_titles if title_key(t) not in in_catalog)
+        searched, candidates = await kakao_api.search_series_by_titles(session, not_in_catalog, settings.request_timeout_seconds)
 
     known_ids = {item["title_id"] for item in items}
     items = items + [item for item in searched if item["title_id"] not in known_ids]
-    return await asyncio.to_thread(repository.migrate_legacy_kakao_webtoons, items)
+    result = await asyncio.to_thread(repository.migrate_legacy_kakao_webtoons, items, candidates)
+    # 못 옮긴 "제외됨" 기록은 지운다 — 지금도 연재 중인 작품이면 전체목록에 다시 나타나고, 완결/휴재라 목록에 없는
+    # 작품의 제외 기록은 있어도 쓸 데가 없다. 구독해제/구독중이던 기록은 이력이라 남기고 이유와 후보를 보여준다.
+    deleted = await asyncio.to_thread(repository.delete_unmatched_legacy_excluded)
+    result["deleted"] = deleted
+    result["unmatched"] = [u for u in result["unmatched"] if u["status"] != repository.STATUS_EXCLUDED]
+    kakao_catalog.start_refresh()  # 이전이 끝났으니 목록 캐시(배지/작가)도 최신으로 다시 채운다
+    return result
 
 
 # ── 카카오페이지 로그인 쿠키 / 다운로드 ─────────────────────────────────
@@ -531,15 +534,7 @@ class KakaoPageLoginIn(BaseModel):
     cookies_json: str
 
 
-class KakaoDownloadSettingsIn(BaseModel):
-    enabled: bool
-    start_no: int | None = None  # 이 회차 이상만 받는다. 비우면(켤 때) 지금 최신 회차 다음부터(=앞으로 나오는 새 회차만)
-
-
-# "지금 받기" 한 번에 받는 최대 회차 수 — 오래 걸리는 작업이라 한 번에 너무 많이 잡지 않게(더 받으려면 다시 누르면 된다)
-_KAKAO_MANUAL_DOWNLOAD_LIMIT = 10
-_kakao_download_state: dict = {"running": False, "title_id": None, "lines": [], "result": None}
-_kakao_download_task: asyncio.Task | None = None  # 진행 중 작업이 중간에 정리되지 않게 참조를 잡아둔다
+_kakao_manual_task: asyncio.Task | None = None  # 진행 중 작업이 중간에 정리되지 않게 참조를 잡아둔다
 
 
 def _kakao_page_session() -> aiohttp.ClientSession:
@@ -590,122 +585,190 @@ async def check_kakao_page_login():
     return {**status, "logged_in": logged_in, "message": _KAKAO_LOGIN_CHECK_MESSAGES[logged_in]}
 
 
-def _kakao_download_settings_out(wt: dict) -> dict:
-    return {"download_enabled": wt["download_enabled"], "start_no": wt["start_no"], "last_downloaded_no": wt["last_downloaded_no"]}
+# ── 카카오페이지 다운로드 폴더 / 자동 다운로드 스위치 ──────────────────
+
+class KakaoDownloadRootIn(BaseModel):
+    path: str
 
 
-async def _list_kakao_episodes(title_id: int):
-    """회차 목록(저장된 쿠키가 있으면 로그인 상태로 — 대여 중인 회차를 구분하려면 필요). 못 받으면 502."""
-    settings = get_settings()
-    async with _kakao_page_session() as session:
-        client = kakao_page_download.client_from_saved_cookies(session, settings.request_timeout_seconds)
-        if client is None:
-            client = kakao_page_download.KakaoPageClient(session, {}, settings.request_timeout_seconds)
-        listing = await client.list_episodes(title_id)
-        kakao_page_download.persist_refreshed_cookies(client)
-    if listing is None:
-        raise HTTPException(status_code=502, detail="카카오페이지에서 회차 목록을 가져오지 못했습니다. 잠시 뒤 다시 시도해주세요.")
-    return listing[1]
-
-
-@router.get("/kakao-webtoons/{title_id}/download-settings")
-async def get_kakao_download_settings(title_id: int):
-    return _kakao_download_settings_out(await _get_or_404_kakao(title_id))
-
-
-@router.post("/kakao-webtoons/{title_id}/download-settings")
-async def set_kakao_download_settings(title_id: int, payload: KakaoDownloadSettingsIn):
-    wt = await _get_or_404_kakao(title_id)
-    start_no = payload.start_no
-    if start_no is not None and start_no < 1:
-        raise HTTPException(status_code=400, detail="시작 회차는 1 이상이어야 합니다.")
-    if payload.enabled and start_no is None:
-        # 비워두면 "앞으로 나오는 새 회차부터" — 지금 최신 회차 다음 번호로 정한다
-        numbers = [e.number for e in await _list_kakao_episodes(title_id) if e.number is not None and not e.hidden]
-        start_no = max(numbers) + 1 if numbers else 1
-    elif start_no is None:
-        start_no = wt["start_no"]  # 끄기만 할 때는 예전 값을 그대로 둔다
-    await asyncio.to_thread(repository.set_kakao_download_settings, title_id, payload.enabled, start_no)
-    return _kakao_download_settings_out(await _get_or_404_kakao(title_id))
-
-
-@router.post("/kakao-webtoons/{title_id}/download-preview")
-async def preview_kakao_download(title_id: int):
-    """받으면 어떻게 되는지만 보여준다 — 아무것도 받지 않고 대여권도 쓰지 않는다."""
-    wt = await _get_or_404_kakao(title_id)
-    start_no = wt["start_no"] or 1
-    episodes = await _list_kakao_episodes(title_id)
-    folder = Path(get_settings().download_root) / remove_forbidden_str_kakao(wt["title"])
-    existing = await asyncio.to_thread(kakao_page_download.scan_existing_numbers, folder)
-    plan = kakao_page_download.plan_downloads(
-        episodes, start_no=start_no, last_downloaded_no=wt["last_downloaded_no"], existing_numbers=existing
-    )
+def _kakao_download_root_state() -> dict:
+    default_root = get_settings().download_root
     return {
-        "start_no": start_no, "start_no_set": wt["start_no"] is not None, "last_downloaded_no": wt["last_downloaded_no"],
-        "to_download": [e.number for e in plan.to_download], "locked": [e.number for e in plan.locked],
-        "skipped_existing": plan.skipped_existing, "unnumbered": plan.unnumbered,
-        "cookie_saved": await asyncio.to_thread(kakao_page_auth.load_cookies) is not None,
+        "path": repository.get_setting(kakao_page_download.DOWNLOAD_ROOT_SETTING_KEY) or "",
+        "effective": kakao_page_download.effective_download_root(default_root),
+        "default": default_root,
     }
 
 
-async def _run_kakao_download_task(wt: dict) -> None:
-    state = _kakao_download_state
+@router.get("/settings/kakao-download-root")
+async def get_kakao_download_root():
+    return await asyncio.to_thread(_kakao_download_root_state)
 
-    def log_line(text: str) -> None:
-        state["lines"] = (state["lines"] + [text])[-50:]
 
+@router.post("/settings/kakao-download-root")
+async def set_kakao_download_root(payload: KakaoDownloadRootIn):
+    """카카오페이지 전용 다운로드 폴더. 비우면 네이버와 같은 기본 다운로드 폴더를 쓴다. 이미 있는(컨테이너에
+    마운트된) 폴더만 받는다 — 없는 폴더를 자동으로 만들면 마운트가 안 된 경로일 때 컨테이너 안에 저장돼서,
+    컨테이너를 다시 만들면 받은 파일이 사라지기 때문이다."""
+    path = payload.path.strip()
+    if path:
+        folder = Path(path)
+        if not folder.is_absolute():
+            raise HTTPException(status_code=400, detail="절대 경로로 입력해주세요(예: /webtoon_download_kakao).")
+        if not folder.is_dir():
+            raise HTTPException(
+                status_code=400,
+                detail="그 폴더가 없습니다. 컨테이너에 마운트한 경로가 맞는지 확인해주세요(마운트 안 된 경로를 만들면 컨테이너 안에만 저장돼서 자동으로 만들지 않습니다).",
+            )
+        try:
+            with tempfile.NamedTemporaryFile(dir=folder):
+                pass
+        except OSError:
+            raise HTTPException(status_code=400, detail="그 폴더에 파일을 쓸 수 없습니다. 권한을 확인해주세요.")
+    await asyncio.to_thread(repository.set_setting, kakao_page_download.DOWNLOAD_ROOT_SETTING_KEY, path or None)
+    return await asyncio.to_thread(_kakao_download_root_state)
+
+
+# ── 카카오페이지 수동 다운로드 ────────────────────────────────────────────
+
+class KakaoManualRunIn(BaseModel):
+    series_id: int
+    numbers: list[int]
+
+    @field_validator("numbers")
+    @classmethod
+    def not_empty(cls, v: list[int]) -> list[int]:
+        if not v:
+            raise ValueError("다운로드할 회차를 하나 이상 선택해주세요.")
+        return v
+
+
+def _kakao_series_status_label(item: dict) -> str:
+    return "완결" if item.get("is_finished") else "휴재" if item.get("is_paused") else "연재"
+
+
+@router.get("/kakao-manual/search")
+async def kakao_manual_search(query: str):
+    """제목/작가로 카카오페이지 웹툰 후보를 찾는다(완결/휴재작도 나옴)."""
+    if not query.strip():
+        raise HTTPException(status_code=400, detail="검색할 제목을 입력해주세요.")
     settings = get_settings()
-    try:
-        async with _kakao_page_session() as session:
-            client = kakao_page_download.client_from_saved_cookies(session, settings.request_timeout_seconds)
-            if client is None:
-                state["result"] = {"error": "저장된 카카오페이지 쿠키가 없습니다. 먼저 쿠키를 붙여넣어 저장해주세요."}
-                return
-            log_line("로그인 확인 중...")
+    async with aiohttp.ClientSession() as session:
+        items = await kakao_api.search_series(session, query.strip(), settings.request_timeout_seconds)
+    return [
+        {
+            "title_id": item["title_id"], "title": item["title_name"], "thumbnail_url": item["thumbnail_url"],
+            "authors": ", ".join(item["author_names"]), "status": _kakao_series_status_label(item),
+        }
+        for item in items[:10]
+    ]
+
+
+@router.get("/kakao-manual/analyze")
+async def kakao_manual_analyze(series_id: int):
+    """작품의 회차를 폴더 규칙(폴더 없음 / 누락 회차 비교 / 파일 1개면 그 이후부터)으로 분석해서 표로 보여줄 결과를
+    돌려준다. 아무것도 받지 않는다."""
+    settings = get_settings()
+    root = await asyncio.to_thread(kakao_page_download.effective_download_root, settings.download_root)
+    async with _kakao_page_session() as session:
+        client = kakao_page_download.client_from_saved_cookies(session, settings.request_timeout_seconds)
+        cookie_saved = client is not None
+        logged_in: bool | None = None
+        if client is None:
+            client = kakao_page_download.KakaoPageClient(session, {}, settings.request_timeout_seconds)
+        else:
             logged_in = await client.check_login()
             status = kakao_page_auth.cookie_status(kakao_page_auth.load_cookies())
             await kakao_page_auth.notify_if_needed(session, settings, logged_in, status["days_left"])
-            if logged_in is False:
-                state["result"] = {"error": "카카오페이지 로그인이 풀려 있어서 받지 않았습니다. 쿠키를 다시 export해서 붙여넣어 주세요."}
-                return
-            result = await kakao_page_download.run_download(
-                client, series_id=wt["title_id"], title=wt["title"], start_no=wt["start_no"],
-                last_downloaded_no=wt["last_downloaded_no"], download_root=settings.download_root,
-                max_episodes=_KAKAO_MANUAL_DOWNLOAD_LIMIT, on_progress=log_line,
-            )
-            kakao_page_download.persist_refreshed_cookies(client)
-        if result.downloaded:
-            await asyncio.to_thread(repository.update_kakao_last_downloaded_no, wt["title_id"], max(result.downloaded))
-        state["result"] = {
-            "downloaded": result.downloaded, "failed": result.failed,
-            "locked": [e.number for e in result.plan.locked], "error": result.error,
-        }
+        listing = await client.list_episodes(series_id)
+        kakao_page_download.persist_refreshed_cookies(client)
+    if listing is None:
+        raise HTTPException(status_code=502, detail="카카오페이지에서 회차 목록을 가져오지 못했습니다. 작품 번호를 확인하거나 잠시 뒤 다시 시도해주세요.")
+    series_item, episodes = listing
+    title = series_item.get("title") or str(series_id)
+    folder = kakao_page_download.series_folder(root, title)
+    existing = await asyncio.to_thread(kakao_page_download.scan_existing_files, folder)
+    plan = kakao_page_download.plan_by_folder_rules(episodes, existing)
+    return {
+        "series_id": series_id, "title": title, "folder": str(folder), "mode": plan.mode, "existing_count": plan.existing_count,
+        "marker": None if plan.marker is None else {
+            "number": plan.marker.number, "subtitle": plan.marker.subtitle,
+            "resolved_number": plan.marker.resolved_number, "warning": plan.marker.warning,
+        },
+        "to_download_count": len(plan.to_download), "locked_count": len(plan.locked),
+        "downloaded_count": sum(1 for row in plan.rows if row.downloaded),
+        "before_start_count": sum(1 for row in plan.rows if row.before_start),
+        "cookie_saved": cookie_saved, "logged_in": logged_in,
+        "episodes": [
+            {
+                "number": row.episode.number, "subtitle": row.episode.subtitle,
+                "state": kakao_page_download.episode_state(row.episode), "expire": row.episode.rent_expire,
+                "downloaded": row.downloaded, "before_start": row.before_start,
+                "selectable": row.episode.accessible,  # 이미 받은 회차도 다시 받을 수 있다(수동)
+            }
+            for row in plan.rows
+        ],
+    }
+
+
+async def _run_kakao_manual_download(series_id: int, numbers: list[int]) -> None:
+    job = manual_download.JOB_NAME
+    settings = get_settings()
+
+    def log_line(text: str) -> None:
+        job_status.log_line(job, text)
+
+    success = False
+    try:
+        async with kakao_page_download.download_lock:
+            root = await asyncio.to_thread(kakao_page_download.effective_download_root, settings.download_root)
+            async with _kakao_page_session() as session:
+                client = kakao_page_download.client_from_saved_cookies(session, settings.request_timeout_seconds)
+                if client is None:
+                    log_line("저장된 카카오페이지 쿠키가 없습니다. 설정에서 쿠키를 먼저 저장해주세요.")
+                    return
+                log_line(f"카카오페이지 series_id={series_id} — 로그인 확인 중...")
+                logged_in = await client.check_login()
+                status = kakao_page_auth.cookie_status(kakao_page_auth.load_cookies())
+                await kakao_page_auth.notify_if_needed(session, settings, logged_in, status["days_left"])
+                if logged_in is False:
+                    log_line("카카오페이지 로그인이 풀려 있어서 받지 않았습니다. 쿠키를 다시 export해서 붙여넣어 주세요.")
+                    return
+                log_line(f"{len(numbers)}개 회차 다운로드 시작 (저장 폴더: {root})")
+                result = await kakao_page_download.download_selected(
+                    client, series_id=series_id, title=None, numbers=numbers, download_root=root, on_progress=log_line
+                )
+                kakao_page_download.persist_refreshed_cookies(client)
+        for number, subtitle in result.downloaded_items:
+            repository.add_episode_history(str(series_id), result.title, number, subtitle, "success")
+        for number in result.failed:
+            repository.add_episode_history(str(series_id), result.title, number, "", "failed", "이미지 받기 실패")
+        log_line(
+            f"[{result.title}] 받음 {len(result.downloaded)}개(그 중 다시 받아 교체 {len(result.replaced)}개) / "
+            f"실패 {len(result.failed)}개 / 잠겨서 건너뜀 {len(result.skipped_locked)}개"
+        )
+        success = not result.failed and not result.not_found
     except Exception as e:
-        log.exception("카카오페이지 다운로드 중 예외")
-        state["result"] = {"error": f"예기치 못한 오류: {e}"}
+        log.exception("카카오페이지 수동 다운로드 중 예외")
+        log_line(f"예기치 못한 오류: {e}")
     finally:
-        state["running"] = False
+        log_line("수동 다운로드 종료")
+        job_status.finish(job, success=success)
 
 
-@router.post("/kakao-webtoons/{title_id}/download-now")
-async def start_kakao_download(title_id: int):
-    """이 작품에서 지금 읽을 수 있는 회차를 순서대로 받는다(백그라운드 — 진행은 download-status로 본다)."""
-    global _kakao_download_task
-    wt = await _get_or_404_kakao(title_id)
-    if wt["start_no"] is None:
-        raise HTTPException(status_code=400, detail="먼저 시작 회차를 정해서 저장해주세요(모르면 비워서 저장하면 앞으로 나오는 새 회차부터 받습니다).")
+@router.post("/kakao-manual/run")
+async def kakao_manual_run(payload: KakaoManualRunIn):
+    """분석 표에서 고른 회차를 받는다(백그라운드 — 진행은 기존 수동 다운로드 진행상황 창에 나온다)."""
+    global _kakao_manual_task
     if await asyncio.to_thread(kakao_page_auth.load_cookies) is None:
         raise HTTPException(status_code=400, detail="카카오페이지 로그인 쿠키가 없습니다. 설정에서 쿠키를 먼저 저장해주세요.")
-    if _kakao_download_state["running"]:
-        raise HTTPException(status_code=409, detail="이미 다른 카카오페이지 다운로드가 진행 중입니다.")
-    _kakao_download_state.update(running=True, title_id=title_id, lines=[], result=None)
-    _kakao_download_task = asyncio.create_task(_run_kakao_download_task(wt))
-    return dict(_kakao_download_state)
-
-
-@router.get("/kakao-webtoons/download-status")
-async def get_kakao_download_status():
-    return {**_kakao_download_state, "lines": _kakao_download_state["lines"][-30:]}
+    if job_status.snapshot().get(manual_download.JOB_NAME, {}).get("status") == "running":
+        raise HTTPException(status_code=409, detail="이미 수동 다운로드가 진행 중입니다.")
+    if kakao_page_download.download_lock.locked():
+        raise HTTPException(status_code=409, detail="카카오페이지 자동 다운로드가 진행 중입니다. 끝난 뒤 다시 시도해주세요.")
+    job_status.start(manual_download.JOB_NAME)
+    _kakao_manual_task = asyncio.create_task(_run_kakao_manual_download(payload.series_id, payload.numbers))
+    return {"status": "started"}
 
 
 async def _get_or_404_kakao(title_id: int) -> dict:
@@ -727,6 +790,11 @@ async def subscribe_kakao_webtoon(title_id: int, payload: KakaoWebtoonEntryIn):
         )
     await asyncio.to_thread(repository.set_kakao_webtoon_status, title_id, repository.STATUS_ACTIVE)
     await asyncio.to_thread(repository.refresh_kakao_webtoon_author_summary, title_id, payload.author_summary)
+    if await asyncio.to_thread(_is_author_auto_register_enabled):
+        # 구독하면 그 작품의 작가를 관심 작가로 자동 등록한다(네이버와 같은 설정). 카카오페이지는 작가 이름만 오고
+        # 역할(작가/원작자)은 안 와서, 원작자를 우선하는 규칙은 아직 적용하지 못하고 이름 전부를 등록한다.
+        for author_name in [n.strip() for n in payload.author_summary.split(",") if n.strip()]:
+            await asyncio.to_thread(repository.upsert_watched_author, author_name, author_name, True, "kakao")
     return KakaoWebtoonOut(**await asyncio.to_thread(repository.get_kakao_webtoon, title_id))
 
 
@@ -934,6 +1002,7 @@ class InterestedAuthorOut(BaseModel):
     author_id: str
     author_name: str
     enabled: bool
+    is_origin: bool = False  # 원작자(작품에 작가와 원작자가 따로 있을 때의 원작자)
 
 
 @router.get("/authors/interested", response_model=list[InterestedAuthorOut])
@@ -945,17 +1014,22 @@ async def list_interested_authors():
     """
     watched = await asyncio.to_thread(repository.list_watched_authors)
     all_pairs = await asyncio.to_thread(repository.list_all_writer_id_name_pairs)
+    origin_ids = await asyncio.to_thread(repository.list_origin_author_ids)
 
     result_map: dict[str, InterestedAuthorOut] = {}
     for a in watched:
         name = a.author_name or all_pairs.get(a.author_id, "")
-        result_map[a.author_id] = InterestedAuthorOut(author_id=a.author_id, author_name=name, enabled=a.enabled)
+        result_map[a.author_id] = InterestedAuthorOut(
+            author_id=a.author_id, author_name=name, enabled=a.enabled, is_origin=a.author_id in origin_ids
+        )
 
-    # watched_authors에 아직 한 번도 안 들어간 저자(웹툰 데이터에만 있는 경우)는
+    # watched_authors에 아직 한 번도 안 들어간 저자(웹툰 데이터에만 있는 경우 — 작가와 원작자 모두)는
     # "전체 작가 목록"(미등록) 쪽에 기본으로 채운다.
     for author_id, author_name in all_pairs.items():
         if author_id not in result_map:
-            result_map[author_id] = InterestedAuthorOut(author_id=author_id, author_name=author_name, enabled=False)
+            result_map[author_id] = InterestedAuthorOut(
+                author_id=author_id, author_name=author_name, enabled=False, is_origin=author_id in origin_ids
+            )
 
     return sorted(result_map.values(), key=lambda a: a.author_name)
 
@@ -1442,12 +1516,20 @@ class JobScheduleIn(BaseModel):
     interval_minutes: int = 60
     cron_times: list[CronTimeIn] = [CronTimeIn(hour=3, minute=0)]
     cron_days: list[str] = []
+    target: str = "naver"  # 다운로드 스케줄에서만 쓴다: naver | kakao | both
 
     @field_validator("mode")
     @classmethod
     def mode_must_be_valid(cls, v: str) -> str:
         if v not in schedule_config.VALID_MODES:
             raise ValueError(f"mode는 {schedule_config.VALID_MODES} 중 하나여야 합니다.")
+        return v
+
+    @field_validator("target")
+    @classmethod
+    def target_must_be_valid(cls, v: str) -> str:
+        if v not in schedule_config.VALID_TARGETS:
+            raise ValueError(f"대상은 {schedule_config.VALID_TARGETS} 중 하나여야 합니다.")
         return v
 
     @field_validator("interval_minutes")
@@ -1475,19 +1557,25 @@ class JobScheduleIn(BaseModel):
 
 class SchedulesIn(BaseModel):
     discovery_job: JobScheduleIn
-    download_job: JobScheduleIn
+    download_job: list[JobScheduleIn]  # 다운로드는 스케줄을 여러 개 등록할 수 있다(각각 대상이 다름)
     report_job: JobScheduleIn
     archive_job: JobScheduleIn
 
 
-def _schedule_to_dict(job_id: str) -> dict:
-    s = schedule_config.get_schedule(job_id, scheduler_mod.DEFAULT_SCHEDULES[job_id])
+def _schedule_dict(s: "schedule_config.JobSchedule") -> dict:
     return {
         "mode": s.mode,
         "interval_minutes": s.interval_minutes,
         "cron_times": s.cron_times,
         "cron_days": s.cron_days,
+        "target": s.target,
     }
+
+
+def _schedule_to_dict(job_id: str) -> dict | list[dict]:
+    if job_id == "download_job":
+        return [_schedule_dict(s) for s in schedule_config.get_download_schedules(scheduler_mod.DEFAULT_SCHEDULES[job_id])]
+    return _schedule_dict(schedule_config.get_schedule(job_id, scheduler_mod.DEFAULT_SCHEDULES[job_id]))
 
 
 def _validate_archive_schedule_gap(payload: "SchedulesIn") -> None:
@@ -1497,9 +1585,15 @@ def _validate_archive_schedule_gap(payload: "SchedulesIn") -> None:
     '몇 분마다' 모드면(계속 도니 안전한 간격을 이 방식으로 보장할 수 없어서) 이 검증은
     건너뛴다."""
     archive_in = payload.archive_job
-    download_in = payload.download_job
-    if archive_in.mode != "cron" or download_in.mode != "cron":
+    if archive_in.mode != "cron":
         return
+    for download_in in payload.download_job:  # 다운로드 스케줄이 여러 개일 수 있어서 전부 확인한다
+        if download_in.mode != "cron":
+            continue
+        _check_archive_gap_against(archive_in, download_in)
+
+
+def _check_archive_gap_against(archive_in: "JobScheduleIn", download_in: "JobScheduleIn") -> None:
     for download_time in download_in.cron_times:
         download_minutes = download_time.hour * 60 + download_time.minute
         for archive_time in archive_in.cron_times:
@@ -1527,8 +1621,12 @@ async def get_schedules():
 async def update_schedules(payload: SchedulesIn, request: Request):
     _validate_archive_schedule_gap(payload)
     for job_id, job_in in payload.model_dump().items():
-        job_schedule = schedule_config.JobSchedule(**job_in)
-        await asyncio.to_thread(schedule_config.set_schedule, job_id, job_schedule)
+        if job_id == "download_job":
+            await asyncio.to_thread(
+                schedule_config.set_download_schedules, [schedule_config.JobSchedule(**entry) for entry in job_in]
+            )
+        else:
+            await asyncio.to_thread(schedule_config.set_schedule, job_id, schedule_config.JobSchedule(**job_in))
 
     scheduler = getattr(request.app.state, "scheduler", None)
     if scheduler is not None:
@@ -1745,10 +1843,26 @@ async def trigger_discovery_job():
     return {"status": "started"}
 
 
+def _default_manual_download_target() -> str:
+    """"지금 실행"을 대상 없이 부르면, 등록된(꺼지지 않은) 다운로드 스케줄들이 받는 플랫폼 전체를 받는다. 스케줄이
+    없으면 네이버만(예전 동작)."""
+    platforms: set[str] = set()
+    for entry in schedule_config.get_download_schedules(scheduler_mod.DEFAULT_SCHEDULES["download_job"]):
+        if entry.mode != "off":
+            platforms |= {"naver", "kakao"} if entry.target == "both" else {entry.target}
+    if platforms == {"kakao"}:
+        return "kakao"
+    return "both" if platforms == {"naver", "kakao"} else "naver"
+
+
 @router.post("/jobs/download/run")
-async def trigger_download_job():
-    asyncio.create_task(scheduler_mod.run_download_job())
-    return {"status": "started"}
+async def trigger_download_job(target: str | None = None):
+    if target is None:
+        target = await asyncio.to_thread(_default_manual_download_target)
+    if target not in schedule_config.VALID_TARGETS:
+        raise HTTPException(status_code=400, detail=f"대상은 {schedule_config.VALID_TARGETS} 중 하나여야 합니다.")
+    asyncio.create_task(scheduler_mod.run_download_job(target))
+    return {"status": "started", "target": target}
 
 
 # ── 아카이빙 ──────────────────────────────────────────────────

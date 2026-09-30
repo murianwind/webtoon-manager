@@ -932,21 +932,27 @@ select {
 .markdown-body hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
 
 
-/* 카카오페이지 다운로드 창 */
-.modal-overlay {
-  position: fixed; inset: 0; z-index: 1000; padding: 16px;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex; align-items: center; justify-content: center;
-}
-.modal-overlay.hidden { display: none; }
-.modal-box {
-  width: min(560px, 100%); max-height: 90vh; overflow: auto;
-  background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px;
-}
-.modal-box h2 { margin: 0 0 8px; font-size: 17px; }
-.modal-box .field-group { margin: 12px 0; }
-.modal-output {
-  margin: 12px 0 0; padding: 8px; min-height: 40px; white-space: pre-wrap; font-size: 12px;
-  border: 1px solid var(--border); border-radius: 6px; background: #fafafa;
-}
 #kp-cookie-json { width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; }
+
+/* 목록 카드: 화면 밖 카드는 그리기를 건너뛰어 800여 개를 다뤄도 스크롤/탭 전환이 가볍게 */
+.webtoon-card { content-visibility: auto; contain-intrinsic-size: auto 360px; }
+#migrate-legacy-kakao-unmatched { white-space: pre-wrap; }
+.run-target-select { margin-right: 6px; }
+
+/* 카카오페이지 수동 다운로드 분석 표 */
+.kakao-manual-summary { margin: 6px 0 10px; font-size: 13px; line-height: 1.6; }
+.kakao-manual-summary .warn { color: #b26a00; }
+#kakao-manual-table td:nth-child(2), #kakao-manual-table th:nth-child(2) { width: 64px; text-align: right; }
+#kakao-manual-table td:nth-child(4), #kakao-manual-table td:nth-child(6) { text-align: center; white-space: nowrap; }
+.kp-badge { display: inline-block; padding: 1px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; color: #fff; }
+.kp-free { background: #28a745; }
+.kp-owned { background: #0d6efd; }
+.kp-locked { background: #6c757d; }
+.kp-done { background: #0d6efd; }
+.kp-wait { color: #333; font-weight: 600; }
+.kp-before { color: #999; }
+
+/* 다운로드 스케줄(여러 개 등록) */
+.schedule-entry { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 8px 0; }
+.schedule-entry-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.schedule-entry-head .schedule-entry-remove { margin-left: auto; }

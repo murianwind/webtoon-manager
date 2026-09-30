@@ -24,7 +24,7 @@ _COMICINFO_TEMPLATE = """<?xml version="1.0"?>
   <Series>{title}</Series>
   <Summary>{summary}</Summary>
   <Writer>{writer}</Writer>
-  <Publisher>네이버웹툰</Publisher>
+  <Publisher>{publisher}</Publisher>
   <Genre>{genre}</Genre>
   <Tags>{tags}</Tags>
   <LanguageISO>ko</LanguageISO>
@@ -62,6 +62,39 @@ def _normalize_age_rating(age_description: str) -> str:
     return _AGE_RATING_NORMALIZE.get(age_description, age_description)
 
 
+def render_comicinfo(
+    *, title: str, summary: str, writer: str, cover_artist: str, notes: str, genre: str, tags: str,
+    publisher: str, web: str, age_rating: str, series_status: str,
+) -> str:
+    """네이버/카카오 공통 — 값을 XML로 이스케이프해서 같은 템플릿에 채운다."""
+    return _COMICINFO_TEMPLATE.format(
+        title=escape(title), summary=escape(summary), writer=escape(writer), cover_artist=escape(cover_artist),
+        notes=escape(notes), genre=escape(genre), tags=escape(tags), publisher=escape(publisher), web=escape(web),
+        age_rating=escape(age_rating), series_status=series_status,
+    )
+
+
+def kakao_age_rating(age_grade: int | None) -> str:
+    """카카오페이지 연령 등급(age_grade: 0/15/19)을 info.xml 표기로 — 15세 이용가, 18세 이용가, 그 외는 전부 전체이용가."""
+    if (age_grade or 0) >= 18:
+        return "18세 이용가"
+    if age_grade == 15:
+        return "15세 이용가"
+    return "전체이용가"
+
+
+def build_kakao_comicinfo_xml(series_item: dict, series_id: int) -> str:
+    """카카오페이지 작품 정보(회차 목록 응답의 series_item)로 info.xml을 만든다. 작가는 역할 구분 없이 이름만
+    나와서(예: "연상호,최규석") 전부 Writer에 적는다."""
+    authors = ", ".join(a.strip() for a in (series_item.get("authors") or "").split(",") if a.strip())
+    return render_comicinfo(
+        title=series_item.get("title", ""), summary=series_item.get("description") or "", writer=authors,
+        cover_artist="", notes="", genre=series_item.get("sub_category") or "", tags="", publisher="카카오페이지",
+        web=f"https://page.kakao.com/content/{series_id}", age_rating=kakao_age_rating(series_item.get("age_grade")),
+        series_status="완결" if series_item.get("on_issue") == "N" else "연재",
+    )
+
+
 def build_comicinfo_xml(info: TitleInfo) -> str:
     writer_names = ", ".join(dict.fromkeys(info.writer_names))
     cover_artist_names = ", ".join(dict.fromkeys(info.painter_names))
@@ -69,17 +102,11 @@ def build_comicinfo_xml(info: TitleInfo) -> str:
     # genres_ko가 비어있으면(과거에 만들어진 캐시 등) genres(원본 코드)로라도 대체한다 —
     # 항상 뭐라도 나오는 게, 아무것도 안 나오는 것보다 낫다.
     genre_display = info.genres_ko or info.genres
-    return _COMICINFO_TEMPLATE.format(
-        title=escape(info.title_name),
-        summary=escape(info.synopsis),
-        writer=escape(writer_names),
-        cover_artist=escape(cover_artist_names),
-        notes=escape(notes),
-        genre=escape(",".join(genre_display)),
-        tags=escape(",".join(info.tags)),
-        web=escape(NAVER_SERIES_URL_TEMPLATE.format(title_id=info.title_id)),
-        age_rating=escape(_normalize_age_rating(info.age_description)),
-        series_status="완결" if info.is_finished else "연재",
+    return render_comicinfo(
+        title=info.title_name, summary=info.synopsis, writer=writer_names, cover_artist=cover_artist_names, notes=notes,
+        genre=",".join(genre_display), tags=",".join(info.tags), publisher="네이버웹툰",
+        web=NAVER_SERIES_URL_TEMPLATE.format(title_id=info.title_id),
+        age_rating=_normalize_age_rating(info.age_description), series_status="완결" if info.is_finished else "연재",
     )
 
 

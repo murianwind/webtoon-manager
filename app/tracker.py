@@ -59,9 +59,28 @@ async def _fetch_info_and_others(
             return title_id, None, []
 
 
+def authors_to_register(info: TitleInfo) -> list[tuple[str, str]]:
+    """관심 작가로 자동 등록할 (id, 이름) — 원작자가 있으면 원작자를, 없으면 작가를 등록한다(작가와 원작자가 둘 다
+    있는 작품은 원작자만)."""
+    return list(info.origin_id_name_pairs) or list(info.writer_id_name_pairs)
+
+
+def _store_origin_authors(title_id: str, info: TitleInfo) -> None:
+    ids = [author_id for author_id, _ in info.origin_id_name_pairs]
+    names = [name for _, name in info.origin_id_name_pairs]
+    repository.update_origin_ids_and_names(title_id, ids, names)
+
+
 def _matches_enabled_writer(other: dict, enabled_author_ids: set[str]) -> bool:
-    other_writer_ids = {str(w.get("id")) for w in (other.get("author") or {}).get("writers") or []}
-    return bool(enabled_author_ids & other_writer_ids)
+    """다른 작품의 작가 목록에 등록된 작가가 있는지. 작가(writers)뿐 아니라 응답의 author 안에 있는 모든 사람 목록에서
+    id를 찾는다 — 원작자가 어느 필드로 오는지 확인된 응답 예시가 없어서, 필드 이름에 기대지 않는다."""
+    author = other.get("author") or {}
+    other_ids = {
+        str(person.get("id"))
+        for people in author.values() if isinstance(people, list)
+        for person in people if isinstance(person, dict) and person.get("id") is not None
+    }
+    return bool(enabled_author_ids & other_ids)
 
 
 async def _is_other_finished(
@@ -160,14 +179,16 @@ async def enrich_one(
     if info.writer_id_name_pairs:
         ids, names = zip(*info.writer_id_name_pairs)
         repository.update_writer_ids_and_names(title_id, list(ids), list(names))
+    _store_origin_authors(title_id, info)
 
     registered_names = []
-    for writer_id, writer_name in info.writer_id_name_pairs:
-        repository.upsert_watched_author(writer_id, writer_name, enabled=register_authors_enabled)
-        registered_names.append(writer_name or writer_id)
+    for author_id, author_name in authors_to_register(info):
+        repository.upsert_watched_author(author_id, author_name, enabled=register_authors_enabled)
+        registered_names.append(author_name or author_id)
 
     if registered_names:
-        return True, f"작가 등록: {', '.join(registered_names)}"
+        label = "원작자 등록" if info.origin_id_name_pairs else "작가 등록"
+        return True, f"{label}: {', '.join(registered_names)}"
     return True, "작가 정보 없음 (API 응답에 작가 필드가 비어있음)"
 
 
@@ -404,9 +425,11 @@ async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, setting
             ids, names = zip(*info.writer_id_name_pairs)
             repository.update_writer_ids_and_names(title_id, list(ids), list(names))
 
-        # 구독중인 작품의 작가는 자동으로 레지스트리에 등록된다 (이미 있으면 enabled는 안 건드림).
-        for writer_id, writer_name in info.writer_id_name_pairs:
-            repository.upsert_watched_author(writer_id, writer_name, enabled=True)
+        _store_origin_authors(title_id, info)
+
+        # 구독중인 작품의 작가(원작자가 있으면 원작자)는 자동으로 레지스트리에 등록된다 (이미 있으면 enabled는 안 건드림).
+        for author_id, author_name in authors_to_register(info):
+            repository.upsert_watched_author(author_id, author_name, enabled=True)
 
         enabled_author_ids = repository.get_enabled_author_ids()
         added = await _add_discovered_titles(session, settings, others, enabled_author_ids)

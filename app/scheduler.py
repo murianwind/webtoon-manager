@@ -27,7 +27,7 @@ from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app import archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, kakao_api, naver_api, repository, schedule_config, tracker, webtoon_server_client
+from app import archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, kakao_api, kakao_catalog, kakao_page_auth, kakao_page_download, naver_api, repository, schedule_config, tracker, webtoon_server_client
 from app import rclone_updater
 from app.config import Settings, get_settings
 from app.constants import NAVER_DETAIL_URL_TEMPLATES
@@ -171,23 +171,94 @@ async def _download_new_episodes_for_one(
             await asyncio.sleep(rest_minutes * 60)
 
 
-async def run_download_job() -> None:
-    """정기 스케줄과 '수동 실행' 버튼이 동시에 이 잡을 실행하면, 같은 웹툰을 두 실행이
-    동시에 다운로드하려고 시도할 수 있다(회차 저장/압축이 원자적이지 않음) — 잡별
-    락으로 겹치는 실행은 조용히 건너뛴다(에러 아님, 그냥 "이미 실행 중"으로 로그만 남김)."""
-    if _download_job_lock.locked():
-        job_status.log_line("download", "이미 실행 중이라 건너뜁니다 (중복 실행 방지)")
+_DOWNLOAD_TARGET_PLATFORMS = {"naver": {"naver"}, "kakao": {"kakao"}, "both": {"naver", "kakao"}}
+_download_claimed_platforms: set[str] = set()  # 지금 실행 중이거나 순서를 기다리는 실행이 맡은 플랫폼
+
+
+async def run_download_job(target: str = "naver") -> None:
+    """target: naver | kakao | both(스케줄에서 고른 대상). 정기 스케줄과 '수동 실행' 버튼이 동시에 같은 플랫폼을
+    받으려 하면 같은 웹툰을 두 실행이 동시에 다운로드할 수 있다(회차 저장/압축이 원자적이지 않음) — 이미 실행 중이거나
+    기다리는 실행이 같은 플랫폼을 맡고 있으면 조용히 건너뛴다(에러 아님, "이미 실행 중"으로 로그만 남김). 서로 다른
+    플랫폼(예: 네이버 스케줄과 카카오 스케줄이 같은 시각)은 건너뛰지 않고 순서를 기다렸다가 실행한다."""
+    wanted = set(_DOWNLOAD_TARGET_PLATFORMS.get(target, {"naver"}))
+    platforms = wanted - _download_claimed_platforms
+    if not platforms:
+        job_status.log_line("download", "이미 실행 중이거나 대기 중이라 건너뜁니다 (중복 실행 방지)")
         return
-    async with _download_job_lock:
-        await _run_download_job_impl()
+    if platforms != wanted:
+        job_status.log_line("download", "이미 실행 중이거나 대기 중인 대상은 건너뛰고 나머지만 실행합니다 (중복 실행 방지)")
+    _download_claimed_platforms.update(platforms)
+    try:
+        async with _download_job_lock:
+            await _run_download_job_impl(platforms)
+    finally:
+        _download_claimed_platforms.difference_update(platforms)
 
 
-async def _run_download_job_impl() -> None:
+# 카카오페이지 자동 다운로드 — 작품 하나당 한 번 실행에 받는 최대 회차 수. 폴더가 없는 작품은 처음부터 전부
+# 받아야 해서 회차가 수백 개일 수 있는데, 한 번에 다 받으면 이 작업이 몇 시간씩 걸리므로 나눠서 받는다(다음 실행에
+# 이어서 받는다).
+_KAKAO_AUTO_MAX_EPISODES_PER_TITLE = 20
+
+
+async def _download_kakao_subscriptions(settings, failures: list[dict]) -> None:
+    """구독 중인 카카오페이지 작품을 폴더 규칙(폴더 없음 → 처음부터 / 파일 여러 개 → 누락 회차 / 파일 1개 → 그 이후)
+    으로 받는다(이미 받은 회차는 다시 받지 않는다). 다운로드 스케줄의 대상에 카카오페이지가 들어 있을 때만 불리고,
+    로그인 쿠키가 없거나 로그인이 풀려 있으면 받지 않고(풀림은 디스코드로 알림) 건너뛴다."""
+    subscribed = repository.list_kakao_webtoons_by_status(repository.STATUS_ACTIVE)
+    if not subscribed:
+        return
+
+    async with kakao_page_download.download_lock:
+        root = kakao_page_download.effective_download_root(settings.download_root)
+        job_status.log_line("download", f"카카오페이지 다운로드 시작 — 구독 중인 웹툰 {len(subscribed)}개 (저장 폴더: {root})")
+        async with aiohttp.ClientSession(cookie_jar=aiohttp.DummyCookieJar()) as session:
+            client = kakao_page_download.client_from_saved_cookies(session, settings.request_timeout_seconds)
+            if client is None:
+                job_status.log_line("download", "카카오페이지 로그인 쿠키가 없어서 건너뜁니다(설정에서 쿠키를 저장해주세요)")
+                return
+            logged_in = await client.check_login()
+            status = kakao_page_auth.cookie_status(kakao_page_auth.load_cookies())
+            await kakao_page_auth.notify_if_needed(session, settings, logged_in, status["days_left"])
+            if logged_in is False:
+                job_status.log_line("download", "카카오페이지 로그인이 풀려 있어서 건너뜁니다(쿠키를 다시 붙여넣어 주세요)")
+                return
+
+            for webtoon in subscribed:
+                title = webtoon["title"]
+                try:
+                    result = await kakao_page_download.run_download(
+                        client, series_id=webtoon["title_id"], title=None, download_root=root,
+                        max_episodes=_KAKAO_AUTO_MAX_EPISODES_PER_TITLE,
+                        on_progress=lambda line, t=title: job_status.log_line("download", f"[{t}] {line}"),
+                    )
+                except Exception as e:
+                    log.error("카카오페이지 웹툰(series_id=%s) 다운로드 중 예외 — 다음으로 진행: %s", webtoon["title_id"], e)
+                    job_status.log_line("download", f"[{title}] 처리 중 오류: {e}")
+                    failures.append({"title_name": title, "episode_no": None, "subtitle": str(e)})
+                    continue
+                for number, subtitle in result.downloaded_items:
+                    repository.add_episode_history(str(webtoon["title_id"]), result.title, number, subtitle, "success")
+                if result.error:
+                    job_status.log_line("download", f"[{title}] {result.error}")
+                elif result.failed is not None:
+                    repository.add_episode_history(str(webtoon["title_id"]), result.title, result.failed, "", "failed", "이미지 받기 실패")
+                    failures.append({"title_name": result.title, "episode_no": result.failed, "subtitle": "이미지 받기 실패"})
+                elif not result.downloaded and result.plan.marker is not None and result.plan.marker.warning:
+                    job_status.log_line("download", f"[{title}] ⚠ 폴더의 파일(표식)이 사이트 회차와 맞지 않아 번호대로 이어받았습니다")
+                await asyncio.sleep(settings.delay_seconds)
+            kakao_page_download.persist_refreshed_cookies(client)
+
+
+async def _run_download_job_impl(platforms: set[str]) -> None:
     settings = get_settings()
-    active_webtoons = repository.list_by_status(repository.STATUS_ACTIVE)
+    active_webtoons = repository.list_by_status(repository.STATUS_ACTIVE) if "naver" in platforms else []
 
     job_status.start("download")
-    job_status.log_line("download", f"다운로드 스캔 시작 — 구독 중인 웹툰 {len(active_webtoons)}개")
+    if "naver" in platforms:
+        job_status.log_line("download", f"다운로드 스캔 시작 — 구독 중인 네이버 웹툰 {len(active_webtoons)}개")
+    else:
+        job_status.log_line("download", "다운로드 스캔 시작 — 카카오페이지만")
     had_error = False
 
     adult_tracker = cookie_health.AdultFetchTracker()
@@ -211,6 +282,14 @@ async def _run_download_job_impl() -> None:
             await cookie_health.finalize_and_notify(session, settings, adult_tracker)
         except Exception as e:
             log.error("쿠키 상태 판단/알림 중 예외: %s", e)
+
+        try:
+            if "kakao" in platforms:
+                await _download_kakao_subscriptions(settings, failures)
+        except Exception as e:
+            had_error = True
+            log.error("카카오페이지 자동 다운로드 중 예외: %s", e)
+            job_status.log_line("download", f"카카오페이지 자동 다운로드 중 오류: {e}")
 
         if failures:
             # 다운로드 리포트가 켜져 있으면 실패 목록이 리포트에도 그대로 포함되므로
@@ -762,7 +841,6 @@ async def _run_discovery_job_impl() -> None:
 
 _JOB_FUNCS = {
     "discovery_job": run_discovery_job,
-    "download_job": run_download_job,
     "report_job": run_report_job,
     "archive_job": run_archive_job,
 }
@@ -789,7 +867,21 @@ def _build_trigger(schedule: JobSchedule):
     return IntervalTrigger(minutes=schedule.interval_minutes)
 
 
+def _apply_download_schedules(scheduler: AsyncIOScheduler) -> None:
+    """다운로드 잡은 스케줄이 여러 개(각각 대상이 다름)라서, 등록된 것을 전부 지우고 저장된 목록대로 다시 등록한다."""
+    for job in scheduler.get_jobs():
+        if job.id == "download_job" or job.id.startswith("download_job:"):
+            scheduler.remove_job(job.id)
+    for index, entry in enumerate(schedule_config.get_download_schedules(DEFAULT_SCHEDULES["download_job"])):
+        trigger = _build_trigger(entry)
+        if trigger is not None:
+            scheduler.add_job(run_download_job, trigger=trigger, id=f"download_job:{index}", kwargs={"target": entry.target})
+
+
 def _apply_job_schedule(scheduler: AsyncIOScheduler, job_id: str) -> None:
+    if job_id == "download_job":
+        _apply_download_schedules(scheduler)
+        return
     schedule = schedule_config.get_schedule(job_id, DEFAULT_SCHEDULES[job_id])
     trigger = _build_trigger(schedule)
     existing = scheduler.get_job(job_id)
@@ -805,6 +897,16 @@ def _apply_job_schedule(scheduler: AsyncIOScheduler, job_id: str) -> None:
         scheduler.add_job(_JOB_FUNCS[job_id], trigger=trigger, id=job_id)
 
 
+async def run_kakao_catalog_refresh_job() -> None:
+    """카카오페이지 전체목록 캐시를 3시간마다 백그라운드로 새로 채운다(카카오 기능이 켜져 있을 때만)."""
+    if repository.get_setting("kakao_webtoons_enabled") != "1":
+        return
+    try:
+        await kakao_catalog.refresh()
+    except Exception as e:
+        log.error("카카오 목록 정기 새로고침 중 예외: %s", e)
+
+
 def create_scheduler() -> AsyncIOScheduler:
     # 컨테이너의 시스템 시간대(보통 UTC)와 무관하게 항상 한국시간으로 해석하도록
     # 명시한다 — 명시 안 하면 APScheduler가 컨테이너의 시스템 기본값(UTC)을 쓰는데,
@@ -813,6 +915,11 @@ def create_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone="Asia/Seoul")
     for job_id in DEFAULT_SCHEDULES:
         _apply_job_schedule(scheduler, job_id)
+    # 사용자가 설정하는 스케줄이 아니라 고정된 내부 작업 — 설정 화면의 스케줄 저장/재등록과 무관하게 항상 돈다
+    scheduler.add_job(
+        run_kakao_catalog_refresh_job, trigger=IntervalTrigger(minutes=kakao_catalog.REFRESH_INTERVAL_MINUTES),
+        id="kakao_catalog_refresh",
+    )
     return scheduler
 
 

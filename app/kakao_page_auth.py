@@ -19,8 +19,10 @@ from app import crypto, discord_notify, repository
 
 log = logging.getLogger(__name__)
 
-# 사용자가 확인해준 로그인에 필요한 쿠키
-REQUIRED_COOKIES = ("_kau", "_kpwtkn", "_T_ANO", "_karmt", "_kahai", "_kawlt", "_kpdid")
+# 사용자가 확인해준 로그인에 필요한 쿠키(필수 6개 + 선택 1개)
+REQUIRED_COOKIES = ("_kau", "_kpwtkn", "_T_ANO", "_kahai", "_kawlt", "_kpdid")
+# 있으면 알아보고(요청에 같이 보내고) 없으면 무시하는 쿠키 — 없어도 로그인 검사/만료 계산에 영향이 없다
+OPTIONAL_COOKIES = ("_karmt",)
 SETTING_KEY = "kakao_page_cookies"
 _ALERT_EXPIRED_KEY = "kakao_page_alert_expired_at"
 _ALERT_SOON_KEY = "kakao_page_alert_soon_at"
@@ -99,7 +101,7 @@ def cookie_map(cookies: list[dict]) -> dict[str, str]:
 def cookie_status(cookies: list[dict] | None, *, now: float | None = None) -> dict:
     """화면에 보여줄 상태(쿠키 값은 절대 안 담는다). 만료일은 필수 쿠키 중 가장 빨리 만료되는 것 기준."""
     if not cookies:
-        return {"saved": False, "missing": list(REQUIRED_COOKIES), "expires_at": None, "days_left": None}
+        return {"saved": False, "missing": list(REQUIRED_COOKIES), "optional_present": [], "expires_at": None, "days_left": None}
     now = time.time() if now is None else now
     names = {c["name"] for c in cookies}
     expiries = [c["expirationDate"] for c in cookies if c["name"] in REQUIRED_COOKIES and c.get("expirationDate")]
@@ -107,6 +109,7 @@ def cookie_status(cookies: list[dict] | None, *, now: float | None = None) -> di
     return {
         "saved": True,
         "missing": [n for n in REQUIRED_COOKIES if n not in names],
+        "optional_present": [n for n in OPTIONAL_COOKIES if n in names],
         "expires_at": datetime.fromtimestamp(earliest, tz=timezone.utc).isoformat() if earliest else None,
         "days_left": math.floor((earliest - now) / 86400) if earliest else None,
     }

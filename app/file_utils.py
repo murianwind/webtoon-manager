@@ -6,6 +6,7 @@
 치환 테이블과 순서를 원본과 동일하게 유지한다 (요구사항: 네이밍 규칙 유지).
 """
 
+import re
 from app.constants import FORBIDDEN_CHAR_TABLE_FROM, FORBIDDEN_CHAR_TABLE_TO
 
 _WINDOWS_WEIRD_SPACES = [
@@ -68,3 +69,10 @@ def guess_image_extension(img_url: str) -> str:
     if "." in last_segment:
         return "." + last_segment.split(".")[-1].split("?")[0]
     return ".jpg"
+
+
+def title_key(title: str) -> str:
+    """작품 제목을 "같은 작품인지" 비교하기 위한 키 — 공백/문장부호/대소문자를 무시한다(예: "영웅, 회귀하다 "와
+    "영웅 회귀하다"가 같은 키). 옛 카카오웹툰 기록과 카카오페이지 작품을 제목으로 이어 붙일 때 쓴다. "[19세
+    완전판]"처럼 제목에 붙은 판본 표기는 글자라서 그대로 남아, 완전판과 일반판은 다른 키가 된다."""
+    return re.sub(r"[\W_]+", "", title or "").casefold()
