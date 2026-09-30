@@ -216,6 +216,17 @@ LEGACY_KAKAO_ID_LIMIT = 1_000_000
 _connection: sqlite3.Connection | None = None
 
 
+def _fix_episode_history_platforms(conn: sqlite3.Connection) -> int:
+    """이력에 platform 열이 생기기 전에 기록된 카카오페이지 다운로드 이력은 기본값 'naver'로 남는다. 카카오페이지 작품 번호는
+    8자리 이상이고 네이버 웹툰 번호는 그보다 훨씬 짧으므로, 8자리 이상이면서 네이버 웹툰 목록에 없는 'naver' 이력을 'kakao'로
+    바로잡는다. 이미 맞으면 아무 일도 안 해서 시작할 때마다 실행해도 안전하다. 바로잡은 행 수를 돌려준다."""
+    cursor = conn.execute(
+        "UPDATE episode_history SET platform = 'kakao' "
+        "WHERE platform = 'naver' AND LENGTH(title_id) >= 8 AND title_id NOT IN (SELECT title_id FROM webtoons)"
+    )
+    return cursor.rowcount
+
+
 def get_connection() -> sqlite3.Connection:
     global _connection
     if _connection is None:
@@ -233,8 +244,15 @@ def get_connection() -> sqlite3.Connection:
         # 알림 폭탄이 된다. 지워두면 작가별 다음 스캔이 "첫 스캔"으로 취급돼 조용히 기준선만
         # 다시 쌓는다(이미 지운 뒤에는 옛 번호 행이 없어서 매번 실행돼도 아무 일도 안 함).
         _connection.execute("DELETE FROM kakao_seen_titles WHERE title_id < ?", (LEGACY_KAKAO_ID_LIMIT,))
+        _fix_episode_history_platforms(_connection)
         _connection.commit()
     return _connection
+
+
+def fix_episode_history_platforms() -> int:
+    """(테스트/수동 점검용) 지금 연결에서 이력의 플랫폼 표시를 바로잡는다 — 시작할 때 자동으로도 실행된다."""
+    with write_transaction() as conn:
+        return _fix_episode_history_platforms(conn)
 
 
 @contextmanager

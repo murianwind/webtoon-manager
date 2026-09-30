@@ -5,7 +5,6 @@ import html
 import json
 import logging
 
-import aiohttp
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, field_validator
 
@@ -22,11 +21,6 @@ def _is_author_auto_register_enabled() -> bool:
     """구독 시 그 작품 작가를 '등록된 작가'(자동 신작추가 대상)로 자동 등록할지 여부.
     값이 명시적으로 '0'일 때만 꺼짐 — 기존 사용자는 값이 아예 없을 테니 켜짐 유지."""
     return repository.get_setting("auto_register_author_on_subscribe") != "0"
-
-
-def _kakao_page_session() -> aiohttp.ClientSession:
-    # 쿠키는 KakaoPageClient가 직접 관리하므로 세션엔 쿠키 저장소를 두지 않는다
-    return aiohttp.ClientSession(cookie_jar=aiohttp.DummyCookieJar())
 
 
 def _render_exclude_confirm_html(title_id, title: str, exclude_endpoint: str, payload: dict) -> HTMLResponse:

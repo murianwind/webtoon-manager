@@ -12,18 +12,17 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 from app import (
+    kakao_page_download,
     repository,
 )
 from app import kakao_api
 from app import kakao_catalog
 from app import kakao_cover
-from app import kakao_page_download
 from app import archiver
 from app.config import get_settings
 
 from app.api.common import (
     _is_author_auto_register_enabled,
-    _kakao_page_session,
     _render_exclude_confirm_html,
 )
 
@@ -209,7 +208,7 @@ async def _kakao_about(series_id: int) -> dict | None:
     """작품 "정보"(글/그림/원작 작가 등). 못 받으면 None — 호출부가 등록/저장을 건너뛴다."""
     settings = get_settings()
     try:
-        async with _kakao_page_session() as session:
+        async with kakao_page_download.new_session() as session:
             return await kakao_page_download.client_or_anonymous(session, settings.request_timeout_seconds).fetch_about(series_id)
     except Exception as e:
         log.warning("카카오 작품 정보(series_id=%s) 조회 실패 — 작가 등록/저장을 건너뜁니다: %s", series_id, e)

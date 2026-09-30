@@ -9,6 +9,16 @@ const STATUS_LABEL = {
 const DAY_LABEL = { mon: "월", tue: "화", wed: "수", thu: "목", fri: "금", sat: "토", sun: "일" };
 const SCHEDULE_JOB_IDS = ["discovery_job", "download_job", "report_job", "archive_job"];
 
+// 구독/구독해제/제외/목록으로/삭제처럼 웹툰의 상태를 바꾸는 요청 — 성공하면 전체목록/구독해제/제외됨 목록 캐시를 모두 무효화한다
+// (각 탭이 60초 동안 다시 받지 않도록 캐시하므로, 다른 탭에서 바꾼 결과가 안 보이는 일이 없게 여기서 한 번에 처리한다).
+const LIST_STATE_PATHS = ["/api/webtoons", "/api/kakao-webtoons", "/api/naver-list"];
+
+function changesWebtoonState(path, method) {
+  if (method === "GET") return false;
+  const base = path.split("?")[0];
+  return LIST_STATE_PATHS.some((p) => base === p || base.startsWith(`${p}/`));
+}
+
 async function apiCall(path, options = {}) {
   const res = await fetch(path, {
     headers: { "Content-Type": "application/json" },
@@ -22,6 +32,7 @@ async function apiCall(path, options = {}) {
       : detail || `요청 실패 (${res.status})`;
     throw new Error(message);
   }
+  if (changesWebtoonState(path, (options.method || "GET").toUpperCase())) invalidateListCaches();
   return res.json();
 }
 

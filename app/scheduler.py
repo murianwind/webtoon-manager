@@ -15,6 +15,7 @@ discord_bot.py의 실시간 Gateway 봇으로 대체되어 더 이상 필요 없
 """
 
 import asyncio
+from dataclasses import dataclass
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -27,7 +28,7 @@ from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app import download_roots, archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, kakao_api, kakao_catalog, kakao_page_auth, kakao_page_download, naver_api, repository, schedule_config, tracker, webtoon_server_client
+from app import download_roots, archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, kakao_api, kakao_catalog, kakao_page_auth, kakao_page_download, naver_api, report_seen, repository, schedule_config, tracker, webtoon_server_client
 from app import rclone_updater
 from app.config import Settings, get_settings
 from app.constants import NAVER_DETAIL_URL_TEMPLATES
@@ -54,55 +55,53 @@ _report_job_lock = asyncio.Lock()
 _archive_job_lock = asyncio.Lock()
 
 
-async def _download_new_episodes_for_one(
-    session: aiohttp.ClientSession,
-    settings: Settings,
-    title_id: str,
-    adult_tracker: cookie_health.AdultFetchTracker,
-    failures: list[dict],
-) -> None:
-    webtoon = repository.get(title_id)
-    if webtoon is None or webtoon.status != repository.STATUS_ACTIVE:
-        return
+@dataclass
+class _NaverDownloadPlan:
+    """한 작품의 이번 다운로드 계획 — 받을 회차(pending)와 그걸 받는 데 필요한 정보."""
 
+    info: object
+    cookies: dict
+    webtoon_dir: Path
+    pending: list
+
+
+async def _plan_naver_download(
+    session: aiohttp.ClientSession, settings: Settings, webtoon, adult_tracker: cookie_health.AdultFetchTracker
+) -> "_NaverDownloadPlan | None":
+    """정보/회차 목록을 확인하고, 폴더 기준으로 마지막 회차를 바로잡고, 정보 파일/커버를 갱신한 뒤 받을 회차를 계산한다. 이번에 할 일이 없는
+    경우(정보 조회 실패, 성인 쿠키 없음)는 None. 받을 회차가 없어도 계획은 돌려준다(pending이 빈 목록)."""
+    title_id = webtoon.title_id
     info = await naver_api.fetch_title_info(session, title_id, settings.request_timeout_seconds)
     if info is None:
         job_status.log_line("download", f"[{webtoon.title}] 정보 조회 실패, 건너뜀")
-        return
+        return None
 
     repository.update_is_adult(title_id, info.is_adult)
 
     cookies = get_adult_cookies(settings.cookie_file_path) if info.is_adult else {}
     if info.is_adult and not cookies:
         job_status.log_line("download", f"[{info.title_name}] 성인 웹툰 인증 쿠키 없음, 건너뜀")
-        return
+        return None
     cookies = cookies or {}
 
-    safe_title = remove_forbidden_str(info.title_name)
-    webtoon_dir = Path(download_roots.naver_root(settings)) / safe_title
-
-    all_episodes = await naver_api.fetch_all_episodes(
-        session, title_id, cookies, settings.request_timeout_seconds
-    )
+    webtoon_dir = Path(download_roots.naver_root(settings)) / remove_forbidden_str(info.title_name)
+    all_episodes = await naver_api.fetch_all_episodes(session, title_id, cookies, settings.request_timeout_seconds)
     if info.is_adult:
         # 쿠키 만료 감지용 — 별도 API 호출 없이, 이번에 실제로 받아온 회차 개수를 그대로 신호로 쓴다.
         adult_tracker.record(len(all_episodes))
 
     free_episodes = naver_api.free_episodes_only(all_episodes)
-
     if free_episodes:
         repository.update_latest_episode_no(title_id, free_episodes[-1].episode_no)
 
-    # DB에 저장된 last_downloaded_no만 믿지 않고, 매번 실제 폴더의 마지막 zip 파일명을
-    # 부제목 기준으로 네이버 회차 목록과 대조해서 확인한다. 네이버 회차 번호(no)는
-    # 가끔 건너뛰기 때문에(예: 109 다음이 111), 로컬 zip 개수를 세서 위치로 추론하면
-    # 어긋난다 — 그래서 반드시 부제목 텍스트로 실제 회차를 찾아야 한다.
+    # DB에 저장된 last_downloaded_no만 믿지 않고, 매번 실제 폴더의 마지막 zip 파일명을 부제목 기준으로 네이버 회차 목록과 대조해서
+    # 확인한다. 네이버 회차 번호(no)는 가끔 건너뛰기 때문에(예: 109 다음이 111), 로컬 zip 개수를 세서 위치로 추론하면 어긋난다 — 그래서
+    # 반드시 부제목 텍스트로 실제 회차를 찾아야 한다.
     last_no = webtoon.last_downloaded_no
     folder_last_no = find_last_downloaded_episode_no(webtoon_dir, free_episodes)
     if folder_last_no > last_no:
         job_status.log_line(
-            "download",
-            f"[{info.title_name}] 폴더 확인 결과 {folder_last_no}화까지 완료 (DB 기록 {last_no}화에서 갱신)",
+            "download", f"[{info.title_name}] 폴더 확인 결과 {folder_last_no}화까지 완료 (DB 기록 {last_no}화에서 갱신)"
         )
         last_no = folder_last_no
         repository.update_last_downloaded_no(title_id, last_no)
@@ -113,16 +112,19 @@ async def _download_new_episodes_for_one(
         await comicinfo.download_cover_image(session, webtoon_dir, info, settings.request_timeout_seconds)
     job_status.log_line("download", f"[{info.title_name}] ComicInfo.xml 갱신 / 커버 이미지 확인")
 
-    pending = [ep for ep in free_episodes if ep.episode_no > last_no]
-    if not pending:
-        return
+    return _NaverDownloadPlan(info, cookies, webtoon_dir, [ep for ep in free_episodes if ep.episode_no > last_no])
 
+
+async def _download_pending_batches(
+    session: aiohttp.ClientSession, settings: Settings, title_id: str, plan: _NaverDownloadPlan, failures: list[dict]
+) -> None:
+    """받을 회차를 번호순으로 받는다(다운로드 → 압축 → 폴더 삭제 → 다음 화). 상한에 걸리면 "다음 정기 실행까지 대기"가 아니라, 이번 실행
+    안에서 batch_rest_minutes만큼 쉬었다가 이어서 계속 받는다 — 하루 한 번처럼 뜸하게 도는 스케줄에서는 다음 정기 실행까지 기다리면
+    너무 오래 걸리기 때문. 하나라도 실패하면 그 즉시 이 작품은 전부 멈추고(실패 이력/알림 목록에 기록) 다음 실행에서 재시도한다."""
+    info, pending = plan.info, list(plan.pending)
     total_pending = len(pending)
     job_status.log_line("download", f"[{info.title_name}] 새 회차 {total_pending}개 다운로드 시작")
 
-    # 상한에 걸리면 "다음 정기 실행까지 대기"가 아니라, 이번 실행 안에서 batch_rest_minutes만큼
-    # 쉬었다가 이어서 계속 받는다 — 하루 한 번처럼 뜸하게 도는 스케줄에서는 다음 정기 실행까지
-    # 기다리면 너무 오래 걸리기 때문. 실패하면(회로차단) 그 즉시 전부 멈추고 다음 실행에서 재시도한다.
     cap = settings.max_new_episodes_per_title
     while pending:
         batch = pending[:cap] if cap > 0 else pending
@@ -135,28 +137,22 @@ async def _download_new_episodes_for_one(
                 title_name=info.title_name,
                 webtoon_type=info.webtoon_type,
                 episode=episode,
-                cookies=cookies,
+                cookies=plan.cookies,
                 download_root=download_roots.naver_root(settings),
                 folder_zero_fill=settings.folder_zero_fill,
                 image_zero_fill=settings.image_zero_fill,
                 max_concurrent_downloads=settings.max_concurrent_downloads,
                 timeout_seconds=settings.request_timeout_seconds,
             )
-
             if not success:
-                job_status.log_line(
-                    "download", f"[{info.title_name}] {episode.episode_no}화 다운로드 실패 — 다음 실행에서 재시도"
-                )
+                job_status.log_line("download", f"[{info.title_name}] {episode.episode_no}화 다운로드 실패 — 다음 실행에서 재시도")
                 repository.add_episode_history(
                     title_id, info.title_name, episode.episode_no, episode.subtitle, "failed", "이미지 URL 수집 또는 다운로드 오류"
                 )
-                failures.append(
-                    {"title_name": info.title_name, "episode_no": episode.episode_no, "subtitle": episode.subtitle}
-                )
+                failures.append({"title_name": info.title_name, "episode_no": episode.episode_no, "subtitle": episode.subtitle})
                 return  # 이 작품은 여기서 완전히 중단 — 배치 남았어도 더 안 받음
 
-            # 다운로드 → 압축 → 폴더 삭제 → (다음 루프에서) 다음 화, 순서로 진행한다.
-            zip_episode_folders(webtoon_dir)
+            zip_episode_folders(plan.webtoon_dir)
             repository.update_last_downloaded_no(title_id, episode.episode_no)
             repository.add_episode_history(title_id, info.title_name, episode.episode_no, episode.subtitle, "success")
             job_status.log_line("download", f"[{info.title_name}] {episode.episode_no}화 완료 (압축 후 폴더 삭제)")
@@ -164,11 +160,24 @@ async def _download_new_episodes_for_one(
 
         if pending:
             rest_minutes = settings.batch_rest_minutes
-            job_status.log_line(
-                "download",
-                f"[{info.title_name}] {cap}화 받음, 남은 {len(pending)}화는 {rest_minutes}분 쉬었다가 이어받기",
-            )
+            job_status.log_line("download", f"[{info.title_name}] {cap}화 받음, 남은 {len(pending)}화는 {rest_minutes}분 쉬었다가 이어받기")
             await asyncio.sleep(rest_minutes * 60)
+
+
+async def _download_new_episodes_for_one(
+    session: aiohttp.ClientSession,
+    settings: Settings,
+    title_id: str,
+    adult_tracker: cookie_health.AdultFetchTracker,
+    failures: list[dict],
+) -> None:
+    webtoon = repository.get(title_id)
+    if webtoon is None or webtoon.status != repository.STATUS_ACTIVE:
+        return
+    plan = await _plan_naver_download(session, settings, webtoon, adult_tracker)
+    if plan is None or not plan.pending:
+        return
+    await _download_pending_batches(session, settings, title_id, plan, failures)
 
 
 _DOWNLOAD_TARGET_PLATFORMS = {"naver": {"naver"}, "kakao": {"kakao"}, "both": {"naver", "kakao"}}
@@ -660,6 +669,61 @@ async def run_archive_job() -> None:
             job_status.finish("archive", success=False)
 
 
+_KST = ZoneInfo("Asia/Seoul")
+
+
+def _kst_day_range_utc(day) -> tuple[str, str]:
+    """한국시간 하루(day)의 [시작, 끝)을 UTC ISO 문자열로."""
+    start_kst = datetime.combine(day, datetime.min.time(), tzinfo=_KST)
+    end_kst = start_kst + timedelta(days=1)
+    return start_kst.astimezone(timezone.utc).isoformat(), end_kst.astimezone(timezone.utc).isoformat()
+
+
+def _select_report_rows(since: str | None, force_test: bool) -> tuple[list[dict], bool]:
+    """리포트에 담을 다운로드 이력과, 어제 기록으로 대체했는지(테스트 발송에서만).
+
+    일반 발송은 "지난 발송 이후" 이력 전부다. 테스트 발송은 그 누적 로직을 아예 안 쓴다 — 오늘(한국시간) 다운로드한 것만 보내고,
+    오늘 게 없으면 어제 것만 보낸다. 전체 이력이 몰려서 나오는 걸 막기 위해 날짜 하루 단위로 딱 끊는다."""
+    if not force_test:
+        return (repository.list_episode_history_since(since) if since else []), False
+    today = datetime.now(_KST).date()
+    rows = repository.list_episode_history_between(*_kst_day_range_utc(today))
+    if rows:
+        return rows, False
+    rows = repository.list_episode_history_between(*_kst_day_range_utc(today - timedelta(days=1)))
+    return rows, bool(rows)
+
+
+async def _collect_new_episode_sections(session: aiohttp.ClientSession, settings, *, force_test: bool) -> tuple[list, list]:
+    """등록 안 한 작품의 새 에피소드(네이버, 카카오 순). 다운로드 기록과 무관하게(rows가 비어 있어도) 항상 확인한다 — 구독을 안 해서
+    기록 자체가 없는 작품을 발견하는 게 이 섹션의 목적이라, "받은 게 없으니 리포트도 없음"에 묻히면 안 된다. 일반 발송에서는 이미
+    같은 회차로 알린 작품을 뺀다(UP 표시가 남아 있는 동안 리포트마다 반복되지 않게) — 테스트 발송은 전부 보여준다."""
+    enabled = repository.get_setting("report_unregistered_new_episodes_enabled") != "0"
+    kakao_enabled = repository.get_setting("kakao_webtoons_enabled") == "1"
+    naver_items = await _collect_unregistered_new_episodes(session, settings) if enabled else []
+    kakao_items = await _collect_kakao_new_episodes(session, settings) if enabled and kakao_enabled else []
+    if not force_test:
+        naver_items, kakao_items = report_seen.filter_unseen(naver_items, kakao_items)
+    return naver_items, kakao_items
+
+
+async def _resolve_reader_urls(session: aiohttp.ClientSession, settings, success_rows: list[dict]) -> dict[str, str]:
+    """받은 작품의 웹툰 뷰어 바로가기 링크(뷰어 서버가 설정돼 있을 때만). 키: 네이버는 제목, 카카오는 "kakao:제목".
+    웹툰서버는 실제 디스크 폴더명 기준으로 매칭하는데, 폴더를 만들 때는 ':' 같은 금지문자를 치환해서 저장한다 — 네이버는 전각 문자로
+    (예: "제목 : 부제" → "제목 ： 부제"), 카카오는 밑줄 규칙으로. 원본 제목을 그대로 조회하면 문자가 안 맞아 실패한 사례가 있어서
+    폴더명 생성과 같은 치환을 거쳐 조회한다."""
+    webtoon_server_url = repository.get_setting(_SETTING_KEY_WEBTOON_SERVER_URL) or ""
+    urls: dict[str, str] = {}
+    if not webtoon_server_url:
+        return urls
+    for platform, folder_name, key_prefix in (("naver", remove_forbidden_str, ""), ("kakao", remove_forbidden_str_kakao, "kakao:")):
+        for title in sorted({r["title_name"] for r in success_rows if (r.get("platform") or "naver") == platform}):
+            url = await webtoon_server_client.fetch_reader_url(session, webtoon_server_url, folder_name(title), settings.request_timeout_seconds)
+            if url:
+                urls[f"{key_prefix}{title}"] = url
+    return urls
+
+
 async def _run_report_job_impl(force_test: bool = False) -> None:
     settings = get_settings()
     job_status.start("report")
@@ -667,63 +731,21 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
     since = repository.get_setting(_SETTING_KEY_REPORT_LAST_SENT_AT)
     now_iso = datetime.now(timezone.utc).isoformat()
     if not since and not force_test:
-        # 최초 실행이면 지금까지 쌓인 이력을 전부 몰아 보내는 대신, 지금 시점부터
-        # 집계를 시작한다 — 첫 리포트에 예전 이력이 전부 딸려오는 걸 방지.
-        # 수동 테스트(force_test)일 때는 이 규칙을 건너뛴다 — 사용자가 실제로 발송
-        # 형태를 확인해보고 싶은 것이므로.
+        # 최초 실행이면 지금까지 쌓인 이력을 전부 몰아 보내는 대신, 지금 시점부터 집계를 시작한다 — 첫 리포트에 예전 이력이 전부
+        # 딸려오는 걸 방지. 수동 테스트(force_test)일 때는 이 규칙을 건너뛴다 — 사용자가 실제 발송 형태를 확인해보고 싶은 것이므로.
         repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, now_iso)
         job_status.log_line("report", "최초 실행 — 이번 시점부터 집계 시작 (발송 없음)")
         job_status.finish("report", success=True)
         return
 
-    if force_test:
-        # 테스트 발송은 "지난 발송 이후" 누적 로직을 아예 안 쓴다 — 오늘(한국시간)
-        # 다운로드한 것만 보내고, 오늘 게 없으면 어제 것만 보낸다. 단순하고 예측
-        # 가능하게: 전체 이력이 몰려서 나오는 걸 막기 위한 것이라 날짜 하루 단위로
-        # 딱 끊는다.
-        kst = ZoneInfo("Asia/Seoul")
-        today_kst = datetime.now(kst).date()
-        used_fallback = False
-
-        def _kst_day_range_utc(day):
-            start_kst = datetime.combine(day, datetime.min.time(), tzinfo=kst)
-            end_kst = start_kst + timedelta(days=1)
-            return start_kst.astimezone(timezone.utc).isoformat(), end_kst.astimezone(timezone.utc).isoformat()
-
-        start_iso, end_iso = _kst_day_range_utc(today_kst)
-        rows = repository.list_episode_history_between(start_iso, end_iso)
-        if not rows:
-            start_iso, end_iso = _kst_day_range_utc(today_kst - timedelta(days=1))
-            rows = repository.list_episode_history_between(start_iso, end_iso)
-            used_fallback = bool(rows)
-    else:
-        rows = repository.list_episode_history_since(since) if since else []
-        used_fallback = False
-
+    rows, used_fallback = _select_report_rows(since, force_test)
     success_rows = [r for r in rows if r["status"] == "success"]
     failed_rows = [r for r in rows if r["status"] == "failed"]
-
-    webtoon_server_url = repository.get_setting(_SETTING_KEY_WEBTOON_SERVER_URL) or ""
-    unregistered_new_episodes_enabled = repository.get_setting("report_unregistered_new_episodes_enabled") != "0"
-    kakao_webtoons_enabled = repository.get_setting("kakao_webtoons_enabled") == "1"
     app_public_base_url = repository.get_setting("app_public_base_url") or ""
-    reader_urls: dict[str, str] = {}
 
     try:
         async with aiohttp.ClientSession() as session:
-            # 미등록 신규 에피소드는 다운로드 기록과 무관하게(rows가 비어있어도)
-            # 항상 확인한다 — 구독을 안 해서 애초에 다운로드 기록 자체가 없는
-            # 작품을 발견하는 게 이 섹션의 목적이라, "받은 게 없으니 리포트도
-            # 없음" 조건에 같이 걸려서 묻히면 안 된다.
-            unregistered_new_episodes = (
-                await _collect_unregistered_new_episodes(session, settings)
-                if unregistered_new_episodes_enabled else []
-            )
-            kakao_new_episodes = (
-                await _collect_kakao_new_episodes(session, settings)
-                if unregistered_new_episodes_enabled and kakao_webtoons_enabled else []
-            )
-
+            unregistered_new_episodes, kakao_new_episodes = await _collect_new_episode_sections(session, settings, force_test=force_test)
             if not rows and not unregistered_new_episodes and not kakao_new_episodes:
                 job_status.log_line("report", "발송할 내용 없음 (다운로드 기록도, 새 에피소드도 없음)")
                 if not force_test:
@@ -731,33 +753,15 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
                 job_status.finish("report", success=True)
                 return
 
-            if webtoon_server_url:
-                for title in sorted({r["title_name"] for r in success_rows if r.get("platform") != "kakao"}):
-                    # 웹툰서버는 실제 디스크 폴더명 기준으로 매칭한다. 그런데 폴더를
-                    # 만들 때는 ':' 같은 금지문자를 전각 문자로 치환해서 저장하는데
-                    # (예: "제목 : 부제" → "제목 ： 부제"), 여기선 원본 제목(치환 전)을
-                    # 그대로 조회에 쓰고 있어서 문자가 안 맞아 조회가 실패하는 경우가
-                    # 있었다(실제로 확인된 사례) — 폴더명 생성과 동일한 치환을 거쳐서 조회한다.
-                    folder_safe_title = remove_forbidden_str(title)
-                    url = await webtoon_server_client.fetch_reader_url(
-                        session, webtoon_server_url, folder_safe_title, settings.request_timeout_seconds
-                    )
-                    if url:
-                        reader_urls[title] = url
-                # 카카오는 폴더 이름 규칙(금지문자 치환)이 달라서 그 규칙으로 따로 조회한다
-                for title in sorted({r["title_name"] for r in success_rows if r.get("platform") == "kakao"}):
-                    url = await webtoon_server_client.fetch_reader_url(
-                        session, webtoon_server_url, remove_forbidden_str_kakao(title), settings.request_timeout_seconds
-                    )
-                    if url:
-                        reader_urls[f"kakao:{title}"] = url
-
+            reader_urls = await _resolve_reader_urls(session, settings, success_rows)
             message = _build_report_message(
                 success_rows, failed_rows, reader_urls, unregistered_new_episodes, app_public_base_url, kakao_new_episodes
             )
             if used_fallback:
                 message = "🧪 **[테스트 발송 — 오늘 기록 없어 어제 기록으로 대체됨]**\n" + message
             await discord_notify.send_webhook_notification(session, settings, message)
+            if not force_test:
+                report_seen.remember(unregistered_new_episodes, kakao_new_episodes)  # 전송이 성공한 뒤에만 기록(실패하면 다음에 다시 시도)
 
         if not force_test:
             repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, now_iso)

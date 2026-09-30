@@ -136,18 +136,21 @@ def refresh_kakao_cover_if_applicable(webtoon_dir: Path, *, timeout: int = 15) -
     series_id = find_kakao_series_id_for_folder(webtoon_dir)
     if series_id is None:
         return False
+    return replace_cover(webtoon_dir, series_id, timeout=timeout)
 
-    jpeg_bytes = fetch_official_cover_bytes(series_id, timeout=timeout)
+
+def replace_cover(webtoon_dir: Path, series_id: int | str, *, timeout: int = 15) -> bool:
+    """카카오페이지 공식 표지를 받아 webtoon_dir/cover.jpg로 교체한다(이미 있어도 덮어씀). 못 받으면 기존 커버를 그대로 두고
+    False. 표지는 항상 JPEG로 저장되므로, 다른 확장자의 옛 커버(cover.png 등 — 예전 카카오웹툰에서 받은 것 포함)가 남아 있으면
+    새 표지를 저장한 뒤에만 지워서 cover.*가 둘 이상 남지 않게 한다."""
+    jpeg_bytes = fetch_official_cover_bytes(str(series_id), timeout=timeout)
     if jpeg_bytes is None:
         return False
-
     try:
-        # 확장자가 뭐였든(cover.png 등) 표지는 항상 JPEG로 저장되므로, 다른 확장자의 옛 커버가
-        # 남아있으면 같이 지워서 cover.*가 두 개 이상 안 남게 한다.
+        (webtoon_dir / "cover.jpg").write_bytes(jpeg_bytes)
         for old in webtoon_dir.glob("cover.*"):
             if old.name != "cover.jpg":
                 old.unlink(missing_ok=True)
-        (webtoon_dir / "cover.jpg").write_bytes(jpeg_bytes)
     except OSError as e:
         log.warning("카카오 표지 저장 실패 (%s): %s", webtoon_dir, e)
         return False

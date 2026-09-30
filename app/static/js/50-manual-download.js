@@ -83,8 +83,6 @@ async function kakaoManualStart(query) {
         });
         subscribeBtn.textContent = "구독 중";
         subscribeBtn.disabled = true;
-        kakaoListVersion = null;
-        naverListLoadedAt = 0;
       } catch (e) {
         alert(e.message);
       }
@@ -153,8 +151,6 @@ document.getElementById("btn-kakao-manual-subscribe").addEventListener("click", 
       body: JSON.stringify({ title: a.title, thumbnail_url: a.thumbnail_url || "", author_summary: a.authors || "" }),
     });
     a.subscription = "active";
-    kakaoListVersion = null; // 전체목록이 다음에 열릴 때 바뀐 구독 상태를 반영한다
-    naverListLoadedAt = 0;
     refreshKakaoManualSubscribeButton();
   } catch (e) {
     alert(e.message);

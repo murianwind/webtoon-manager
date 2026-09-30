@@ -10,17 +10,14 @@ from pydantic import BaseModel, field_validator
 
 from app import (
     job_status,
+    kakao_page_download,
     naver_api,
     repository,
     tracker,
 )
 from app import kakao_api
-from app import kakao_page_download
 from app.config import get_settings
 
-from app.api.common import (
-    _kakao_page_session,
-)
 
 
 log = logging.getLogger(__name__)
@@ -293,7 +290,7 @@ async def resync_registry():
             kakao_count = None
             if await asyncio.to_thread(repository.get_setting, "kakao_webtoons_enabled") == "1":
                 job_status.log_line("registry", "카카오 작가 재동기화 시작")
-                async with _kakao_page_session() as kakao_session:
+                async with kakao_page_download.new_session() as kakao_session:
                     kakao_client = kakao_page_download.client_or_anonymous(kakao_session, settings.request_timeout_seconds)
                     kakao_count = await tracker.resync_kakao_registry(kakao_client, settings)
                     kakao_page_download.persist_refreshed_cookies(kakao_client)

@@ -35,6 +35,15 @@ let kakaoListVersion = null;
 let kakaoListPollTimer = null;
 let kakaoListPollCount = 0;
 
+// 웹툰의 구독 상태가 바뀌면(어느 탭에서든) 다음에 각 목록을 열 때 서버에서 다시 받게 한다. 카드는 재사용되므로(reconcileGrid)
+// 다시 받아도 바뀐 것만 갱신되고 깜빡이지 않는다.
+function invalidateListCaches() {
+  naverListLoadedAt = 0;
+  kakaoListVersion = null;
+  subscriptionLoadedAt.unsubscribed = 0;
+  subscriptionLoadedAt.excluded = 0;
+}
+
 function combineNaverListCache() {
   naverListCache = [...naverListNaverItems, ...naverListKakaoItems];
 }

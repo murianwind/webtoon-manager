@@ -74,11 +74,16 @@ def render_comicinfo(
     )
 
 
-def kakao_age_rating(age_grade: int | None) -> str:
-    """카카오페이지 연령 등급(age_grade: 0/15/19)을 info.xml 표기로 — 15세 이용가, 18세 이용가, 그 외는 전부 전체이용가."""
-    if (age_grade or 0) >= 18:
+def kakao_age_rating(age_grade: int | str | None) -> str:
+    """카카오페이지 연령 등급(age_grade: 0/15/19)을 info.xml 표기로 — 15세 이용가, 18세 이용가, 그 외는 전부 전체이용가.
+    응답에서는 정수지만, 타입이 달라지거나 값이 이상해도 예외로 info.xml 작성이 통째로 실패하지 않게 숫자로 바꿔 본다."""
+    try:
+        grade = int(str(age_grade).strip())
+    except ValueError:
+        return "전체이용가"
+    if grade >= 18:
         return "18세 이용가"
-    if age_grade == 15:
+    if grade == 15:
         return "15세 이용가"
     return "전체이용가"
 
@@ -156,6 +161,10 @@ async def download_cover_image(
                 return
             ext = guess_image_extension(info.thumbnail_url)
             webtoon_dir.mkdir(parents=True, exist_ok=True)
-            (webtoon_dir / f"cover{ext}").write_bytes(await response.read())
+            new_cover = webtoon_dir / f"cover{ext}"
+            new_cover.write_bytes(await response.read())
+            for old in webtoon_dir.glob("cover.*"):  # 확장자가 다른 옛 커버가 남아 cover.*가 둘 이상 되지 않게(새 커버를 저장한 뒤에만 지운다)
+                if old != new_cover:
+                    old.unlink(missing_ok=True)
     except Exception as e:
         log.warning("커버 이미지 다운로드 중 오류 (titleId=%s): %s", info.title_id, e)

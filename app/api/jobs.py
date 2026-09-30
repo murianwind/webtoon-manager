@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 
 from app import (
     job_status,
+    kakao_page_download,
     repository,
     schedule_config,
     tracker,
@@ -37,6 +38,13 @@ async def sync_metadata():
         try:
             count = await tracker.sync_metadata_for_all(settings)
             job_status.log_line("metadata_sync", f"{count}개 웹툰 정리 완료")
+            if await asyncio.to_thread(repository.get_setting, "kakao_webtoons_enabled") == "1":
+                job_status.log_line("metadata_sync", "카카오 메타 동기화 시작")
+                async with kakao_page_download.new_session() as kakao_session:
+                    kakao_client = kakao_page_download.client_or_anonymous(kakao_session, settings.request_timeout_seconds)
+                    kakao_count = await tracker.sync_kakao_metadata(kakao_client, settings)
+                    kakao_page_download.persist_refreshed_cookies(kakao_client)
+                job_status.log_line("metadata_sync", f"카카오 {kakao_count}개 작품 정리 완료")
             job_status.finish("metadata_sync", success=True)
         except Exception as e:
             job_status.log_line("metadata_sync", f"오류: {e}")

@@ -18,8 +18,8 @@ from pathlib import Path
 
 import aiohttp
 
-from app import download_roots, comicinfo, discord_notify, job_status, kakao_api, kakao_page_download, naver_api, repository
-from app.file_utils import remove_forbidden_str
+from app import download_roots, comicinfo, discord_notify, job_status, kakao_api, kakao_cover, kakao_page_download, naver_api, repository
+from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
 from app.config import Settings
 from app.discord_notify import send_webhook_notification
 from app.models import TitleInfo
@@ -272,10 +272,11 @@ async def sync_metadata_for_all(settings) -> int:
     추적 중인(구독중/구독해제/제외됨 전부) 웹툰 폴더를 스캔해서 info.xml/cover를
     다시 만들어준다. 폴더가 아예 없으면(다운로드한 적 없는 웹툰) 건너뛴다.
 
-    info.xml은 (커버와 달리) 있어도 매번 네이버에서 새로 받아와 덮어쓴다 — DB에
-    저장된 값만으로 만들면 글작가/그림작가/원작자처럼 DB에 아예 저장 안 하는
-    정보는 영원히 못 채우기 때문이다(예전 방식의 근본적인 한계였음). 커버 이미지는
-    용량이 있고 거의 안 바뀌므로 지금처럼 없을 때만 받는다.
+    info.xml과 커버는 있어도 매번 네이버에서 새로 받아와 교체한다 — DB에 저장된 값만으로
+    info.xml을 만들면 글작가/그림작가/원작자처럼 DB에 아예 저장 안 하는 정보는 영원히
+    못 채우고, 커버도 예전 것이 그대로 굳어 버리기 때문이다("누락분만"이던 예전 방식의
+    한계). 다운로드 중에는 커버가 없을 때만 받는 기존 동작 그대로이고, 이 메타 동기화만
+    새로 받는다.
 
     한 웹툰 처리 중 예외가 나도(디스크 오류, 커버 이미지 네트워크 실패 등) 전체가
     멈추지 않고 다음 웹툰으로 넘어가야 하므로, 다른 스캔 함수들과 동일하게 웹툰
@@ -304,14 +305,56 @@ async def sync_metadata_for_all(settings) -> int:
                 repository.update_genres_and_tags(wt.title_id, info.genres_ko, info.tags)
 
                 comicinfo.write_comicinfo_file(webtoon_dir, info)
-                if comicinfo.needs_comicinfo(webtoon_dir) and info.thumbnail_url:
+                if info.thumbnail_url:
+                    # 메타 동기화는 커버도 새로 받아 교체한다(받기 실패 시 기존 커버는 그대로 남는다)
                     await comicinfo.download_cover_image(session, webtoon_dir, info, settings.request_timeout_seconds)
-                job_status.log_line("metadata_sync", f"[{wt.title}] info.xml 갱신 / 커버 이미지 확인")
+                job_status.log_line("metadata_sync", f"[{wt.title}] info.xml 갱신 / 커버 이미지 교체")
                 fixed += 1
             except Exception as e:
                 log.error("메타 동기화 중 예외 (titleId=%s) — 다음 웹툰으로 진행: %s", wt.title_id, e)
                 job_status.log_line("metadata_sync", f"[{wt.title}] 처리 중 오류: {e}")
     return fixed
+
+
+async def sync_kakao_metadata(client: kakao_page_download.KakaoPageClient, settings: Settings) -> int:
+    """
+    추적 중인 카카오페이지 웹툰(구독/구독해제/목록/제외됨 전부)의 작품 폴더에서 info.xml과 커버를 카카오페이지의 최신 정보로
+    교체한다. 예전 카카오웹툰 시절에 받은 커버(다른 확장자 포함)와 info.xml도 이걸로 카카오페이지 것으로 바뀐다. 폴더가 없으면
+    (받은 적 없는 작품) 건너뛰고 카카오에 묻지도 않는다. 작품 정보를 못 받으면 그 작품의 기존 파일은 그대로 두고, 표지만 못
+    받으면 info.xml만 갱신하고 기존 커버를 유지한다. 한 작품에서 예외가 나도 나머지는 계속한다. info.xml을 갱신한 작품 수를 돌려준다.
+    """
+    root = Path(download_roots.kakao_root(settings))
+    targets = [(row, root / remove_forbidden_str_kakao(row["title"])) for row in repository.get_kakao_webtoons_map().values()]
+    targets = [(row, folder) for row, folder in targets if folder.is_dir()]
+    if not targets:
+        return 0
+
+    semaphore = asyncio.Semaphore(settings.artist_scan_concurrency)
+
+    async def _run_one(row: dict, folder: Path) -> bool:
+        title, series_id = row["title"], row["title_id"]
+        async with semaphore:
+            try:
+                series_item = await client.fetch_series_item(series_id)
+                about = await client.fetch_about(series_id)
+                if series_item is None:
+                    job_status.log_line("metadata_sync", f"[카카오] {title} — 작품 정보 조회 실패로 건너뜀")
+                    return False
+                kakao_page_download.write_info_xml(series_item, series_id, folder, about)
+                replaced = await asyncio.to_thread(kakao_cover.replace_cover, folder, series_id)
+                job_status.log_line(
+                    "metadata_sync", f"[카카오] {title} — info.xml 갱신 / " + ("커버 교체" if replaced else "커버는 받지 못해 기존 유지")
+                )
+                return True
+            except Exception as e:
+                log.error("카카오 메타 동기화 중 예외 (series_id=%s) — 다음 작품으로 진행: %s", series_id, e)
+                job_status.log_line("metadata_sync", f"[카카오] {title} — 처리 중 오류: {e}")
+                return False
+            finally:
+                await asyncio.sleep(settings.delay_seconds)
+
+    results = await asyncio.gather(*(_run_one(row, folder) for row, folder in targets))
+    return sum(1 for r in results if r)
 
 
 async def refresh_inactive_metadata(session: aiohttp.ClientSession, settings: Settings) -> int:

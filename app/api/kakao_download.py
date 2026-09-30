@@ -19,9 +19,6 @@ from app import kakao_page_auth
 from app import kakao_page_download
 from app.config import get_settings
 
-from app.api.common import (
-    _kakao_page_session,
-)
 
 
 log = logging.getLogger(__name__)
@@ -69,7 +66,7 @@ _KAKAO_LOGIN_CHECK_MESSAGES = {
 async def check_kakao_page_login():
     """저장된 쿠키로 실제로 로그인이 되는지 확인한다. 풀려 있으면(또는 만료가 며칠 안 남았으면) 디스코드로 알린다."""
     settings = get_settings()
-    async with _kakao_page_session() as session:
+    async with kakao_page_download.new_session() as session:
         client = kakao_page_download.client_from_saved_cookies(session, settings.request_timeout_seconds)
         if client is None:
             raise HTTPException(status_code=400, detail="저장된 카카오페이지 쿠키가 없습니다. 먼저 쿠키를 붙여넣어 저장해주세요.")
@@ -130,7 +127,7 @@ async def kakao_manual_analyze(series_id: int):
     돌려준다. 아무것도 받지 않는다."""
     settings = get_settings()
     root = await asyncio.to_thread(download_roots.kakao_root, settings)
-    async with _kakao_page_session() as session:
+    async with kakao_page_download.new_session() as session:
         client = kakao_page_download.client_or_anonymous(session, settings.request_timeout_seconds)
         cookie_saved = bool(client.cookies)  # 저장된 쿠키가 있는 클라이언트만 쿠키 값을 갖는다(익명은 빈 값)
         logged_in: bool | None = None
@@ -193,7 +190,7 @@ async def _run_kakao_manual_download(series_id: int, numbers: list[int]) -> None
     try:
         async with kakao_page_download.download_lock:
             root = await asyncio.to_thread(download_roots.kakao_root, settings)
-            async with _kakao_page_session() as session:
+            async with kakao_page_download.new_session() as session:
                 client = kakao_page_download.client_from_saved_cookies(session, settings.request_timeout_seconds)
                 if client is None:
                     log_line("저장된 카카오페이지 쿠키가 없습니다. 설정에서 쿠키를 먼저 저장해주세요.")

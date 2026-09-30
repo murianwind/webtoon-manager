@@ -462,6 +462,17 @@ class KakaoPageClient:
             return False, f"기다무 사용에 실패했습니다(HTTP {status})"
         return True, "기다무로 열었습니다"
 
+    async def fetch_series_item(self, series_id: int) -> dict | None:
+        """작품 기본 정보(제목/설명/장르/연령/연재 상태/작가). 회차 목록의 첫 페이지 응답에 들어 있어서 회차 1개만 요청해 얻는다
+        (전체 회차를 넘기지 않으므로 가볍다). 못 받으면 None."""
+        _, data = await self._request_json(
+            "GET", PRODUCT_LIST_URL,
+            params={"series_id": series_id, "cursor_index": 0, "cursor_direction": "NEXT", "window_size": 1, "sort_type": "asc"},
+            label=f"작품 정보 series_id={series_id}",
+        )
+        result = (data or {}).get("result") or {}
+        return result.get("series_item") or None
+
     async def fetch_about(self, series_id: int) -> dict | None:
         """작품 "정보" 탭: 글/그림/원작 작가(role), 테마 키워드 등. 못 받으면 None."""
         _, data = await self._request_json("GET", ABOUT_URL, params={"series_id": series_id}, label=f"작품 정보 series_id={series_id}")
@@ -509,6 +520,11 @@ def client_from_saved_cookies(session: aiohttp.ClientSession, timeout_seconds: i
     if not cookies:
         return None
     return KakaoPageClient(session, kakao_page_auth.cookie_map(cookies), timeout_seconds)
+
+
+def new_session() -> aiohttp.ClientSession:
+    """카카오페이지 호출용 세션 — 쿠키는 KakaoPageClient가 직접 관리하므로 세션엔 쿠키 저장소를 두지 않는다."""
+    return aiohttp.ClientSession(cookie_jar=aiohttp.DummyCookieJar())
 
 
 def client_or_anonymous(session: aiohttp.ClientSession, timeout_seconds: int) -> KakaoPageClient:
@@ -720,13 +736,18 @@ def authors_to_register(about: dict | None) -> list[str]:
     return originals or writers
 
 
+def write_info_xml(series_item: dict, series_id: int, folder: Path, about: dict | None = None) -> None:
+    """작품 폴더의 info.xml을 최신 정보로 (다시) 쓰고, 파일명 템플릿 {author}용 글 작가도 저장한다. 받을 때마다/메타 동기화 때마다 같은 규칙."""
+    repository.set_kakao_writer_names(series_id, split_authors(about)[0])
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "info.xml").write_text(comicinfo.build_kakao_comicinfo_xml(series_item, series_id, about), encoding="utf-8")
+
+
 async def write_series_metadata(series_item: dict, series_id: int, folder: Path, on_progress=None, about: dict | None = None) -> None:
     """받은 뒤 작품 폴더에 info.xml을 쓰고(네이버와 같이 받을 때마다 최신 정보로 덮어씀), 표지(cover)가 없으면
     카카오페이지 공식 표지를 받아 저장한다. 실패해도 다운로드 결과에는 영향을 주지 않는다."""
     try:
-        repository.set_kakao_writer_names(series_id, split_authors(about)[0])  # 파일명 템플릿 {author}용 — 받을 때마다 최신으로
-        folder.mkdir(parents=True, exist_ok=True)
-        (folder / "info.xml").write_text(comicinfo.build_kakao_comicinfo_xml(series_item, series_id, about), encoding="utf-8")
+        write_info_xml(series_item, series_id, folder, about)
         if not any(folder.glob("cover.*")):
             cover = await asyncio.to_thread(kakao_cover.fetch_official_cover_bytes, str(series_id))
             if cover:
