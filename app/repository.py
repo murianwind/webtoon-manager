@@ -410,8 +410,40 @@ def _row_to_kakao_webtoon(row) -> dict:
     return {
         "title_id": row["title_id"], "title": row["title"], "status": row["status"],
         "ever_subscribed": bool(row["ever_subscribed"]), "thumbnail_url": row["thumbnail_url"],
-        "author_summary": row["author_summary"],
+        "author_summary": row["author_summary"], "is_finished": bool(row["is_finished"]),
+        "finish_notified": bool(row["finish_notified"]), "finish_ack": bool(row["finish_ack"]),
     }
+
+
+def set_kakao_finished(title_id: int, finished: bool) -> None:
+    """완결(이고 받을 회차를 다 받은) 상태를 기록한다. 다시 연재로 돌아오면 알림 기록도 초기화해서 다음 완결 때 다시 알린다."""
+    with write_transaction() as conn:
+        if finished:
+            conn.execute("UPDATE kakao_webtoons SET is_finished = 1, updated_at = ? WHERE title_id = ?", (_now(), title_id))
+        else:
+            conn.execute(
+                "UPDATE kakao_webtoons SET is_finished = 0, finish_notified = 0, finish_ack = 0, updated_at = ? "
+                "WHERE title_id = ? AND is_finished = 1", (_now(), title_id),
+            )
+
+
+def set_kakao_finish_notified(title_id: int) -> None:
+    with write_transaction() as conn:
+        conn.execute("UPDATE kakao_webtoons SET finish_notified = 1, updated_at = ? WHERE title_id = ?", (_now(), title_id))
+
+
+def acknowledge_kakao_finish(title_id: int) -> None:
+    """알람 제외: 구독은 그대로 두고 완결 알림만 그만 받는다."""
+    with write_transaction() as conn:
+        conn.execute("UPDATE kakao_webtoons SET finish_ack = 1, updated_at = ? WHERE title_id = ?", (_now(), title_id))
+
+
+def list_kakao_finish_pending() -> list[dict]:
+    """완결이고 받을 회차를 다 받았는데 아직 디스코드로 알리지 않은(알람 제외도 안 한) 구독 중인 카카오 작품."""
+    rows = fetchall(
+        "SELECT * FROM kakao_webtoons WHERE status = ? AND is_finished = 1 AND finish_notified = 0 AND finish_ack = 0", (STATUS_ACTIVE,)
+    )
+    return [_row_to_kakao_webtoon(r) for r in rows]
 
 
 def kakao_webtoon_exists(title_id: int) -> bool:
@@ -874,16 +906,17 @@ def delete_job_history_older_than(days: int) -> int:
 # ── episode_history (회차 단위 다운로드 이력) ──────────────────────
 
 def add_episode_history(
-    title_id: str, title_name: str, episode_no: int, subtitle: str, status: str, error_msg: str = ""
+    title_id: str, title_name: str, episode_no: int, subtitle: str, status: str, error_msg: str = "",
+    platform: str = "naver",
 ) -> None:
     with write_transaction() as conn:
         conn.execute(
             """
             INSERT INTO episode_history
-                (title_id, title_name, episode_no, subtitle, status, error_msg, downloaded_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (title_id, title_name, episode_no, subtitle, status, error_msg, downloaded_at, platform)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (title_id, title_name, episode_no, subtitle, status, error_msg, _now()),
+            (title_id, title_name, episode_no, subtitle, status, error_msg, _now(), platform),
         )
 
 
@@ -919,6 +952,7 @@ def list_episode_history(
             "status": r["status"],
             "error_msg": r["error_msg"],
             "downloaded_at": r["downloaded_at"],
+            "platform": r["platform"],
         }
         for r in rows
     ]
@@ -953,6 +987,7 @@ def list_episode_history_since(since_iso: str) -> list[dict]:
             "status": r["status"],
             "error_msg": r["error_msg"],
             "downloaded_at": r["downloaded_at"],
+            "platform": r["platform"],
         }
         for r in rows
     ]
@@ -975,6 +1010,7 @@ def list_episode_history_between(start_iso: str, end_iso: str) -> list[dict]:
             "status": r["status"],
             "error_msg": r["error_msg"],
             "downloaded_at": r["downloaded_at"],
+            "platform": r["platform"],
         }
         for r in rows
     ]
@@ -1032,7 +1068,8 @@ _WATCHED_AUTHOR_COLUMNS = ("author_id", "author_name", "enabled", "platform", "c
 _WATCHED_TAG_COLUMNS = ("tag_id", "tag_name", "enabled", "created_at", "updated_at")
 _KAKAO_SEEN_TITLE_COLUMNS = ("author_name", "title_id", "title_name", "seen_at")
 _KAKAO_WEBTOON_COLUMNS = (
-    "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "author_summary", "created_at", "updated_at",
+    "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "author_summary",
+    "is_finished", "finish_notified", "finish_ack", "created_at", "updated_at",
 )
 _FILENAME_TEMPLATE_PRESET_COLUMNS = ("id", "name", "template", "created_at", "updated_at")
 _ARCHIVE_TARGET_COLUMNS = (
@@ -1042,7 +1079,7 @@ _ARCHIVE_TARGET_COLUMNS = (
 _ARCHIVE_HISTORY_COLUMNS = ("id", "title_id", "title_name", "file_name", "archived_at", "trigger_type")
 _ARCHIVE_PENDING_FINISH_COLUMNS = ("title_id", "marked_at")
 _EPISODE_HISTORY_COLUMNS = (
-    "id", "title_id", "title_name", "episode_no", "subtitle", "status", "error_msg", "downloaded_at",
+    "id", "title_id", "title_name", "episode_no", "subtitle", "status", "error_msg", "downloaded_at", "platform",
 )
 
 

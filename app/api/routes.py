@@ -754,9 +754,9 @@ async def _run_kakao_manual_download(series_id: int, numbers: list[int]) -> None
                 )
                 kakao_page_download.persist_refreshed_cookies(client)
         for number, subtitle in result.downloaded_items:
-            repository.add_episode_history(str(series_id), result.title, number, subtitle, "success")
+            repository.add_episode_history(str(series_id), result.title, number, subtitle, "success", platform="kakao")
         for number in result.failed:
-            repository.add_episode_history(str(series_id), result.title, number, "", "failed", "이미지 받기 실패")
+            repository.add_episode_history(str(series_id), result.title, number, "", "failed", "이미지 받기 실패", platform="kakao")
         log_line(
             f"[{result.title}] 받음 {len(result.downloaded)}개(그 중 다시 받아 교체 {len(result.replaced)}개) / "
             f"실패 {len(result.failed)}개 / 잠겨서 건너뜀 {len(result.skipped_locked)}개"

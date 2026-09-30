@@ -155,6 +155,16 @@ class RunResult:
     error: str | None = None
     title: str = ""  # 실제로 쓴 폴더 제목(카카오페이지에 등록된 작품 제목)
     ticket_used: int | None = None  # 기다무로 열어서 받은 회차 번호
+    finished: bool = False  # 작품이 완결로 표시돼 있음(작품 정보의 on_issue == "N")
+
+    @property
+    def nothing_left(self) -> bool:
+        """이번 실행 뒤 자동으로 받을 회차가 더 남지 않았다 — 실패/오류가 없고, 받을 수 있던 회차를 다 받았고, 잠긴 회차가 없다
+        (기다무로 연 회차는 잠긴 회차 중 하나였으므로 뺀다). 완결 확인 알림은 이때만 보낸다."""
+        if self.error is not None or self.failed is not None:
+            return False
+        remaining_locked = len(self.plan.locked) - (1 if self.ticket_used is not None else 0)
+        return remaining_locked <= 0 and len(self.downloaded) - (1 if self.ticket_used is not None else 0) >= len(self.plan.to_download)
 
 
 @dataclass
@@ -600,7 +610,7 @@ async def run_download(
         )
     if downloaded:
         await write_series_metadata(series_item, series_id, folder, on_progress, await client.fetch_about(series_id))
-    return RunResult(downloaded, items, failed, plan, title=folder_title, ticket_used=ticket_used)
+    return RunResult(downloaded, items, failed, plan, title=folder_title, ticket_used=ticket_used, finished=series_item.get("on_issue") == "N")
 
 
 async def _download_first_locked_with_waitfree(client, series_id, episode, folder, downloaded, items, on_progress) -> tuple[int | None, int | None]:

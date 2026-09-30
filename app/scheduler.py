@@ -238,16 +238,23 @@ async def _download_kakao_subscriptions(settings, failures: list[dict]) -> None:
                     failures.append({"title_name": title, "episode_no": None, "subtitle": str(e)})
                     continue
                 for number, subtitle in result.downloaded_items:
-                    repository.add_episode_history(str(webtoon["title_id"]), result.title, number, subtitle, "success")
+                    repository.add_episode_history(str(webtoon["title_id"]), result.title, number, subtitle, "success", platform="kakao")
                 if result.error:
                     job_status.log_line("download", f"[{title}] {result.error}")
                 elif result.failed is not None:
-                    repository.add_episode_history(str(webtoon["title_id"]), result.title, result.failed, "", "failed", "이미지 받기 실패")
+                    repository.add_episode_history(
+                        str(webtoon["title_id"]), result.title, result.failed, "", "failed", "이미지 받기 실패", platform="kakao"
+                    )
                     failures.append({"title_name": result.title, "episode_no": result.failed, "subtitle": "이미지 받기 실패"})
                 elif not result.downloaded and result.plan.marker is not None and result.plan.marker.warning:
                     job_status.log_line("download", f"[{title}] ⚠ 폴더의 파일(표식)이 사이트 회차와 맞지 않아 번호대로 이어받았습니다")
+                # 완결이고 받을 회차를 다 받았으면 완결 확인 대상으로 기록한다(완결인데 받을 게 남았으면 아직 알리지 않는다).
+                # 연재 중으로 돌아왔으면 기록을 되돌려 다음 완결 때 다시 알린다.
+                if result.error is None:
+                    repository.set_kakao_finished(webtoon["title_id"], result.finished and result.nothing_left)
                 await asyncio.sleep(settings.delay_seconds)
             kakao_page_download.persist_refreshed_cookies(client)
+        await _notify_kakao_newly_finished()
 
 
 async def _run_download_job_impl(platforms: set[str]) -> None:
@@ -534,13 +541,28 @@ def _build_report_message(
     여러 개 나열될 때 임베드가 줄줄이 생겨서 메시지가 너무 길어지는 문제가 있었다."""
     today_label = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
 
-    success_titles = sorted({r["title_name"] for r in success_rows})
+    # 카카오페이지 이력이 섞여 있으면 어느 플랫폼인지 앞에 붙이고, 카카오는 받은 회차 수/범위와(뷰어에 없으면) 카카오페이지 링크를 보여준다.
+    # 네이버만 있을 땐 예전 형식 그대로다. reader_urls의 카카오 키는 "kakao:제목"이다.
+    tag_platforms = any(r.get("platform") == "kakao" for r in success_rows + failed_rows)
+    success_groups: dict[tuple[str, str], list[dict]] = {}
+    for r in success_rows:
+        success_groups.setdefault((r.get("platform") or "naver", r["title_name"]), []).append(r)
+    success_titles = sorted(success_groups, key=lambda key: (key[0] != "naver", key[1]))
     success_lines = []
-    for title in success_titles:
-        url = reader_urls.get(title)
-        success_lines.append(f"• {title} [바로가기](<{url}>)" if url else f"• {title}")
+    for platform, title in success_titles:
+        prefix = f"[{'카카오' if platform == 'kakao' else '네이버'}] " if tag_platforms else ""
+        if platform == "kakao":
+            group = success_groups[(platform, title)]
+            numbers = sorted({r["episode_no"] for r in group})
+            span = f"{numbers[0]}번" if len(numbers) == 1 else f"{numbers[0]}~{numbers[-1]}번"
+            url = reader_urls.get(f"kakao:{title}") or f"https://page.kakao.com/content/{group[0]['title_id']}"
+            success_lines.append(f"• {prefix}{title} · {len(numbers)}개 회차({span}) [바로가기](<{url}>)")
+        else:
+            url = reader_urls.get(title)
+            success_lines.append(f"• {prefix}{title} [바로가기](<{url}>)" if url else f"• {prefix}{title}")
 
-    failed_titles = sorted({r["title_name"] for r in failed_rows})
+    failed_keys = sorted({(r.get("platform") or "naver", r["title_name"]) for r in failed_rows}, key=lambda key: (key[0] != "naver", key[1]))
+    failed_titles = [f"[{'카카오' if p == 'kakao' else '네이버'}] {t}" if tag_platforms else t for p, t in failed_keys]
 
     parts = [
         f"📅 웹툰 다운로드 리포트 ({today_label})",
@@ -709,7 +731,7 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
                 return
 
             if webtoon_server_url:
-                for title in sorted({r["title_name"] for r in success_rows}):
+                for title in sorted({r["title_name"] for r in success_rows if r.get("platform") != "kakao"}):
                     # 웹툰서버는 실제 디스크 폴더명 기준으로 매칭한다. 그런데 폴더를
                     # 만들 때는 ':' 같은 금지문자를 전각 문자로 치환해서 저장하는데
                     # (예: "제목 : 부제" → "제목 ： 부제"), 여기선 원본 제목(치환 전)을
@@ -721,6 +743,13 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
                     )
                     if url:
                         reader_urls[title] = url
+                # 카카오는 폴더 이름 규칙(금지문자 치환)이 달라서 그 규칙으로 따로 조회한다
+                for title in sorted({r["title_name"] for r in success_rows if r.get("platform") == "kakao"}):
+                    url = await webtoon_server_client.fetch_reader_url(
+                        session, webtoon_server_url, remove_forbidden_str_kakao(title), settings.request_timeout_seconds
+                    )
+                    if url:
+                        reader_urls[f"kakao:{title}"] = url
 
             message = _build_report_message(
                 success_rows, failed_rows, reader_urls, unregistered_new_episodes, app_public_base_url, kakao_new_episodes
@@ -739,8 +768,24 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
         job_status.finish("report", success=False)
 
 
+async def _notify_kakao_newly_finished() -> None:
+    """완결이고 받을 회차를 다 받았는데 아직 알리지 않은 구독 중인 카카오 작품에 완결 확인 메시지(구독해제/알람 제외 버튼)를 보낸다.
+    봇이 꺼져 있거나 전송이 실패하면 알림 기록을 남기지 않아 다음 실행 때 다시 시도한다."""
+    sent = 0
+    for wt in repository.list_kakao_finish_pending():
+        try:
+            if await discord_bot.send_completion_prompt(str(wt["title_id"]), wt["title"], platform="kakao"):
+                repository.set_kakao_finish_notified(wt["title_id"])
+                sent += 1
+        except Exception as e:
+            log.error("카카오 완결 알림 전송 중 예외 (series_id=%s): %s", wt["title_id"], e)
+    if sent:
+        job_status.log_line("download", f"카카오페이지 완결 확인 알림 {sent}건 전송")
+
+
 async def _notify_newly_finished() -> None:
     """완결 감지됐는데 아직 디스코드로 알리지 않은 웹툰에 실시간 봇으로 확인 메시지를 보낸다."""
+    await _notify_kakao_newly_finished()  # 봇이 꺼져 있어서 못 보낸 카카오 알림도 이때 다시 시도한다
     to_notify = [
         wt
         for wt in repository.list_by_status(repository.STATUS_ACTIVE)

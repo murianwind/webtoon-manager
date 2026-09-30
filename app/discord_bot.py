@@ -20,6 +20,8 @@ log = logging.getLogger(__name__)
 
 _CUSTOM_ID_UNSUBSCRIBE_PREFIX = "webtoon_unsubscribe:"
 _CUSTOM_ID_ACKNOWLEDGE_PREFIX = "webtoon_ack:"
+_CUSTOM_ID_KAKAO_UNSUBSCRIBE_PREFIX = "kakao_unsubscribe:"
+_CUSTOM_ID_KAKAO_ACKNOWLEDGE_PREFIX = "kakao_ack:"
 
 _client: "CompletionBotClient | None" = None
 _run_task: asyncio.Task | None = None
@@ -46,6 +48,10 @@ class CompletionBotClient(discord.Client):
             elif custom_id.startswith(_CUSTOM_ID_ACKNOWLEDGE_PREFIX):
                 title_id = custom_id[len(_CUSTOM_ID_ACKNOWLEDGE_PREFIX):]
                 await self._handle_acknowledge(interaction, title_id)
+            elif custom_id.startswith(_CUSTOM_ID_KAKAO_UNSUBSCRIBE_PREFIX):
+                await self._handle_kakao(interaction, int(custom_id[len(_CUSTOM_ID_KAKAO_UNSUBSCRIBE_PREFIX):]), unsubscribe=True)
+            elif custom_id.startswith(_CUSTOM_ID_KAKAO_ACKNOWLEDGE_PREFIX):
+                await self._handle_kakao(interaction, int(custom_id[len(_CUSTOM_ID_KAKAO_ACKNOWLEDGE_PREFIX):]), unsubscribe=False)
         except Exception as e:
             # 여기서 안 잡으면 사용자는 "상호작용 실패"만 보고 원인을 알 방법이 없다.
             log.error("완결 확인 버튼 처리 중 예외 (custom_id=%s): %s", custom_id, e)
@@ -75,27 +81,36 @@ class CompletionBotClient(discord.Client):
             content=f"🔕 **{webtoon.title}** 완결 알림을 껐습니다 (구독은 유지됩니다).", view=None
         )
 
-    async def send_completion_prompt(self, title_id: str, title: str) -> None:
+    async def _handle_kakao(self, interaction: discord.Interaction, series_id: int, *, unsubscribe: bool) -> None:
+        webtoon = await asyncio.to_thread(repository.get_kakao_webtoon, series_id)
+        if webtoon is None:
+            await interaction.response.send_message("이미 처리된 웹툰입니다.", ephemeral=True)
+            return
+        if unsubscribe:
+            await asyncio.to_thread(repository.set_kakao_webtoon_status, series_id, repository.STATUS_UNSUBSCRIBED)
+            content = f"✅ **[카카오] {webtoon['title']}** 구독해제했습니다."
+        else:
+            await asyncio.to_thread(repository.acknowledge_kakao_finish, series_id)
+            content = f"🔕 **[카카오] {webtoon['title']}** 완결 알림을 껐습니다 (구독은 유지됩니다)."
+        await interaction.response.edit_message(content=content, view=None)
+
+    async def send_completion_prompt(self, title_id: str, title: str, platform: str = "naver") -> None:
         channel = self.get_channel(self.notify_channel_id)
         if channel is None:
             channel = await self.fetch_channel(self.notify_channel_id)
 
+        kakao = platform == "kakao"
+        unsubscribe_prefix = _CUSTOM_ID_KAKAO_UNSUBSCRIBE_PREFIX if kakao else _CUSTOM_ID_UNSUBSCRIBE_PREFIX
+        ack_prefix = _CUSTOM_ID_KAKAO_ACKNOWLEDGE_PREFIX if kakao else _CUSTOM_ID_ACKNOWLEDGE_PREFIX
         view = discord.ui.View(timeout=None)
         view.add_item(
-            discord.ui.Button(
-                label="구독해제",
-                style=discord.ButtonStyle.danger,
-                custom_id=f"{_CUSTOM_ID_UNSUBSCRIBE_PREFIX}{title_id}",
-            )
+            discord.ui.Button(label="구독해제", style=discord.ButtonStyle.danger, custom_id=f"{unsubscribe_prefix}{title_id}")
         )
         view.add_item(
-            discord.ui.Button(
-                label="알람 제외",
-                style=discord.ButtonStyle.secondary,
-                custom_id=f"{_CUSTOM_ID_ACKNOWLEDGE_PREFIX}{title_id}",
-            )
+            discord.ui.Button(label="알람 제외", style=discord.ButtonStyle.secondary, custom_id=f"{ack_prefix}{title_id}")
         )
-        await channel.send(content=f"📗 **{title}** 완결되었습니다. 구독을 해제할까요?", view=view)
+        label = "[카카오] " if kakao else ""
+        await channel.send(content=f"📗 **{label}{title}** 완결되었습니다. 구독을 해제할까요?", view=view)
 
     async def send_plain_message(self, content: str) -> None:
         channel = self.get_channel(self.notify_channel_id)
@@ -153,14 +168,17 @@ async def restart_bot() -> None:
     await start_bot()
 
 
-async def send_completion_prompt(title_id: str, title: str) -> None:
+async def send_completion_prompt(title_id: str, title: str, platform: str = "naver") -> bool:
+    """실제로 보냈으면 True, 봇이 준비 안 됐거나 전송이 실패했으면 False(호출부가 "알렸다"고 기록하지 않도록)."""
     if not is_ready():
         log.warning("완결 확인 봇이 아직 준비되지 않아 알림을 보내지 못했습니다 (titleId=%s)", title_id)
-        return
+        return False
     try:
-        await _client.send_completion_prompt(title_id, title)
+        await _client.send_completion_prompt(title_id, title, platform)
+        return True
     except Exception as e:
         log.error("완결 알림 전송 실패 (titleId=%s): %s", title_id, e)
+        return False
 
 
 async def send_test_message() -> tuple[bool, str]:
