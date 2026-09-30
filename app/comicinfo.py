@@ -83,13 +83,25 @@ def kakao_age_rating(age_grade: int | None) -> str:
     return "전체이용가"
 
 
-def build_kakao_comicinfo_xml(series_item: dict, series_id: int) -> str:
-    """카카오페이지 작품 정보(회차 목록 응답의 series_item)로 info.xml을 만든다. 작가는 역할 구분 없이 이름만
-    나와서(예: "연상호,최규석") 전부 Writer에 적는다."""
-    authors = ", ".join(a.strip() for a in (series_item.get("authors") or "").split(",") if a.strip())
+def build_kakao_comicinfo_xml(series_item: dict, series_id: int, about: dict | None = None) -> str:
+    """카카오페이지 작품 정보로 info.xml을 만든다. 작품 "정보" 탭(about)을 받았으면 글은 Writer, 그림은 CoverArtist,
+    원작은 Notes("원작: ...")에 나눠 적고 테마 키워드는 Tags에 적는다. 못 받았으면 목록 응답의 작가 이름 전부를
+    Writer에 적는다(역할을 알 수 없어서)."""
+    groups: dict[str, list[str]] = {"writer": [], "illustrator": [], "original_author": []}
+    tags: list[str] = []
+    if about:
+        for author in about.get("author_list") or []:
+            names = groups.get(author.get("role"))
+            if names is not None and author.get("name") and author["name"] not in names:
+                names.append(author["name"])
+        tags = [t["title"] for t in about.get("theme_keyword_list") or [] if t.get("title")]
+    writers, illustrators, originals = groups["writer"], groups["illustrator"], groups["original_author"]
+    if not (writers or illustrators or originals):
+        writers = [a.strip() for a in (series_item.get("authors") or "").split(",") if a.strip()]
     return render_comicinfo(
-        title=series_item.get("title", ""), summary=series_item.get("description") or "", writer=authors,
-        cover_artist="", notes="", genre=series_item.get("sub_category") or "", tags="", publisher="카카오페이지",
+        title=series_item.get("title", ""), summary=series_item.get("description") or "", writer=", ".join(writers),
+        cover_artist=", ".join(illustrators), notes=f"원작: {', '.join(originals)}" if originals else "",
+        genre=series_item.get("sub_category") or "", tags=",".join(tags), publisher="카카오페이지",
         web=f"https://page.kakao.com/content/{series_id}", age_rating=kakao_age_rating(series_item.get("age_grade")),
         series_status="완결" if series_item.get("on_issue") == "N" else "연재",
     )

@@ -27,7 +27,7 @@ from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app import archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, kakao_api, kakao_catalog, kakao_page_auth, kakao_page_download, naver_api, repository, schedule_config, tracker, webtoon_server_client
+from app import download_roots, archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, kakao_api, kakao_catalog, kakao_page_auth, kakao_page_download, naver_api, repository, schedule_config, tracker, webtoon_server_client
 from app import rclone_updater
 from app.config import Settings, get_settings
 from app.constants import NAVER_DETAIL_URL_TEMPLATES
@@ -79,7 +79,7 @@ async def _download_new_episodes_for_one(
     cookies = cookies or {}
 
     safe_title = remove_forbidden_str(info.title_name)
-    webtoon_dir = Path(settings.download_root) / safe_title
+    webtoon_dir = Path(download_roots.naver_root(settings)) / safe_title
 
     all_episodes = await naver_api.fetch_all_episodes(
         session, title_id, cookies, settings.request_timeout_seconds
@@ -136,7 +136,7 @@ async def _download_new_episodes_for_one(
                 webtoon_type=info.webtoon_type,
                 episode=episode,
                 cookies=cookies,
-                download_root=settings.download_root,
+                download_root=download_roots.naver_root(settings),
                 folder_zero_fill=settings.folder_zero_fill,
                 image_zero_fill=settings.image_zero_fill,
                 max_concurrent_downloads=settings.max_concurrent_downloads,
@@ -210,7 +210,7 @@ async def _download_kakao_subscriptions(settings, failures: list[dict]) -> None:
         return
 
     async with kakao_page_download.download_lock:
-        root = kakao_page_download.effective_download_root(settings.download_root)
+        root = download_roots.kakao_root(settings)
         job_status.log_line("download", f"카카오페이지 다운로드 시작 — 구독 중인 웹툰 {len(subscribed)}개 (저장 폴더: {root})")
         async with aiohttp.ClientSession(cookie_jar=aiohttp.DummyCookieJar()) as session:
             client = kakao_page_download.client_from_saved_cookies(session, settings.request_timeout_seconds)
@@ -614,13 +614,13 @@ async def run_archive_job() -> None:
         failures: list[tuple[str, str, str]] = []
         try:
             moved = await asyncio.to_thread(
-                archiver.run_periodic_archive, settings.archive_root, settings.download_root, settings.rclone_config_path,
+                archiver.run_periodic_archive, settings.archive_root, download_roots.naver_root(settings), settings.rclone_config_path,
                 lambda msg: job_status.log_line("archive", msg), conflicts, failures,
             )
             job_status.log_line("archive", f"지정 웹툰 {moved}개 파일 이동 완료")
 
             pending_moved = await asyncio.to_thread(
-                archiver.process_pending_finish_archives, settings.archive_root, settings.download_root, settings.rclone_config_path,
+                archiver.process_pending_finish_archives, settings.archive_root, download_roots.naver_root(settings), settings.rclone_config_path,
                 lambda msg: job_status.log_line("archive", msg), conflicts, failures,
             )
             job_status.log_line("archive", f"완결 구독해제 대기열 {pending_moved}개 파일 이동 완료")

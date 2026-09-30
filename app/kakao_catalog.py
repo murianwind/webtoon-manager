@@ -9,6 +9,8 @@
   그리고 "새로고침" 버튼을 눌렀을 때. 화면이 캐시가 오래된 걸 발견하면(스케줄이 못 돌았을 때) 그때도 백그라운드로 채운다.
 - 캐시는 DB에도 저장해서 재시작 직후에도 바로 보여주고(새 목록이 채워질 때까지), 저장 형식이 바뀐 버전의 캐시는 버린다.
 - 일부 요일 조회가 실패한 불완전한 결과로 멀쩡한 예전 캐시를 덮어쓰지 않는다(캐시가 아예 없을 때만 임시로 씀).
+- 예전 카카오웹툰 시절의 기록(전체목록/구독해제/제외됨의 옛 주소)은 목록을 처음 온전히 받은 직후 딱 한 번
+  카카오페이지 작품으로 자동 변환한다(migrate_legacy_once).
 """
 
 from __future__ import annotations
@@ -22,10 +24,12 @@ import aiohttp
 
 from app import kakao_api, repository
 from app.config import get_settings
+from app.file_utils import title_key
 
 log = logging.getLogger(__name__)
 
 SETTING_KEY = "kakao_catalog_snapshot"
+LEGACY_DONE_KEY = "kakao_legacy_migrated"
 FORMAT_VERSION = 1
 REFRESH_INTERVAL_MINUTES = 180
 _STALE_AFTER_SECONDS = REFRESH_INTERVAL_MINUTES * 60 + 300  # 스케줄이 한 번 못 돌았을 때를 위한 여유
@@ -89,7 +93,35 @@ async def refresh() -> bool:
             _persist(items, fetched_at)
         except Exception as e:
             log.warning("카카오 목록 캐시 저장 실패(메모리에는 반영됨): %s", e)
+        if all_ok:  # 온전한 목록일 때만 옛 기록을 변환한다(일부만 받은 목록으로 "못 찾음"을 잘못 판단하지 않도록)
+            try:
+                await migrate_legacy_once(items)
+            except Exception as e:
+                log.warning("예전 카카오 기록 자동 변환 중 예외 — 다음 갱신 때 다시 시도합니다: %s", e)
         return True
+
+
+async def migrate_legacy_once(items: list[dict], *, force: bool = False) -> dict | None:
+    """예전 카카오웹툰 기록을 카카오페이지 작품으로 옮긴다(제목이 정확히 하나만 일치할 때). 지금 연재 중인 작품은 받은 목록에서,
+    완결/휴재 작품은 카카오페이지 검색으로 찾는다. 못 옮긴 "제외됨"은 지우고(연재 중이면 전체목록에 다시 나타난다), 구독해제/구독
+    이력이 있는 기록은 남긴다. 한 번 끝나면 다시 하지 않는다(force=True는 테스트/재시도용). 이미 끝났으면 None."""
+    if not force and repository.get_setting(LEGACY_DONE_KEY) == "1":
+        return None
+    legacy_titles = await asyncio.to_thread(repository.list_legacy_kakao_titles)
+    result: dict = {"migrated": 0, "unmatched": [], "deleted": 0}
+    if legacy_titles:
+        in_catalog = {title_key(item["title_name"]) for item in items}
+        not_in_catalog = sorted(t for t in legacy_titles if title_key(t) not in in_catalog)
+        async with aiohttp.ClientSession() as session:
+            searched, candidates = await kakao_api.search_series_by_titles(session, not_in_catalog, get_settings().request_timeout_seconds)
+        known_ids = {item["title_id"] for item in items}
+        all_items = items + [item for item in searched if item["title_id"] not in known_ids]
+        result = await asyncio.to_thread(repository.migrate_legacy_kakao_webtoons, all_items, candidates)
+        result["deleted"] = await asyncio.to_thread(repository.delete_unmatched_legacy_excluded)
+        result["unmatched"] = [u for u in result["unmatched"] if u["status"] != repository.STATUS_EXCLUDED]
+        log.info("예전 카카오 기록 자동 변환: %s개 옮김, 못 옮긴 제외됨 %s개 삭제, 이력 있는 미변환 %s개 남김", result["migrated"], result["deleted"], len(result["unmatched"]))
+    await asyncio.to_thread(repository.set_setting, LEGACY_DONE_KEY, "1")
+    return result
 
 
 def start_refresh() -> bool:

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import aiohttp
 
-from app import comicinfo, discord_notify, job_status, kakao_api, naver_api, repository
+from app import download_roots, comicinfo, discord_notify, job_status, kakao_api, naver_api, repository
 from app.file_utils import remove_forbidden_str
 from app.config import Settings
 from app.discord_notify import send_webhook_notification
@@ -281,7 +281,7 @@ async def sync_metadata_for_all(settings) -> int:
     멈추지 않고 다음 웹툰으로 넘어가야 하므로, 다른 스캔 함수들과 동일하게 웹툰
     단위로 예외를 격리한다.
     """
-    targets = [wt for wt in repository.list_all() if (Path(settings.download_root) / remove_forbidden_str(wt.title)).is_dir()]
+    targets = [wt for wt in repository.list_all() if (Path(download_roots.naver_root(settings)) / remove_forbidden_str(wt.title)).is_dir()]
     if not targets:
         return 0
 
@@ -300,7 +300,7 @@ async def sync_metadata_for_all(settings) -> int:
                     job_status.log_line("metadata_sync", f"[{wt.title}] 네이버 조회 실패로 건너뜀")
                     continue
 
-                webtoon_dir = Path(settings.download_root) / remove_forbidden_str(wt.title)
+                webtoon_dir = Path(download_roots.naver_root(settings)) / remove_forbidden_str(wt.title)
                 repository.update_genres_and_tags(wt.title_id, info.genres_ko, info.tags)
 
                 comicinfo.write_comicinfo_file(webtoon_dir, info)

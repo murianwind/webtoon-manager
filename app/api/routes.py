@@ -33,6 +33,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, field_validator
 
 from app import (
+    download_roots,
     discord_bot,
     discord_config,
     discord_notify,
@@ -51,7 +52,7 @@ from app import kakao_page_auth
 from app import kakao_page_download
 from app import webtoon_server_client
 from app import archiver
-from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao, title_key
+from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
 from app import rclone_client
 from app import rclone_updater
 from app.config import get_settings
@@ -497,37 +498,6 @@ async def list_kakao_webtoons(status: str | None = None):
     return result
 
 
-@router.post("/kakao-webtoons/migrate-legacy")
-async def migrate_legacy_kakao_webtoons():
-    """카카오웹툰이 카카오페이지로 통합되면서 작품 번호 체계가 바뀌어서, 예전에 구독/제외/
-    구독해제해둔 기록이 새 목록과 안 맞는다 — 그 기록을 제목이 정확히 하나만 일치하는 카카오
-    페이지 작품으로 옮긴다(상태와 구독 이력은 그대로). 먼저 요일별 목록(지금 연재 중인 작품)에서
-    찾고, 거기 없는 제목(완결/장기 휴재 등)만 카카오페이지 검색으로 찾는다. 못 옮긴 것(제목이
-    달라졌거나 못 찾았거나 같은 제목이 여러 개인 것)은 건드리지 않고 목록으로 돌려준다. 눌렀을
-    때만 실행되는 수동 작업이라, 여러 번 눌러도 이미 옮긴 건 다시 안 건드리고 남은 것만 다시
-    시도한다."""
-    settings = get_settings()
-    async with aiohttp.ClientSession() as session:
-        items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds, use_cache=False)
-        if not items:
-            raise HTTPException(status_code=502, detail="카카오페이지 목록을 가져오지 못해 이전하지 못했습니다. 잠시 뒤 다시 시도해주세요.")
-        in_catalog = {title_key(item["title_name"]) for item in items}
-        legacy_titles = await asyncio.to_thread(repository.list_legacy_kakao_titles)
-        not_in_catalog = sorted(t for t in legacy_titles if title_key(t) not in in_catalog)
-        searched, candidates = await kakao_api.search_series_by_titles(session, not_in_catalog, settings.request_timeout_seconds)
-
-    known_ids = {item["title_id"] for item in items}
-    items = items + [item for item in searched if item["title_id"] not in known_ids]
-    result = await asyncio.to_thread(repository.migrate_legacy_kakao_webtoons, items, candidates)
-    # 못 옮긴 "제외됨" 기록은 지운다 — 지금도 연재 중인 작품이면 전체목록에 다시 나타나고, 완결/휴재라 목록에 없는
-    # 작품의 제외 기록은 있어도 쓸 데가 없다. 구독해제/구독중이던 기록은 이력이라 남기고 이유와 후보를 보여준다.
-    deleted = await asyncio.to_thread(repository.delete_unmatched_legacy_excluded)
-    result["deleted"] = deleted
-    result["unmatched"] = [u for u in result["unmatched"] if u["status"] != repository.STATUS_EXCLUDED]
-    kakao_catalog.start_refresh()  # 이전이 끝났으니 목록 캐시(배지/작가)도 최신으로 다시 채운다
-    return result
-
-
 # ── 카카오페이지 로그인 쿠키 / 다운로드 ─────────────────────────────────
 
 class KakaoPageLoginIn(BaseModel):
@@ -587,46 +557,60 @@ async def check_kakao_page_login():
 
 # ── 카카오페이지 다운로드 폴더 / 자동 다운로드 스위치 ──────────────────
 
-class KakaoDownloadRootIn(BaseModel):
-    path: str
+class DownloadRootsIn(BaseModel):
+    naver: str = ""
+    kakao: str = ""
 
 
-def _kakao_download_root_state() -> dict:
-    default_root = get_settings().download_root
+def _download_roots_state() -> dict:
+    """설정 화면용: 네이버/카카오페이지 각각 (설정값, 실제로 쓰는 폴더). 카카오 폴더를 비워 두면 네이버 폴더를 쓴다."""
+    settings = get_settings()
     return {
-        "path": repository.get_setting(kakao_page_download.DOWNLOAD_ROOT_SETTING_KEY) or "",
-        "effective": kakao_page_download.effective_download_root(default_root),
-        "default": default_root,
+        "naver": {"path": repository.get_setting(download_roots.NAVER_ROOT_SETTING_KEY) or "", "effective": download_roots.naver_root(settings), "default": settings.download_root},
+        "kakao": {
+            "path": repository.get_setting(kakao_page_download.DOWNLOAD_ROOT_SETTING_KEY) or "", "effective": download_roots.kakao_root(settings),
+            "default": download_roots.naver_root(settings),
+        },
     }
 
 
-@router.get("/settings/kakao-download-root")
-async def get_kakao_download_root():
-    return await asyncio.to_thread(_kakao_download_root_state)
+def _validate_download_folder(raw_path: str) -> str:
+    """비어 있으면 "" (기본 폴더로 되돌림). 아니면 이미 있는(컨테이너에 마운트된) 절대 경로의 쓸 수 있는 폴더만 받는다 — 없는
+    폴더를 자동으로 만들면 마운트가 안 된 경로일 때 컨테이너 안에만 저장돼서, 컨테이너를 다시 만들면 받은 파일이 사라지기 때문이다."""
+    path = raw_path.strip()
+    if not path:
+        return ""
+    folder = Path(path)
+    if not folder.is_absolute():
+        raise HTTPException(status_code=400, detail="절대 경로로 입력해주세요(예: /webtoon_download_kakao).")
+    if not folder.is_dir():
+        raise HTTPException(
+            status_code=400,
+            detail="그 폴더가 없습니다. 컨테이너에 마운트한 경로가 맞는지 확인해주세요(마운트 안 된 경로를 만들면 컨테이너 안에만 저장돼서 자동으로 만들지 않습니다).",
+        )
+    try:
+        with tempfile.NamedTemporaryFile(dir=folder):
+            pass
+    except OSError:
+        raise HTTPException(status_code=400, detail="그 폴더에 파일을 쓸 수 없습니다. 권한을 확인해주세요.")
+    return path
 
 
-@router.post("/settings/kakao-download-root")
-async def set_kakao_download_root(payload: KakaoDownloadRootIn):
-    """카카오페이지 전용 다운로드 폴더. 비우면 네이버와 같은 기본 다운로드 폴더를 쓴다. 이미 있는(컨테이너에
-    마운트된) 폴더만 받는다 — 없는 폴더를 자동으로 만들면 마운트가 안 된 경로일 때 컨테이너 안에 저장돼서,
-    컨테이너를 다시 만들면 받은 파일이 사라지기 때문이다."""
-    path = payload.path.strip()
-    if path:
-        folder = Path(path)
-        if not folder.is_absolute():
-            raise HTTPException(status_code=400, detail="절대 경로로 입력해주세요(예: /webtoon_download_kakao).")
-        if not folder.is_dir():
-            raise HTTPException(
-                status_code=400,
-                detail="그 폴더가 없습니다. 컨테이너에 마운트한 경로가 맞는지 확인해주세요(마운트 안 된 경로를 만들면 컨테이너 안에만 저장돼서 자동으로 만들지 않습니다).",
-            )
-        try:
-            with tempfile.NamedTemporaryFile(dir=folder):
-                pass
-        except OSError:
-            raise HTTPException(status_code=400, detail="그 폴더에 파일을 쓸 수 없습니다. 권한을 확인해주세요.")
-    await asyncio.to_thread(repository.set_setting, kakao_page_download.DOWNLOAD_ROOT_SETTING_KEY, path or None)
-    return await asyncio.to_thread(_kakao_download_root_state)
+@router.get("/settings/download-roots")
+async def get_download_roots():
+    return await asyncio.to_thread(_download_roots_state)
+
+
+@router.post("/settings/download-roots")
+async def set_download_roots(payload: DownloadRootsIn):
+    """네이버/카카오페이지 다운로드 폴더. 폴더를 바꿔도 이미 받은 파일을 옮기지는 않는다(옮기는 건 사용자가 직접). 웹툰 유형
+    아카이빙 대상은 실행할 때 새 폴더를 보고, 폴더 유형 대상/일괄 이동은 "다운로드 폴더"(네이버)와 "카카오페이지 다운로드
+    폴더"를 각각 고를 수 있다."""
+    naver = _validate_download_folder(payload.naver)
+    kakao = _validate_download_folder(payload.kakao)
+    await asyncio.to_thread(repository.set_setting, download_roots.NAVER_ROOT_SETTING_KEY, naver or None)
+    await asyncio.to_thread(repository.set_setting, kakao_page_download.DOWNLOAD_ROOT_SETTING_KEY, kakao or None)
+    return await asyncio.to_thread(_download_roots_state)
 
 
 # ── 카카오페이지 수동 다운로드 ────────────────────────────────────────────
@@ -664,12 +648,20 @@ async def kakao_manual_search(query: str):
     ]
 
 
+def _can_open_with_waitfree(episode, waitfree_ready: bool) -> bool:
+    return waitfree_ready and not episode.accessible and not episode.waitfree_blocked
+
+
+def _kakao_episode_state(episode, waitfree_ready: bool) -> str:
+    return "waitfree" if _can_open_with_waitfree(episode, waitfree_ready) else kakao_page_download.episode_state(episode)
+
+
 @router.get("/kakao-manual/analyze")
 async def kakao_manual_analyze(series_id: int):
     """작품의 회차를 폴더 규칙(폴더 없음 / 누락 회차 비교 / 파일 1개면 그 이후부터)으로 분석해서 표로 보여줄 결과를
     돌려준다. 아무것도 받지 않는다."""
     settings = get_settings()
-    root = await asyncio.to_thread(kakao_page_download.effective_download_root, settings.download_root)
+    root = await asyncio.to_thread(download_roots.kakao_root, settings)
     async with _kakao_page_session() as session:
         client = kakao_page_download.client_from_saved_cookies(session, settings.request_timeout_seconds)
         cookie_saved = client is not None
@@ -681,10 +673,14 @@ async def kakao_manual_analyze(series_id: int):
             status = kakao_page_auth.cookie_status(kakao_page_auth.load_cookies())
             await kakao_page_auth.notify_if_needed(session, settings, logged_in, status["days_left"])
         listing = await client.list_episodes(series_id)
+        # 대여권/소장권/기다무 현황(작품 화면의 "대여권 N장 | 소장권 N장 | 기다무"와 같은 값) — 로그인돼 있을 때만 의미가 있다
+        tickets = await client.ticket_info(series_id) if cookie_saved and logged_in is not False else None
         kakao_page_download.persist_refreshed_cookies(client)
     if listing is None:
         raise HTTPException(status_code=502, detail="카카오페이지에서 회차 목록을 가져오지 못했습니다. 작품 번호를 확인하거나 잠시 뒤 다시 시도해주세요.")
     series_item, episodes = listing
+    waitfree_ready = bool(tickets and tickets.waitfree_ready)
+    tracked = await asyncio.to_thread(repository.get_kakao_webtoon, series_id)
     title = series_item.get("title") or str(series_id)
     folder = kakao_page_download.series_folder(root, title)
     existing = await asyncio.to_thread(kakao_page_download.scan_existing_files, folder)
@@ -699,12 +695,19 @@ async def kakao_manual_analyze(series_id: int):
         "downloaded_count": sum(1 for row in plan.rows if row.downloaded),
         "before_start_count": sum(1 for row in plan.rows if row.before_start),
         "cookie_saved": cookie_saved, "logged_in": logged_in,
+        "thumbnail_url": kakao_api._thumbnail_url(series_item), "authors": series_item.get("authors") or "",
+        "subscription": tracked["status"] if tracked else None,  # 이 프로그램의 구독 상태(active 등, 없으면 None)
+        "tickets": None if tickets is None else {
+            "rental_count": tickets.rental_count, "own_count": tickets.own_count,
+            "waitfree_ready": tickets.waitfree_ready, "waitfree_available_at": tickets.waitfree_available_at,
+        },
         "episodes": [
             {
                 "number": row.episode.number, "subtitle": row.episode.subtitle,
-                "state": kakao_page_download.episode_state(row.episode), "expire": row.episode.rent_expire,
+                # 잠긴 회차라도 기다무를 쓸 수 있으면 "waitfree" — 골라서 받으면 기다무로 열고 받는다(한 장이라 하나만)
+                "state": _kakao_episode_state(row.episode, waitfree_ready), "expire": row.episode.rent_expire,
                 "downloaded": row.downloaded, "before_start": row.before_start,
-                "selectable": row.episode.accessible,  # 이미 받은 회차도 다시 받을 수 있다(수동)
+                "selectable": row.episode.accessible or _can_open_with_waitfree(row.episode, waitfree_ready),  # 이미 받은 회차도 다시 받을 수 있다(수동)
             }
             for row in plan.rows
         ],
@@ -721,7 +724,7 @@ async def _run_kakao_manual_download(series_id: int, numbers: list[int]) -> None
     success = False
     try:
         async with kakao_page_download.download_lock:
-            root = await asyncio.to_thread(kakao_page_download.effective_download_root, settings.download_root)
+            root = await asyncio.to_thread(download_roots.kakao_root, settings)
             async with _kakao_page_session() as session:
                 client = kakao_page_download.client_from_saved_cookies(session, settings.request_timeout_seconds)
                 if client is None:
@@ -746,6 +749,7 @@ async def _run_kakao_manual_download(series_id: int, numbers: list[int]) -> None
         log_line(
             f"[{result.title}] 받음 {len(result.downloaded)}개(그 중 다시 받아 교체 {len(result.replaced)}개) / "
             f"실패 {len(result.failed)}개 / 잠겨서 건너뜀 {len(result.skipped_locked)}개"
+            + (f" / 기다무로 연 회차 {len(result.ticket_used)}개" if result.ticket_used else "")
         )
         success = not result.failed and not result.not_found
     except Exception as e:
@@ -778,6 +782,20 @@ async def _get_or_404_kakao(title_id: int) -> dict:
     return wt
 
 
+async def _kakao_authors_to_register(series_id: int) -> list[str]:
+    settings = get_settings()
+    try:
+        async with _kakao_page_session() as session:
+            client = kakao_page_download.client_from_saved_cookies(session, settings.request_timeout_seconds) or (
+                kakao_page_download.KakaoPageClient(session, {}, settings.request_timeout_seconds)
+            )
+            about = await client.fetch_about(series_id)
+    except Exception as e:
+        log.warning("카카오 작품 정보(series_id=%s) 조회 실패 — 작가 등록을 건너뜁니다: %s", series_id, e)
+        return []
+    return kakao_page_download.authors_to_register(about)
+
+
 @router.post("/kakao-webtoons/{title_id}/subscribe", response_model=KakaoWebtoonOut)
 async def subscribe_kakao_webtoon(title_id: int, payload: KakaoWebtoonEntryIn):
     """"웹툰 뷰어 서버 주소"가 설정돼 있을 때만 의미 있는 동작 — 다운로드를 뜻하는
@@ -791,9 +809,10 @@ async def subscribe_kakao_webtoon(title_id: int, payload: KakaoWebtoonEntryIn):
     await asyncio.to_thread(repository.set_kakao_webtoon_status, title_id, repository.STATUS_ACTIVE)
     await asyncio.to_thread(repository.refresh_kakao_webtoon_author_summary, title_id, payload.author_summary)
     if await asyncio.to_thread(_is_author_auto_register_enabled):
-        # 구독하면 그 작품의 작가를 관심 작가로 자동 등록한다(네이버와 같은 설정). 카카오페이지는 작가 이름만 오고
-        # 역할(작가/원작자)은 안 와서, 원작자를 우선하는 규칙은 아직 적용하지 못하고 이름 전부를 등록한다.
-        for author_name in [n.strip() for n in payload.author_summary.split(",") if n.strip()]:
+        # 구독하면 그 작품의 작가를 관심 작가로 자동 등록한다(네이버와 같은 설정, 같은 규칙): 작품 "정보" 탭의 글/그림/원작
+        # 구분으로 원작자가 있으면 원작자를, 없으면 글 작가를 등록한다. 정보 탭을 못 받으면 등록하지 않는다(그림 작가 등을
+        # 잘못 등록하지 않도록 이름 전부를 등록하는 대신 건너뛴다).
+        for author_name in await _kakao_authors_to_register(title_id):
             await asyncio.to_thread(repository.upsert_watched_author, author_name, author_name, True, "kakao")
     return KakaoWebtoonOut(**await asyncio.to_thread(repository.get_kakao_webtoon, title_id))
 
@@ -2168,7 +2187,7 @@ async def preview_archive_filename(payload: PreviewFilenameIn):
     if payload.source_type == "folder":
         if not payload.source_path:
             raise HTTPException(status_code=400, detail="미리볼 폴더를 먼저 선택하세요.")
-        local_root = settings.archive_root if payload.source_local_root == "archive" else settings.download_root
+        local_root = download_roots.local_root_path(payload.source_local_root, settings)
         result = await asyncio.to_thread(
             archiver.preview_filename_for_folder,
             local_root, settings.rclone_config_path,
@@ -2180,7 +2199,7 @@ async def preview_archive_filename(payload: PreviewFilenameIn):
     if wt is None:
         raise HTTPException(status_code=404, detail="웹툰을 찾을 수 없습니다.")
     result = await asyncio.to_thread(
-        archiver.preview_filename_for_title, settings.download_root, wt.title, payload.template, wt.writer_names
+        archiver.preview_filename_for_title, download_roots.naver_root(settings), wt.title, payload.template, wt.writer_names
     )
     return PreviewFilenameOut(**result)
 
@@ -2297,10 +2316,10 @@ async def list_archive_folders(path: str = "", local_root: str = "archive"):
     rclone 마운트 같은 특수 폴더는 존재는 하는데 목록조회(iterdir)나 종류 확인(is_dir)
     자체가 예외를 던지는 경우가 실제로 있어서, 항목 하나하나 개별 예외 처리를 한다 —
     문제있는 항목 하나 때문에 폴더 찾아보기 전체가 500으로 죽으면 안 되기 때문."""
-    if local_root not in ("archive", "download"):
-        raise HTTPException(status_code=400, detail="local_root는 archive 또는 download여야 합니다.")
+    if local_root not in download_roots.LOCAL_ROOT_NAMES:
+        raise HTTPException(status_code=400, detail="local_root는 archive, download, kakao_download 중 하나여야 합니다.")
     settings = get_settings()
-    root_dir = settings.archive_root if local_root == "archive" else settings.download_root
+    root_dir = download_roots.local_root_path(local_root, settings)
     if not root_dir:
         detail = "로컬 아카이빙 경로(ARCHIVE_ROOT)" if local_root == "archive" else "다운로드 경로(DOWNLOAD_ROOT)"
         raise HTTPException(status_code=400, detail=f"{detail}가 설정되어 있지 않습니다.")
@@ -2341,7 +2360,7 @@ class CreateFolderIn(BaseModel):
     @field_validator("root")
     @classmethod
     def root_must_be_known(cls, v: str) -> str:
-        if v not in ("archive", "download"):
+        if v not in download_roots.LOCAL_ROOT_NAMES:
             raise ValueError("root는 archive 또는 download여야 합니다.")
         return v
 
@@ -2349,7 +2368,7 @@ class CreateFolderIn(BaseModel):
 @router.post("/archive/folders")
 async def create_archive_folder(payload: CreateFolderIn):
     settings = get_settings()
-    root_dir = settings.archive_root if payload.root == "archive" else settings.download_root
+    root_dir = settings.archive_root if payload.root == "archive" else download_roots.naver_root(settings)
     if not root_dir:
         detail = "로컬 아카이빙 경로(ARCHIVE_ROOT)" if payload.root == "archive" else "다운로드 경로(DOWNLOAD_ROOT)"
         raise HTTPException(status_code=400, detail=f"{detail}가 설정되어 있지 않습니다.")
@@ -2381,20 +2400,20 @@ async def run_archive_now(payload: ArchiveRunIn):
         try:
             if payload.title_ids:
                 moved = await asyncio.to_thread(
-                    archiver.manual_archive_now, settings.archive_root, settings.download_root, payload.title_ids, settings.rclone_config_path,
+                    archiver.manual_archive_now, settings.archive_root, download_roots.naver_root(settings), payload.title_ids, settings.rclone_config_path,
                     lambda msg: job_status.log_line("archive", msg), payload.full_move,
                 )
                 job_status.log_line("archive", f"{moved}개 파일 이동 완료")
             else:
                 all_ids = [t.title_id for t in repository.list_archive_targets() if t.enabled]
                 moved = await asyncio.to_thread(
-                    archiver.manual_archive_now, settings.archive_root, settings.download_root, all_ids, settings.rclone_config_path,
+                    archiver.manual_archive_now, settings.archive_root, download_roots.naver_root(settings), all_ids, settings.rclone_config_path,
                     lambda msg: job_status.log_line("archive", msg),
                 )
                 job_status.log_line("archive", f"지정 웹툰 {moved}개 파일 이동 완료")
 
                 pending_moved = await asyncio.to_thread(
-                    archiver.process_pending_finish_archives, settings.archive_root, settings.download_root, settings.rclone_config_path,
+                    archiver.process_pending_finish_archives, settings.archive_root, download_roots.naver_root(settings), settings.rclone_config_path,
                     lambda msg: job_status.log_line("archive", msg),
                 )
                 job_status.log_line("archive", f"완결 구독해제 대기열 {pending_moved}개 파일 이동 완료")
@@ -2465,8 +2484,8 @@ class BulkMoveIn(BaseModel):
     @field_validator("source_local_root", "dest_local_root")
     @classmethod
     def local_root_must_be_known(cls, v: str) -> str:
-        if v not in ("archive", "download"):
-            raise ValueError("source_local_root/dest_local_root는 archive 또는 download여야 합니다.")
+        if v not in download_roots.LOCAL_ROOT_NAMES:
+            raise ValueError("source_local_root/dest_local_root는 archive, download, kakao_download 중 하나여야 합니다.")
         return v
 
 
@@ -2481,8 +2500,8 @@ async def bulk_move(payload: BulkMoveIn):
         settings.rclone_config_path and Path(settings.rclone_config_path).is_file()
     ):
         raise HTTPException(status_code=400, detail="rclone 설정 파일이 등록되어 있지 않습니다.")
-    source_local_root = settings.archive_root if payload.source_local_root == "archive" else settings.download_root
-    dest_local_root = settings.archive_root if payload.dest_local_root == "archive" else settings.download_root
+    source_local_root = download_roots.local_root_path(payload.source_local_root, settings)
+    dest_local_root = download_roots.local_root_path(payload.dest_local_root, settings)
     if payload.source_type == "local" and not source_local_root:
         raise HTTPException(status_code=400, detail="선택한 원본 로컬 경로가 설정되어 있지 않습니다.")
     if payload.dest_type == "local" and not dest_local_root:

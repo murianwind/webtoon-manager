@@ -551,7 +551,7 @@ select {
   flex-wrap: wrap;
 }
 .manual-actions button { font-size: 12px; padding: 6px 10px; }
-#manual-table {
+#manual-table, #kakao-manual-table {
   width: 100%;
   border-collapse: collapse;
   background: var(--card);
@@ -561,13 +561,13 @@ select {
   margin-bottom: 20px;
   font-size: 13px;
 }
-#manual-table th, #manual-table td {
+#manual-table th, #manual-table td, #kakao-manual-table th, #kakao-manual-table td {
   text-align: left;
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
 }
-#manual-table th { background: #fafafa; color: var(--muted); font-weight: 600; }
-#manual-table tr:last-child td { border-bottom: none; }
+#manual-table th, #kakao-manual-table th { background: #fafafa; color: var(--muted); font-weight: 600; }
+#manual-table tr:last-child td, #kakao-manual-table tr:last-child td { border-bottom: none; }
 
 .pagination {
   display: flex;
@@ -936,18 +936,23 @@ select {
 
 /* 목록 카드: 화면 밖 카드는 그리기를 건너뛰어 800여 개를 다뤄도 스크롤/탭 전환이 가볍게 */
 .webtoon-card { content-visibility: auto; contain-intrinsic-size: auto 360px; }
-#migrate-legacy-kakao-unmatched { white-space: pre-wrap; }
 .run-target-select { margin-right: 6px; }
 
 /* 카카오페이지 수동 다운로드 분석 표 */
-.kakao-manual-summary { margin: 6px 0 10px; font-size: 13px; line-height: 1.6; }
+.manual-title-row { display: flex; align-items: center; gap: 12px; margin: 12px 0 6px; }
+.manual-title-row h3 { margin: 0; }
+.kakao-manual-summary { margin: 6px 0 12px; padding: 10px 12px; font-size: 13px; line-height: 1.7; background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
+.kakao-manual-tickets { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); }
+.kakao-manual-tickets b { font-weight: 700; }
 .kakao-manual-summary .warn { color: #b26a00; }
-#kakao-manual-table td:nth-child(2), #kakao-manual-table th:nth-child(2) { width: 64px; text-align: right; }
+#kakao-manual-table td:nth-child(2), #kakao-manual-table th:nth-child(2) { width: 56px; text-align: right; }
+#kakao-manual-table td:first-child, #kakao-manual-table th:first-child { width: 36px; text-align: center; }
 #kakao-manual-table td:nth-child(4), #kakao-manual-table td:nth-child(6) { text-align: center; white-space: nowrap; }
 .kp-badge { display: inline-block; padding: 1px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; color: #fff; }
 .kp-free { background: #28a745; }
 .kp-owned { background: #0d6efd; }
 .kp-locked { background: #6c757d; }
+.kp-waitfree { background: #e08a00; }
 .kp-done { background: #0d6efd; }
 .kp-wait { color: #333; font-weight: 600; }
 .kp-before { color: #999; }

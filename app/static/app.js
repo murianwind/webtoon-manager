@@ -283,21 +283,18 @@ function buildWebtoonCard(w, context) {
   const actions = card.querySelector(".webtoon-card-actions");
   if (context === "naver-list") {
     if (platform === "kakao") {
-      if (webtoonServerConfigured) {
-        // 뷰어 서버가 설정돼 있을 때만 구독 개념이 의미 있다(다운로드가 아니라
-        // "뷰어에서 계속 챙겨보고 싶다"는 표시) — 워크플로 자체는 네이버와 동일.
-        if (w.status === "active") {
-          actions.appendChild(makeButton("구독해제", () => webtoonListAction(w, "unsubscribe", "kakao", context)));
+      // 카카오페이지 "구독"은 다운로드 대상이 된다는 뜻이다 — 네이버와 같은 흐름이고 뷰어 서버 설정과는 무관하다(뷰어를
+      // 설정했으면 구독 중인 카드에 "뷰어에서 보기" 아이콘이 붙을 뿐).
+      if (w.status === "active") {
+        actions.appendChild(makeButton("구독해제", () => webtoonListAction(w, "unsubscribe", "kakao", context)));
+        if (webtoonServerConfigured) {
           const viewerBtn = makeIconButton(READER_ICON_SVG, "뷰어에서 보기", () => openInWebtoonServer(w.title, "kakao"));
           viewerBtn.dataset.viewerCheckTitle = w.title; // 렌더링 뒤에 실제로 뷰어에 있는지 확인해서 없으면 지운다
           viewerBtn.dataset.viewerCheckPlatform = "kakao";
           actions.appendChild(viewerBtn);
-        } else {
-          actions.appendChild(makeButton("구독", () => kakaoSubscribeWithHint(w, context)));
-          actions.appendChild(makeButton("목록제외", () => webtoonListAction(w, "exclude", "kakao", context)));
         }
       } else {
-        // 뷰어 서버 미설정 — 구독 개념 자체가 없고, 그냥 발견/제외만 가능하다.
+        actions.appendChild(makeButton("구독", () => webtoonListAction(w, "subscribe", "kakao", context)));
         actions.appendChild(makeButton("목록제외", () => webtoonListAction(w, "exclude", "kakao", context)));
       }
     } else if (w.status === "active") {
@@ -315,9 +312,7 @@ function buildWebtoonCard(w, context) {
   } else if (platform === "kakao") {
     // "구독해제"/"제외됨" 탭에 들어온 카카오 항목 — 네이버와 동일한 워크플로.
     // 구독은 뷰어 서버가 설정돼 있을 때만 의미가 있으니 그때만 버튼을 보여준다.
-    if (webtoonServerConfigured) {
-      actions.appendChild(makeButton("구독", () => kakaoSubscribeWithHint(w, context)));
-    }
+    actions.appendChild(makeButton("구독", () => webtoonListAction(w, "subscribe", "kakao", context)));
     actions.appendChild(makeButton("목록으로", () => moveToListTab(w.title_id, context, w.ever_subscribed, "kakao")));
   } else {
     actions.appendChild(makeButton("구독", () => subscriptionAction(w.title_id, "subscribe", context)));
@@ -641,17 +636,6 @@ function patchWebtoonListCard(titleId, webtoon, newStatus, everSubscribed, platf
   renderNaverList();
 }
 
-async function kakaoSubscribeWithHint(webtoon, context) {
-  // 카카오 "구독"은 다운로드를 뜻하지 않고, 이 작품이 웹툰 뷰어 서버 라이브러리에
-  // 있다는 표시일 뿐이다 — 실수로 뷰어에 없는 작품을 구독하면(리포트 바로가기가
-  // 조용히 카카오웹툰 링크로 대체되긴 하지만) 헷갈릴 수 있어서, 누르는 시점에
-  // 한 번 안내한다.
-  if (!confirm(`"${webtoon.title}"이(가) 웹툰 뷰어 서버 라이브러리에 실제로 있나요?\n\n구독은 다운로드가 아니라 "뷰어에서 계속 챙겨보고 싶다"는 표시입니다. 뷰어에 없으면 리포트의 바로가기가 카카오웹툰 링크로 대체됩니다.`)) {
-    return;
-  }
-  await webtoonListAction(webtoon, "subscribe", "kakao", context);
-}
-
 document.getElementById("btn-refresh-naver-list").addEventListener("click", () => loadNaverList(true));
 document.getElementById("naver-list-search").addEventListener("input", renderNaverList);
 document.getElementById("naver-list-filter-status").addEventListener("change", () => {
@@ -891,7 +875,23 @@ async function kakaoManualStart(query) {
       </div>
       <div class="webtoon-card-actions"></div>
     `;
-    card.querySelector(".webtoon-card-actions").appendChild(makeButton("이 작품 분석", () => runKakaoManualAnalyze(m.title_id)));
+    const cardActions = card.querySelector(".webtoon-card-actions");
+    cardActions.appendChild(makeButton("이 작품 분석", () => runKakaoManualAnalyze(m.title_id)));
+    const subscribeBtn = makeButton("구독", async () => {
+      try {
+        await apiCall(`/api/kakao-webtoons/${m.title_id}/subscribe`, {
+          method: "POST",
+          body: JSON.stringify({ title: m.title, thumbnail_url: m.thumbnail_url || "", author_summary: m.authors || "" }),
+        });
+        subscribeBtn.textContent = "구독함";
+        subscribeBtn.disabled = true;
+        kakaoListVersion = null;
+        naverListLoadedAt = 0;
+      } catch (e) {
+        alert(e.message);
+      }
+    });
+    cardActions.appendChild(subscribeBtn);
     resultsEl.appendChild(card);
   }
   resultsEl.classList.remove("hidden");
@@ -907,7 +907,54 @@ async function runKakaoManualAnalyze(seriesId) {
   }
 }
 
-const KAKAO_STATE_BADGE = { free: ["kp-free", "무료"], owned: ["kp-owned", "보유"], locked: ["kp-locked", "잠금"] };
+const KAKAO_STATE_BADGE = { free: ["kp-free", "무료"], owned: ["kp-owned", "보유"], waitfree: ["kp-waitfree", "기다무"], locked: ["kp-locked", "잠금"] };
+
+// 기다무를 다시 쓸 수 있기까지 남은 시간(카카오페이지 작품 화면의 "23시간 59분 남음"과 같은 표시)
+function formatRemaining(isoString) {
+  const ms = new Date(isoString).getTime() - Date.now();
+  if (!isFinite(ms) || ms <= 0) return "";
+  const minutes = Math.ceil(ms / 60000);
+  return `${Math.floor(minutes / 60)}시간 ${minutes % 60}분 남음`;
+}
+
+function kakaoTicketsHtml(t) {
+  if (!t) return "";
+  const waitfree = t.waitfree_ready
+    ? "<b>지금 사용 가능</b>"
+    : `사용 중${t.waitfree_available_at && formatRemaining(t.waitfree_available_at) ? ` (${formatRemaining(t.waitfree_available_at)})` : ""}`;
+  return `<div class="kakao-manual-tickets"><span>대여권 <b>${t.rental_count}</b>장</span><span>소장권 <b>${t.own_count}</b>장</span><span>1일 기다무 대여권 ${waitfree}</span></div>`;
+}
+
+function refreshKakaoManualSubscribeButton() {
+  const a = kakaoManualAnalysis;
+  const btn = document.getElementById("btn-kakao-manual-subscribe");
+  btn.classList.toggle("hidden", !a);
+  if (a) btn.textContent = a.subscription === "active" ? "구독해제" : "구독";
+}
+
+document.getElementById("btn-kakao-manual-subscribe").addEventListener("click", async () => {
+  const a = kakaoManualAnalysis;
+  if (!a) return;
+  const subscribed = a.subscription === "active";
+  try {
+    if (subscribed) {
+      await apiCall(`/api/kakao-webtoons/${a.series_id}/unsubscribe`, { method: "POST" });
+      a.subscription = "unsubscribed";
+    } else {
+      // 완결작이라 목록에 없는 작품도 여기서 구독할 수 있고, 구독하면 전체목록에 나타나 자동 다운로드 대상이 된다
+      await apiCall(`/api/kakao-webtoons/${a.series_id}/subscribe`, {
+        method: "POST",
+        body: JSON.stringify({ title: a.title, thumbnail_url: a.thumbnail_url || "", author_summary: a.authors || "" }),
+      });
+      a.subscription = "active";
+    }
+    kakaoListVersion = null; // 전체목록이 다음에 열릴 때 바뀐 구독 상태를 반영한다
+    naverListLoadedAt = 0;
+    refreshKakaoManualSubscribeButton();
+  } catch (e) {
+    alert(e.message);
+  }
+});
 
 function kakaoManualSummaryHtml(a) {
   const lines = [`저장 폴더: ${escapeHtml(a.folder)}`];
@@ -936,7 +983,8 @@ function renderKakaoManualTable() {
   document.getElementById("manual-result").classList.add("hidden");
   document.getElementById("kakao-manual-result").classList.remove("hidden");
   document.getElementById("kakao-manual-title").textContent = a.title;
-  document.getElementById("kakao-manual-summary").innerHTML = kakaoManualSummaryHtml(a);
+  document.getElementById("kakao-manual-summary").innerHTML = kakaoManualSummaryHtml(a) + kakaoTicketsHtml(a.tickets);
+  refreshKakaoManualSubscribeButton();
   const tbody = document.getElementById("kakao-manual-tbody");
   tbody.innerHTML = "";
   for (const e of a.episodes) {
@@ -956,6 +1004,7 @@ function renderKakaoManualTable() {
       <td>${escapeHtml(expire)}</td>
       <td>${progress}</td>`;
     tr.querySelector("input").dataset.downloaded = e.downloaded ? "1" : "";
+    tr.querySelector("input").dataset.waitfree = e.state === "waitfree" ? "1" : "";
     tr.querySelector("input").dataset.missing = e.selectable && !e.downloaded && !e.before_start ? "1" : "";
     tbody.appendChild(tr);
   }
@@ -982,6 +1031,9 @@ document.getElementById("btn-kakao-manual-download").addEventListener("click", a
   }
   const already = checked.filter((cb) => cb.dataset.downloaded === "1").length;
   if (already > 0 && !confirm(`이미 받은 회차가 ${already}개 포함되어 있습니다. 다시 받아서 기존 파일을 교체할까요?`)) return;
+  // 기다무 상태인 회차는 기다무 대여권을 쓴다 — 한 장뿐이라 고른 것 중 번호가 가장 앞선 하나만 열린다
+  const waitfreeNos = checked.filter((cb) => cb.dataset.waitfree === "1").map((cb) => Number(cb.dataset.no)).sort((x, y) => x - y);
+  if (waitfreeNos.length > 0 && !confirm(`${waitfreeNos[0]}번 회차를 열려고 기다무 대여권 1장을 사용합니다.${waitfreeNos.length > 1 ? ` (기다무는 한 장이라 나머지 ${waitfreeNos.length - 1}개는 열리지 않습니다)` : ""}\n계속할까요?`)) return;
   try {
     await apiCall("/api/kakao-manual/run", {
       method: "POST",
@@ -1873,7 +1925,7 @@ async function loadSettingsPage() {
   loadUnregisteredNewEpisodesToggle();
   loadKakaoWebtoonsEnabledToggle();
   loadKakaoPageCookieStatus();
-  loadKakaoDownloadRoot();
+  loadDownloadRoots();
   loadAuthorAutoRegisterSetting();
   loadUnsubscribeHistoryList();
 }
@@ -2153,65 +2205,41 @@ document.getElementById("btn-kp-cookie-delete").addEventListener("click", async 
   }
 });
 
-// ── 설정: 카카오페이지 다운로드 폴더 ─────────────────────
+// ── 설정: 다운로드 폴더(네이버/카카오페이지 따로) ─────────────────
 
-async function loadKakaoDownloadRoot() {
-  const statusEl = document.getElementById("kakao-download-root-status");
+function syncDownloadRootsVisibility() {
+  document.getElementById("kakao-download-root-group").classList.toggle("hidden", !kakaoWebtoonsEnabled);
+}
+
+async function loadDownloadRoots() {
+  const statusEl = document.getElementById("download-roots-status");
+  syncDownloadRootsVisibility();
   try {
-    const data = await apiCall("/api/settings/kakao-download-root");
-    document.getElementById("kakao-download-root").value = data.path || "";
+    const data = await apiCall("/api/settings/download-roots");
+    document.getElementById("naver-download-root").value = data.naver.path || "";
+    document.getElementById("kakao-download-root").value = data.kakao.path || "";
     statusEl.classList.remove("error");
-    statusEl.textContent = `현재 받는 폴더: ${data.effective}`;
+    statusEl.textContent = `현재 받는 폴더 — 네이버: ${data.naver.effective}${kakaoWebtoonsEnabled ? ` / 카카오페이지: ${data.kakao.effective}` : ""}`;
   } catch (e) {
     statusEl.classList.add("error");
     statusEl.textContent = e.message;
   }
 }
 
-document.getElementById("btn-kakao-download-root-save").addEventListener("click", async () => {
-  const statusEl = document.getElementById("kakao-download-root-status");
+document.getElementById("btn-download-roots-save").addEventListener("click", async () => {
+  const statusEl = document.getElementById("download-roots-status");
   statusEl.classList.remove("error");
   statusEl.textContent = "";
   try {
-    const path = document.getElementById("kakao-download-root").value.trim();
-    const data = await apiCall("/api/settings/kakao-download-root", { method: "POST", body: JSON.stringify({ path }) });
-    statusEl.textContent = `저장했습니다. 현재 받는 폴더: ${data.effective}`;
+    const body = {
+      naver: document.getElementById("naver-download-root").value.trim(),
+      kakao: document.getElementById("kakao-download-root").value.trim(),
+    };
+    const data = await apiCall("/api/settings/download-roots", { method: "POST", body: JSON.stringify(body) });
+    statusEl.textContent = `저장했습니다. 네이버: ${data.naver.effective}${kakaoWebtoonsEnabled ? ` / 카카오페이지: ${data.kakao.effective}` : ""}`;
   } catch (e) {
     statusEl.classList.add("error");
     statusEl.textContent = e.message;
-  }
-});
-
-const LEGACY_STATUS_LABELS = { active: "구독중", unsubscribed: "구독해제", excluded: "제외됨", unregistered: "목록" };
-const LEGACY_UNMATCHED_SHOW_LIMIT = 30;
-
-document.getElementById("btn-migrate-legacy-kakao").addEventListener("click", async () => {
-  const btn = document.getElementById("btn-migrate-legacy-kakao");
-  const resultEl = document.getElementById("migrate-legacy-kakao-result");
-  const unmatchedEl = document.getElementById("migrate-legacy-kakao-unmatched");
-  btn.disabled = true;
-  resultEl.textContent = "이전 중... (옮길 작품 수에 따라 10초에서 수십 초 걸릴 수 있습니다)";
-  unmatchedEl.textContent = "";
-  try {
-    const result = await apiCall("/api/kakao-webtoons/migrate-legacy", { method: "POST" });
-    resultEl.textContent =
-      `${result.migrated}개 이전했습니다.` +
-      (result.deleted > 0 ? ` 옮기지 못한 "제외됨" ${result.deleted}개는 지웠습니다(지금도 연재 중인 작품이면 전체목록에 다시 나타납니다).` : "");
-    if (result.unmatched.length > 0) {
-      // 옮기지 못한 것마다 이유와(같은 제목이 여러 개거나 비슷한 제목이 있으면) 후보를 보여준다.
-      const lines = result.unmatched.slice(0, LEGACY_UNMATCHED_SHOW_LIMIT).map((u) => {
-        const candidates = (u.candidates || []).map((c) => `${c.title_name}(${c.title_id})`).join(", ");
-        return `· ${u.title} (${LEGACY_STATUS_LABELS[u.status] || u.status}) — ${u.reason}${candidates ? ` / 후보: ${candidates}` : ""}`;
-      });
-      const rest = result.unmatched.length - LEGACY_UNMATCHED_SHOW_LIMIT;
-      unmatchedEl.textContent =
-        `옮기지 못한 ${result.unmatched.length}개(구독 이력이 있어 그대로 남겨 두었습니다):\n${lines.join("\n")}` +
-        (rest > 0 ? `\n... 외 ${rest}개` : "");
-    }
-  } catch (e) {
-    resultEl.textContent = e.message;
-  } finally {
-    btn.disabled = false;
   }
 });
 
@@ -2305,6 +2333,7 @@ document.getElementById("kakao-webtoons-enabled-toggle").addEventListener("chang
       body: JSON.stringify({ enabled: e.target.checked }),
     });
     kakaoWebtoonsEnabled = e.target.checked;
+    syncDownloadRootsVisibility();
   } catch (err) {
     alert(err.message);
     e.target.checked = !e.target.checked;
@@ -2675,7 +2704,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
 
   // localRoots가 2개 이상이면(예: 일괄 이동에서 ARCHIVE_ROOT/DOWNLOAD_ROOT 둘 다
   // 고를 수 있는 경우), 로컬 모드일 때만 어느 루트를 기준으로 찾아볼지 전환 버튼을 보여준다.
-  const localRootLabels = { archive: "보관 폴더(ARCHIVE_ROOT)", download: "다운로드 폴더(DOWNLOAD_ROOT)" };
+  const localRootLabels = { archive: "보관 폴더(ARCHIVE_ROOT)", download: "다운로드 폴더(네이버)", kakao_download: "카카오페이지 다운로드 폴더" };
   const needsRootChoice = state.mode === "local" && state.localRoots.length > 1;
   if (needsRootChoice) {
     const rootRow = document.createElement("div");
@@ -3072,7 +3101,7 @@ async function loadArchivePage() {
       updateBulkMovePresetPreview();
     },
     "",
-    { skipExistingCheck: true, localRoots: ["archive", "download"] }
+    { skipExistingCheck: true, localRoots: kakaoWebtoonsEnabled ? ["archive", "download", "kakao_download"] : ["archive", "download"] }
   );
   renderFolderPicker(
     "bulk-move-dest-picker",
@@ -3082,7 +3111,7 @@ async function loadArchivePage() {
       archiveSelectedBulkDestLocalRoot = localRoot || "archive";
     },
     "",
-    { skipExistingCheck: true, localRoots: ["archive", "download"] }
+    { skipExistingCheck: true, localRoots: kakaoWebtoonsEnabled ? ["archive", "download", "kakao_download"] : ["archive", "download"] }
   );
   await loadFilenamePresets();
   await loadArchiveTargetList();

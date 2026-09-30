@@ -14,7 +14,7 @@ from pathlib import Path
 
 import aiohttp
 
-from app import job_status, naver_api, repository
+from app import download_roots, job_status, naver_api, repository
 from app.comicinfo import download_cover_image, needs_comicinfo, write_comicinfo_file
 from app.config import Settings
 from app.cookie_loader import get_adult_cookies
@@ -50,7 +50,7 @@ async def analyze(title_id: str, settings: Settings) -> tuple[TitleInfo | None, 
 
     free_episodes = naver_api.free_episodes_only(all_episodes)
     safe_title = remove_forbidden_str(info.title_name)
-    webtoon_dir = Path(settings.download_root) / safe_title
+    webtoon_dir = Path(download_roots.naver_root(settings)) / safe_title
     owned_up_to = find_last_downloaded_episode_no(webtoon_dir, free_episodes)
 
     rows = [
@@ -96,7 +96,7 @@ async def download_selected(title_id: str, episode_nos: list[int], settings: Set
             return
 
         safe_title = remove_forbidden_str(info.title_name)
-        webtoon_dir = Path(settings.download_root) / safe_title
+        webtoon_dir = Path(download_roots.naver_root(settings)) / safe_title
 
         webtoon_dir.mkdir(parents=True, exist_ok=True)
         write_comicinfo_file(webtoon_dir, info)
@@ -119,7 +119,7 @@ async def download_selected(title_id: str, episode_nos: list[int], settings: Set
                 webtoon_type=info.webtoon_type,
                 episode=episode,
                 cookies=cookies,
-                download_root=settings.download_root,
+                download_root=download_roots.naver_root(settings),
                 folder_zero_fill=settings.folder_zero_fill,
                 image_zero_fill=settings.image_zero_fill,
                 max_concurrent_downloads=settings.max_concurrent_downloads,

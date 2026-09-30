@@ -7,9 +7,15 @@
   cursor_index로 NEXT(sort_type=asc)를 부르고, has_next가 false가 될 때까지 넘긴다.
 - 이미지 목록: viewer/data → viewer_data.imageDownloadData.files[].secureUrl(서명된 임시 주소).
 - 로그인 확인: user/get_profile → result_code 0 이고 profile.uid가 있으면 로그인 상태.
-- **파일 앞의 번호는 "N화"가 아니라 사이트의 회차 순서 번호(order_value)다** — 프롤로그/예고편/후기도 번호를
-  하나씩 차지해서(예: `0003_프롤로그`, `0002_1화`) 번호와 화수의 차이가 작품마다 다르다. 그래서 번호는
-  order_value를 그대로 쓰고, 프롤로그 같은 것도 받는다(숨김 처리된 것만 뺀다).
+- **파일 앞의 번호는 "N화"가 아니라 회차 순서 번호다** — 프롤로그/예고편/후기도 번호를 하나씩 차지해서(예:
+  `0003_프롤로그`, `0002_1화`) 번호와 화수의 차이가 작품마다 다르다. 번호는 사이트의 order_value를 따르고, 프롤로그
+  같은 이미지 회차도 받는다(숨김 처리된 것만 뺀다). **동영상(예: "동영상 트레일러")은 받을 수 없어서 목록에서 빼고,
+  그만큼 뒤 회차의 번호를 당긴다** — 예전 도구는 동영상에 번호를 주지 않았기 때문에, 그러지 않으면 같은 회차의
+  번호가 하나씩 어긋난다.
+- **기다무(RT05) 대여권**: ticket/my로 기다무를 쓸 수 있는지 보고(waitfree.charged_complete), ticket/ready_to_use가
+  가리키는 대여권 종류가 RT05일 때만 ticket/use(product_id, ticket_type=RT05)로 열고, 이어서 viewer/data로 이미지를
+  받는다. **결제(캐시/소장권 구매)는 이 코드에 아예 없고, RT05 이외의 대여권(선물권 RT06 등)도 자동으로 쓰지 않는다.**
+  선물권은 사용자가 웹에서 쓰면 그 회차가 "대여 중"이 되어 그대로 받을 수 있다.
 - 파일 이름은 `{번호 4자리}_{부제목}.zip`(예: 0384_384화 복국 (2).zip) — 페이지 수는 붙이지 않는다. 예전 도구가
   받은 파일은 뒤에 `#페이지수`가 붙어 있는데(예: 0384_384화 복국 (2)#48.zip), 그 파일도 같은 번호로 인식한다.
   저장 위치는 다운로드 루트 아래 `{작품 제목}` 폴더(금지문자는 카카오 도구와 같은 규칙).
@@ -24,8 +30,8 @@
   안 되기 때문이다(예: 개미 43화 표식으로 시작했는데 1~42화를 받기 시작하면 안 된다). 앞 회차가 필요하면
   수동 다운로드에서 골라 받는다.
 
-이 단계는 이미 읽을 수 있는 회차(무료, 또는 이미 대여 중)만 받는다. 잠긴 회차는 받지 않고 "대기"로 알린다
-— 대여권을 쓰는 건 다음 단계에서 붙인다.
+읽을 수 있는 회차(무료, 또는 이미 대여 중)를 받는다. 잠긴 회차를 만나면, 기다무를 쓸 수 있을 때 그 회차 하나를
+기다무로 열어서 받고(기다무는 작품당 한 장씩 주기적으로 충전된다), 그 뒤 잠긴 회차부터는 멈춰서 "대기"로 알린다.
 """
 
 from __future__ import annotations
@@ -50,6 +56,12 @@ _API = "https://bff-page.kakao.com/api/gateway/api"
 PROFILE_URL = f"{_API}/v1/user/get_profile"
 PRODUCT_LIST_URL = kakao_api.KAKAO_PRODUCT_LIST_URL
 VIEWER_DATA_URL = f"{_API}/v1/viewer/data"
+TICKET_MY_URL = f"{_API}/v1/ticket/my"
+TICKET_READY_URL = f"{_API}/v1/ticket/ready_to_use"
+TICKET_USE_URL = f"{_API}/v1/ticket/use"
+ABOUT_URL = f"{_API}/v1/content/about"
+WAITFREE_TICKET_TYPE = "RT05"  # 기다무 대여권 — 이 프로그램이 자동으로 쓰는 유일한 이용권 종류
+_IMAGE_SLIDE_TYPE = "SD03"  # 이미지 회차(그 밖의 종류는 동영상 등이라 받지 않는다)
 
 _LIST_WINDOW_SIZE = 25
 _MAX_LIST_PAGES = 80  # 25 x 80 = 2000회차 — 이상 응답으로 끝없이 넘기는 걸 막는 안전 상한
@@ -84,6 +96,17 @@ class Episode:
     page_count: int
     hidden: bool
     rent_expire: str | None = None  # 대여 중이면 대여 만료 시각
+    waitfree_blocked: bool = False  # 기다무로 열 수 없는 회차(최신 회차 등)
+
+
+@dataclass
+class TicketInfo:
+    """작품의 이용권 현황 — 카카오페이지 작품 화면의 "대여권 N장 | 소장권 N장 | 기다무" 표시와 같은 값."""
+
+    rental_count: int = 0  # 대여권(선물권 등)
+    own_count: int = 0  # 소장권
+    waitfree_ready: bool = False  # 지금 기다무를 쓸 수 있음
+    waitfree_available_at: str | None = None  # 기다무를 다시 쓸 수 있게 되는 시각(쓸 수 없을 때)
 
 
 @dataclass
@@ -126,6 +149,7 @@ class RunResult:
     plan: DownloadPlan
     error: str | None = None
     title: str = ""  # 실제로 쓴 폴더 제목(카카오페이지에 등록된 작품 제목)
+    ticket_used: int | None = None  # 기다무로 열어서 받은 회차 번호
 
 
 @dataclass
@@ -135,6 +159,7 @@ class SelectedResult:
     replaced: list[int] = field(default_factory=list)  # 이미 받은 회차를 다시 받아 교체한 것(downloaded의 일부)
     failed: list[int] = field(default_factory=list)
     skipped_locked: list[int] = field(default_factory=list)
+    ticket_used: list[int] = field(default_factory=list)  # 기다무로 열어서 받은 회차
     not_found: list[int] = field(default_factory=list)
     title: str = ""
 
@@ -256,6 +281,14 @@ def _is_accessible(item: dict, now_kst: datetime) -> bool:
         return True
 
 
+def is_video_item(item: dict) -> bool:
+    """이미지가 아닌 회차(동영상 트레일러 등). slide_type이 이미지(SD03)가 아니거나 제목에 "동영상"이 있으면 동영상으로 본다."""
+    slide_type = item.get("slide_type")
+    if slide_type and slide_type != _IMAGE_SLIDE_TYPE:
+        return True
+    return "동영상" in (item.get("title") or "")
+
+
 def _parse_episode(item: dict, series_title: str, now_kst: datetime) -> Episode:
     title = item.get("title") or ""
     purchase = ((item.get("service_property") or {}).get("purchase_info")) or {}
@@ -265,6 +298,7 @@ def _parse_episode(item: dict, series_title: str, now_kst: datetime) -> Episode:
         subtitle=derive_subtitle(title, series_title), is_free=bool(item.get("is_free")), accessible=accessible,
         page_count=int(item.get("page_count") or 0), hidden=bool(item.get("hidden")),
         rent_expire=purchase.get("rent_expire_dt") if accessible and not item.get("is_free") else None,
+        waitfree_blocked=bool(item.get("waitfree_blocked")),
     )
 
 
@@ -309,11 +343,11 @@ class KakaoPageClient:
                 self.cookies[name] = morsel.value
                 self.cookies_changed = True
 
-    async def _request_json(self, method: str, url: str, *, params: dict | None = None, label: str):
+    async def _request_json(self, method: str, url: str, *, params: dict | None = None, label: str, data: dict | None = None):
         """(HTTP 상태, JSON 또는 None). 요청 자체가 실패하면 (None, None)."""
         try:
             if method == "POST":
-                request = self._session.post(url, data={}, headers=self._headers(post=True), timeout=self._timeout)
+                request = self._session.post(url, data=data or {}, headers=self._headers(post=True), timeout=self._timeout)
             else:
                 request = self._session.get(url, params=params, headers=self._headers(), timeout=self._timeout)
             async with request as response:
@@ -341,6 +375,7 @@ class KakaoPageClient:
         now_kst = datetime.now(_KST).replace(tzinfo=None)
         series_item: dict = {}
         episodes: dict[int, Episode] = {}
+        video_orders: list[int] = []  # 동영상 회차의 순서 번호(뒤 회차의 번호를 그만큼 당기는 데 쓴다)
         cursor, direction = 0, "INIT"
         for _ in range(_MAX_LIST_PAGES):
             params = {"series_id": series_id, "cursor_index": cursor, "cursor_direction": direction, "window_size": _LIST_WINDOW_SIZE}
@@ -359,14 +394,64 @@ class KakaoPageClient:
                 product_id = item.get("product_id")
                 if product_id is None or product_id in episodes:
                     continue
-                episodes[product_id] = _parse_episode(item, series_item.get("title", ""), now_kst)
+                if is_video_item(item):
+                    video_orders.append(int(item.get("order_value") or 0))
+                    episodes[product_id] = None  # 다시 세지 않게 표시만 해 둔다
+                else:
+                    episodes[product_id] = _parse_episode(item, series_item.get("title", ""), now_kst)
                 new_count += 1
             cursor = entries[-1].get("cursor_index") if entries else None
             if not result.get("has_next") or new_count == 0 or cursor is None:
                 break
             direction = "NEXT"
             await asyncio.sleep(_PAGE_INTERVAL_SECONDS)
-        return series_item, sorted((e for e in episodes.values() if e.number > 0), key=lambda e: e.number)
+        images = [e for e in episodes.values() if e is not None and e.number > 0]
+        for episode in images:
+            episode.number -= sum(1 for order in video_orders if order < episode.number)
+        return series_item, sorted(images, key=lambda e: e.number)
+
+    async def ticket_info(self, series_id: int) -> TicketInfo | None:
+        """이 작품의 대여권/소장권 수와 기다무 상태. 못 받으면 None(기다무를 못 쓰는 것으로 다룬다)."""
+        _, data = await self._request_json(
+            "GET", TICKET_MY_URL, params={"series_id": series_id, "include_waitfree": "true"}, label=f"이용권 series_id={series_id}"
+        )
+        if not data or data.get("result_code") != 0:
+            return None
+        result = data.get("result") or {}
+        mine, waitfree = result.get("my") or {}, result.get("waitfree") or {}
+        ready = bool(waitfree.get("charged_complete"))
+        return TicketInfo(
+            rental_count=int(mine.get("ticket_rental_count") or 0), own_count=int(mine.get("ticket_own_count") or 0),
+            waitfree_ready=ready, waitfree_available_at=None if ready else waitfree.get("charged_at"),
+        )
+
+    async def use_waitfree_ticket(self, product_id: int) -> tuple[bool, str]:
+        """회차 하나를 기다무 대여권으로 연다. (성공 여부, 사람이 읽을 이유). 이 회차에 실제로 쓸 수 있는 이용권이
+        기다무(RT05)라고 서버가 알려줄 때만 쓴다 — 선물권 등 다른 이용권이나 결제가 필요한 경우는 쓰지 않는다."""
+        _, ready = await self._request_json(
+            "GET", TICKET_READY_URL, params={"product_id": product_id, "include_series": "true"}, label=f"이용권 확인 product_id={product_id}"
+        )
+        if not ready or ready.get("result_code") != 0:
+            return False, "이용권 상태를 확인하지 못했습니다"
+        result = ready.get("result") or {}
+        if (result.get("single") or {}).get("waitfree_block"):
+            return False, "기다무로 열 수 없는 회차입니다"
+        ticket_type = ((result.get("available") or {}).get("ticket_rental_type"))
+        if ticket_type != WAITFREE_TICKET_TYPE:
+            return False, "기다무를 쓸 수 없습니다" + (f"(가능한 이용권: {ticket_type})" if ticket_type else "")
+        status, used = await self._request_json(
+            "POST", TICKET_USE_URL, data={"product_id": product_id, "ticket_type": WAITFREE_TICKET_TYPE}, label=f"기다무 사용 product_id={product_id}"
+        )
+        if not used or used.get("result_code") != 0:
+            return False, f"기다무 사용에 실패했습니다(HTTP {status})"
+        return True, "기다무로 열었습니다"
+
+    async def fetch_about(self, series_id: int) -> dict | None:
+        """작품 "정보" 탭: 글/그림/원작 작가(role), 테마 키워드 등. 못 받으면 None."""
+        _, data = await self._request_json("GET", ABOUT_URL, params={"series_id": series_id}, label=f"작품 정보 series_id={series_id}")
+        if not data or data.get("result_code") != 0:
+            return None
+        return data.get("result") or None
 
     async def viewer_image_urls(self, series_id: int, product_id: int) -> list[str] | None:
         _, data = await self._request_json(
@@ -488,9 +573,41 @@ async def run_download(
         items.append((episode.number, episode.subtitle))
         if on_progress:
             on_progress(f"{episode.number}번 회차 받음 ({path.name})")
+    ticket_used: int | None = None
+    if failed is None and len(downloaded) < max_episodes and plan.locked:
+        # 받을 수 있는 건 다 받았고 잠긴 회차가 남았으면, 첫 잠긴 회차를 기다무로 열어 받는다(한 장뿐이라 그 뒤는 대기)
+        ticket_used, failed = await _download_first_locked_with_waitfree(
+            client, series_id, plan.locked[0], folder, downloaded, items, on_progress
+        )
     if downloaded:
-        await write_series_metadata(series_item, series_id, folder, on_progress)
-    return RunResult(downloaded, items, failed, plan, title=folder_title)
+        await write_series_metadata(series_item, series_id, folder, on_progress, await client.fetch_about(series_id))
+    return RunResult(downloaded, items, failed, plan, title=folder_title, ticket_used=ticket_used)
+
+
+async def _download_first_locked_with_waitfree(client, series_id, episode, folder, downloaded, items, on_progress) -> tuple[int | None, int | None]:
+    """(기다무로 연 회차 번호 또는 None, 받기에 실패한 회차 번호 또는 None). 기다무를 못 쓰면 아무것도 안 한다."""
+    if episode.waitfree_blocked:
+        return None, None
+    info = await client.ticket_info(series_id)
+    if info is None or not info.waitfree_ready:
+        return None, None
+    ok, reason = await client.use_waitfree_ticket(episode.product_id)
+    if not ok:
+        if on_progress:
+            on_progress(f"{episode.number}번 회차: {reason} — 여기서 멈춥니다")
+        return None, None
+    if on_progress:
+        on_progress(f"{episode.number}번 회차를 기다무로 열었습니다")
+    path = await download_episode(client, series_id, episode, folder)
+    if path is None:
+        if on_progress:
+            on_progress(f"{episode.number}번 회차 받기 실패 — 기다무로 이미 열렸으니 대여 기간 안에 다음 실행에서 다시 받습니다")
+        return episode.number, episode.number
+    downloaded.append(episode.number)
+    items.append((episode.number, episode.subtitle))
+    if on_progress:
+        on_progress(f"{episode.number}번 회차 받음 ({path.name})")
+    return episode.number, None
 
 
 async def download_selected(
@@ -509,38 +626,72 @@ async def download_selected(
     folder = series_folder(download_root, result.title)
     plan = plan_by_folder_rules(episodes, scan_existing_files(folder))
     rows = {row.episode.number: row for row in plan.rows}
+    ticket = None  # 잠긴 회차를 고른 경우에만 조회한다
+    waitfree_spent = False  # 기다무는 한 장이라 고른 잠긴 회차 중 번호가 가장 앞선 하나만 연다
     for number in sorted(set(numbers)):
         row = rows.get(number)
         if row is None:
             result.not_found.append(number)
-        elif not row.episode.accessible:
-            result.skipped_locked.append(number)
-            if on_progress:
-                on_progress(f"{number}번 회차: 잠김(대여권 필요) — 건너뜀")
-        else:
-            path = await download_episode(client, series_id, row.episode, folder)
-            if path is None:
-                result.failed.append(number)
-                if on_progress:
-                    on_progress(f"❌ {number}번 회차 받기 실패" + (" (기존 파일은 그대로 둡니다)" if row.downloaded else ""))
+            continue
+        if not row.episode.accessible:
+            opened = False
+            reason = "잠김(대여권 필요)"
+            if waitfree_spent:
+                reason = "기다무는 한 장이라 하나만 열 수 있습니다"
+            elif row.episode.waitfree_blocked:
+                reason = "기다무로 열 수 없는 회차입니다"
             else:
-                result.downloaded.append(number)
-                result.downloaded_items.append((number, row.episode.subtitle))
-                if row.downloaded:
-                    result.replaced.append(number)
+                ticket = ticket or await client.ticket_info(series_id) or TicketInfo()
+                if ticket.waitfree_ready:
+                    opened, reason = await client.use_waitfree_ticket(row.episode.product_id)
+                    waitfree_spent = True
+            if not opened:
+                result.skipped_locked.append(number)
                 if on_progress:
-                    on_progress(f"✅ {number}번 회차 {'다시 받아 교체' if row.downloaded else '완료'} ({path.name})")
+                    on_progress(f"{number}번 회차: {reason} — 건너뜀")
+                continue
+            result.ticket_used.append(number)
+            if on_progress:
+                on_progress(f"{number}번 회차를 기다무로 열었습니다")
+        path = await download_episode(client, series_id, row.episode, folder)
+        if path is None:
+            result.failed.append(number)
+            if on_progress:
+                on_progress(f"❌ {number}번 회차 받기 실패" + (" (기존 파일은 그대로 둡니다)" if row.downloaded else ""))
+        else:
+            result.downloaded.append(number)
+            result.downloaded_items.append((number, row.episode.subtitle))
+            if row.downloaded:
+                result.replaced.append(number)
+            if on_progress:
+                on_progress(f"✅ {number}번 회차 {'다시 받아 교체' if row.downloaded else '완료'} ({path.name})")
     if result.downloaded:
-        await write_series_metadata(series_item, series_id, folder, on_progress)
+        await write_series_metadata(series_item, series_id, folder, on_progress, await client.fetch_about(series_id))
     return result
 
 
-async def write_series_metadata(series_item: dict, series_id: int, folder: Path, on_progress=None) -> None:
+def split_authors(about: dict | None) -> tuple[list[str], list[str], list[str]]:
+    """작품 "정보"의 author_list에서 (글, 그림, 원작) 이름 목록. 같은 이름은 한 번만."""
+    groups: dict[str, list[str]] = {"writer": [], "illustrator": [], "original_author": []}
+    for author in (about or {}).get("author_list") or []:
+        names = groups.get(author.get("role"))
+        if names is not None and author.get("name") and author["name"] not in names:
+            names.append(author["name"])
+    return groups["writer"], groups["illustrator"], groups["original_author"]
+
+
+def authors_to_register(about: dict | None) -> list[str]:
+    """구독할 때 관심 작가로 등록할 이름 — 원작자가 있으면 원작자, 없으면 글 작가(네이버와 같은 규칙)."""
+    writers, _, originals = split_authors(about)
+    return originals or writers
+
+
+async def write_series_metadata(series_item: dict, series_id: int, folder: Path, on_progress=None, about: dict | None = None) -> None:
     """받은 뒤 작품 폴더에 info.xml을 쓰고(네이버와 같이 받을 때마다 최신 정보로 덮어씀), 표지(cover)가 없으면
     카카오페이지 공식 표지를 받아 저장한다. 실패해도 다운로드 결과에는 영향을 주지 않는다."""
     try:
         folder.mkdir(parents=True, exist_ok=True)
-        (folder / "info.xml").write_text(comicinfo.build_kakao_comicinfo_xml(series_item, series_id), encoding="utf-8")
+        (folder / "info.xml").write_text(comicinfo.build_kakao_comicinfo_xml(series_item, series_id, about), encoding="utf-8")
         if not any(folder.glob("cover.*")):
             cover = await asyncio.to_thread(kakao_cover.fetch_official_cover_bytes, str(series_id))
             if cover:
