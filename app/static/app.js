@@ -2244,17 +2244,18 @@ async function renderDownloadRootPicker(kind) {
 
   const current = document.createElement("div");
   current.className = "drp-current";
-  const pathEl = document.createElement("span");
-  pathEl.className = "drp-path";
-  pathEl.textContent = downloadRootLabel(kind);
-  current.appendChild(pathEl);
   const shownAbs = downloadRootDraft[kind] || (kind === "kakao" ? downloadRootDraft.naver || info.base : info.base);
   const host = downloadHostPath(shownAbs);
+  const pathEl = document.createElement("span");
+  pathEl.className = "drp-path";
+  // 호스트 경로를 알면 그것을 앞에(사용자가 아는 실제 폴더), 컨테이너 안 경로는 괄호로 덧붙인다
+  pathEl.textContent = host ? host : downloadRootLabel(kind);
+  current.appendChild(pathEl);
   if (host) {
-    const hostEl = document.createElement("span");
-    hostEl.className = "drp-host";
-    hostEl.textContent = `(호스트: ${host})`;
-    current.appendChild(hostEl);
+    const containerEl = document.createElement("span");
+    containerEl.className = "drp-host";
+    containerEl.textContent = downloadRootDraft[kind] ? `(컨테이너: ${downloadRootDraft[kind]})` : `(컨테이너: ${shownAbs}${kind === "kakao" ? ", 네이버와 같은 폴더" : ", 기본 폴더"})`;
+    current.appendChild(containerEl);
   }
   current.appendChild(makeButton(browse.open ? "닫기" : "폴더 선택", () => {
     browse.open = !browse.open;
@@ -2274,7 +2275,7 @@ async function renderDownloadRootPicker(kind) {
   const crumbs = document.createElement("div");
   crumbs.className = "drp-crumbs";
   const segments = browse.path ? browse.path.split("/") : [];
-  crumbs.appendChild(makeButton(info.base, () => { browse.path = ""; renderDownloadRootPicker(kind); }));
+  crumbs.appendChild(makeButton(info.host_path || info.base, () => { browse.path = ""; renderDownloadRootPicker(kind); }));
   segments.forEach((name, index) => {
     crumbs.appendChild(document.createTextNode(" / "));
     const target = segments.slice(0, index + 1).join("/");
@@ -2322,7 +2323,7 @@ async function renderDownloadRootPicker(kind) {
 }
 
 function downloadRootsStatusText(data) {
-  const part = (label, side) => `${label}: ${side.effective}${side.effective_host ? ` (호스트: ${side.effective_host})` : ""}`;
+  const part = (label, side) => (side.effective_host ? `${label}: ${side.effective_host} (컨테이너: ${side.effective})` : `${label}: ${side.effective}`);
   return `현재 받는 폴더 — ${part("네이버", data.naver)}${kakaoWebtoonsEnabled ? ` / ${part("카카오페이지", data.kakao)}` : ""}`;
 }
 
