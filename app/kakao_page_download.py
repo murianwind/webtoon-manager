@@ -3,8 +3,11 @@
 폴더에 이미 있는 파일과 비교해 받을 회차를 정하고, 회차를 zip으로 저장한다. 실제 브라우저 캡처(HAR)와
 사용자의 실제 폴더 목록(예전 카카오 도구가 받은 1,935개 파일)으로 확인한 것들:
 
-- 회차 목록: content/product/list — 첫 페이지는 cursor_direction=INIT, 이어서는 마지막 항목의
-  cursor_index로 NEXT(sort_type=asc)를 부르고, has_next가 false가 될 때까지 넘긴다.
+- 회차 목록: content/product/list — **항상 cursor_direction=NEXT, sort_type=asc, cursor_index=0부터** 시작해서 마지막
+  항목의 cursor_index로 이어 부르고, has_next가 false가 될 때까지 넘긴다. cursor_index는 "정렬된 목록 안의 순번"이라
+  정렬이 섞이면 안 된다 — 첫 요청을 INIT으로 하면 서버가 계정에 저장된 정렬(작품 화면의 "첫화부터/최신 순")을 따라서, 최신순으로
+  저장된 작품은 첫 페이지가 뒤쪽 회차(내림차순)로 오고 그 순번에서 오름차순으로 이어 받으면 앞 회차가 통째로 빠진다(실제로
+  개미 1~24화가 빠졌다).
 - 이미지 목록: viewer/data → viewer_data.imageDownloadData.files[].secureUrl(서명된 임시 주소).
 - 로그인 확인: user/get_profile → result_code 0 이고 profile.uid가 있으면 로그인 상태.
 - **파일 앞의 번호는 "N화"가 아니라 회차 순서 번호다** — 프롤로그/예고편/후기도 번호를 하나씩 차지해서(예:
@@ -376,11 +379,12 @@ class KakaoPageClient:
         series_item: dict = {}
         episodes: dict[int, Episode] = {}
         video_orders: list[int] = []  # 동영상 회차의 순서 번호(뒤 회차의 번호를 그만큼 당기는 데 쓴다)
-        cursor, direction = 0, "INIT"
+        cursor, direction = 0, "NEXT"
         for _ in range(_MAX_LIST_PAGES):
-            params = {"series_id": series_id, "cursor_index": cursor, "cursor_direction": direction, "window_size": _LIST_WINDOW_SIZE}
-            if direction == "NEXT":
-                params["sort_type"] = "asc"
+            params = {
+                "series_id": series_id, "cursor_index": cursor, "cursor_direction": direction, "window_size": _LIST_WINDOW_SIZE,
+                "sort_type": "asc",  # 계정에 저장된 정렬과 무관하게 항상 첫화부터
+            }
             _, data = await self._request_json("GET", PRODUCT_LIST_URL, params=params, label=f"회차 목록 series_id={series_id}")
             if data is None:
                 return None
@@ -403,7 +407,6 @@ class KakaoPageClient:
             cursor = entries[-1].get("cursor_index") if entries else None
             if not result.get("has_next") or new_count == 0 or cursor is None:
                 break
-            direction = "NEXT"
             await asyncio.sleep(_PAGE_INTERVAL_SECONDS)
         images = [e for e in episodes.values() if e is not None and e.number > 0]
         for episode in images:

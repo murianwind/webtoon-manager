@@ -19,6 +19,9 @@ class Settings(BaseSettings):
 
     # 경로
     download_root: str = "/webtoon_download"
+    # 선택: compose의 WEBTOON_DOWNLOAD_HOST_PATH(호스트의 실제 폴더)를 컨테이너 환경변수로 넘겨주면, 설정 화면이 "받는 폴더"를
+    # 컨테이너 경로뿐 아니라 호스트 경로로도 보여준다. 안 넘기면 컨테이너 경로만 보인다(컨테이너는 호스트 경로를 스스로 알 수 없다).
+    webtoon_download_host_path: str = ""
     archive_root: str = ""
     rclone_config_path: str = ""
     database_path: str = "/data/webtoons.db"

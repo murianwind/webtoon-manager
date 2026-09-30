@@ -945,8 +945,6 @@ select {
 .kakao-manual-tickets { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); }
 .kakao-manual-tickets b { font-weight: 700; }
 .kakao-manual-summary .warn { color: #b26a00; }
-#kakao-manual-table td:nth-child(2), #kakao-manual-table th:nth-child(2) { width: 56px; text-align: right; }
-#kakao-manual-table td:first-child, #kakao-manual-table th:first-child { width: 36px; text-align: center; }
 #kakao-manual-table td:nth-child(4), #kakao-manual-table td:nth-child(6) { text-align: center; white-space: nowrap; }
 .kp-badge { display: inline-block; padding: 1px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; color: #fff; }
 .kp-free { background: #28a745; }
@@ -961,3 +959,25 @@ select {
 .schedule-entry { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 8px 0; }
 .schedule-entry-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .schedule-entry-head .schedule-entry-remove { margin-left: auto; }
+
+/* 카카오 수동 다운로드 표: 열 너비를 고정해서 분석할 때마다 번호/제목/상태 위치가 흔들리지 않게 한다 */
+#kakao-manual-table { table-layout: fixed; min-width: 640px; }
+#kakao-manual-table th:nth-child(1), #kakao-manual-table td:nth-child(1) { width: 40px; text-align: center; }
+#kakao-manual-table th:nth-child(2), #kakao-manual-table td:nth-child(2) { width: 64px; text-align: right; }
+#kakao-manual-table th:nth-child(3), #kakao-manual-table td:nth-child(3) { width: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#kakao-manual-table th:nth-child(4), #kakao-manual-table td:nth-child(4) { width: 84px; text-align: center; }
+#kakao-manual-table th:nth-child(5), #kakao-manual-table td:nth-child(5) { width: 150px; white-space: nowrap; }
+#kakao-manual-table th:nth-child(6), #kakao-manual-table td:nth-child(6) { width: 96px; text-align: center; white-space: nowrap; }
+#kakao-manual-table td:nth-child(2), #kakao-manual-table td:nth-child(3) { padding-left: 12px; }
+.scroll-table-wrapper { overflow-x: auto; }
+
+/* 다운로드 폴더 선택기 */
+.download-root-picker { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--card); }
+.download-root-picker .drp-current { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.download-root-picker .drp-current .drp-path { font-family: monospace; font-size: 13px; word-break: break-all; }
+.download-root-picker .drp-current .drp-host { color: var(--muted); font-size: 12px; }
+.download-root-picker .drp-browser { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.download-root-picker .drp-crumbs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-bottom: 6px; font-size: 13px; }
+.download-root-picker .drp-list { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; margin-bottom: 8px; }
+.download-root-picker .drp-list button { text-align: left; font-size: 13px; }
+.download-root-picker .drp-actions { display: flex; gap: 8px; flex-wrap: wrap; }

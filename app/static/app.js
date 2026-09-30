@@ -922,32 +922,30 @@ function kakaoTicketsHtml(t) {
   const waitfree = t.waitfree_ready
     ? "<b>지금 사용 가능</b>"
     : `사용 중${t.waitfree_available_at && formatRemaining(t.waitfree_available_at) ? ` (${formatRemaining(t.waitfree_available_at)})` : ""}`;
-  return `<div class="kakao-manual-tickets"><span>대여권 <b>${t.rental_count}</b>장</span><span>소장권 <b>${t.own_count}</b>장</span><span>1일 기다무 대여권 ${waitfree}</span></div>`;
+  return `<div class="kakao-manual-tickets"><span>대여권 <b>${t.rental_count}</b>장</span><span>1일 기다무 대여권 ${waitfree}</span></div>`;
 }
 
 function refreshKakaoManualSubscribeButton() {
+  // 구독만 있고 구독해제는 없다 — 구독 중이면 버튼 대신 "구독 중"만 보여준다(해제는 전체목록에서)
   const a = kakaoManualAnalysis;
   const btn = document.getElementById("btn-kakao-manual-subscribe");
   btn.classList.toggle("hidden", !a);
-  if (a) btn.textContent = a.subscription === "active" ? "구독해제" : "구독";
+  if (!a) return;
+  const subscribed = a.subscription === "active";
+  btn.textContent = subscribed ? "구독 중" : "구독";
+  btn.disabled = subscribed;
 }
 
 document.getElementById("btn-kakao-manual-subscribe").addEventListener("click", async () => {
   const a = kakaoManualAnalysis;
-  if (!a) return;
-  const subscribed = a.subscription === "active";
+  if (!a || a.subscription === "active") return;
   try {
-    if (subscribed) {
-      await apiCall(`/api/kakao-webtoons/${a.series_id}/unsubscribe`, { method: "POST" });
-      a.subscription = "unsubscribed";
-    } else {
-      // 완결작이라 목록에 없는 작품도 여기서 구독할 수 있고, 구독하면 전체목록에 나타나 자동 다운로드 대상이 된다
-      await apiCall(`/api/kakao-webtoons/${a.series_id}/subscribe`, {
-        method: "POST",
-        body: JSON.stringify({ title: a.title, thumbnail_url: a.thumbnail_url || "", author_summary: a.authors || "" }),
-      });
-      a.subscription = "active";
-    }
+    // 완결작이라 목록에 없는 작품도 여기서 구독할 수 있고, 구독하면 전체목록에 나타나 자동 다운로드 대상이 된다
+    await apiCall(`/api/kakao-webtoons/${a.series_id}/subscribe`, {
+      method: "POST",
+      body: JSON.stringify({ title: a.title, thumbnail_url: a.thumbnail_url || "", author_summary: a.authors || "" }),
+    });
+    a.subscription = "active";
     kakaoListVersion = null; // 전체목록이 다음에 열릴 때 바뀐 구독 상태를 반영한다
     naverListLoadedAt = 0;
     refreshKakaoManualSubscribeButton();
@@ -987,6 +985,9 @@ function renderKakaoManualTable() {
   refreshKakaoManualSubscribeButton();
   const tbody = document.getElementById("kakao-manual-tbody");
   tbody.innerHTML = "";
+  // "미보유만 선택"은 이미 받았거나 시작 지점 이전인 회차가 있어서 "전체선택"과 결과가 다를 때만 보여준다
+  const missingDiffers = a.episodes.some((e) => e.selectable && (e.downloaded || e.before_start));
+  document.getElementById("btn-kakao-manual-select-missing").classList.toggle("hidden", !missingDiffers);
   for (const e of a.episodes) {
     const [badgeClass, badgeLabel] = KAKAO_STATE_BADGE[e.state] || ["kp-locked", e.state];
     const progress = e.downloaded
@@ -2211,15 +2212,132 @@ function syncDownloadRootsVisibility() {
   document.getElementById("kakao-download-root-group").classList.toggle("hidden", !kakaoWebtoonsEnabled);
 }
 
+// 다운로드 폴더는 직접 입력하지 않고, 컨테이너에 마운트된 다운로드 폴더(base) 안에서 고르거나 새로 만든다.
+// 폴더 목록/새 폴더 만들기는 아카이빙의 폴더 찾아보기와 같은 API(local_root=download_base)를 쓴다.
+let downloadRootsInfo = null;
+const downloadRootDraft = { naver: "", kakao: "" }; // 저장 전에 고른 절대 경로("" = 기본)
+const downloadRootBrowse = { naver: { open: false, path: "" }, kakao: { open: false, path: "" } };
+
+function downloadHostPath(absPath) {
+  const info = downloadRootsInfo;
+  if (!info || !info.host_path || !absPath) return "";
+  const base = info.base.replace(/\/+$/, "");
+  if (absPath !== base && !absPath.startsWith(base + "/")) return "";
+  const rest = absPath.slice(base.length).replace(/^\/+/, "");
+  if (!rest) return info.host_path;
+  const sep = info.host_path.includes("\\") ? "\\" : "/";
+  return info.host_path.replace(/[\\/]+$/, "") + sep + rest.split("/").join(sep);
+}
+
+function downloadRootLabel(kind) {
+  const info = downloadRootsInfo;
+  const draft = downloadRootDraft[kind];
+  if (draft) return draft;
+  return kind === "kakao" ? "네이버와 같은 폴더" : `기본 폴더 (${info.base})`;
+}
+
+async function renderDownloadRootPicker(kind) {
+  const box = document.getElementById(`${kind}-download-root-picker`);
+  const info = downloadRootsInfo;
+  const browse = downloadRootBrowse[kind];
+  box.innerHTML = "";
+
+  const current = document.createElement("div");
+  current.className = "drp-current";
+  const pathEl = document.createElement("span");
+  pathEl.className = "drp-path";
+  pathEl.textContent = downloadRootLabel(kind);
+  current.appendChild(pathEl);
+  const shownAbs = downloadRootDraft[kind] || (kind === "kakao" ? downloadRootDraft.naver || info.base : info.base);
+  const host = downloadHostPath(shownAbs);
+  if (host) {
+    const hostEl = document.createElement("span");
+    hostEl.className = "drp-host";
+    hostEl.textContent = `(호스트: ${host})`;
+    current.appendChild(hostEl);
+  }
+  current.appendChild(makeButton(browse.open ? "닫기" : "폴더 선택", () => {
+    browse.open = !browse.open;
+    renderDownloadRootPicker(kind);
+  }));
+  if (downloadRootDraft[kind]) {
+    current.appendChild(makeButton(kind === "kakao" ? "네이버와 같게" : "기본으로", () => {
+      downloadRootDraft[kind] = "";
+      renderDownloadRootPicker(kind);
+    }));
+  }
+  box.appendChild(current);
+  if (!browse.open) return;
+
+  const panel = document.createElement("div");
+  panel.className = "drp-browser";
+  const crumbs = document.createElement("div");
+  crumbs.className = "drp-crumbs";
+  const segments = browse.path ? browse.path.split("/") : [];
+  crumbs.appendChild(makeButton(info.base, () => { browse.path = ""; renderDownloadRootPicker(kind); }));
+  segments.forEach((name, index) => {
+    crumbs.appendChild(document.createTextNode(" / "));
+    const target = segments.slice(0, index + 1).join("/");
+    crumbs.appendChild(makeButton(name, () => { browse.path = target; renderDownloadRootPicker(kind); }));
+  });
+  panel.appendChild(crumbs);
+
+  const list = document.createElement("div");
+  list.className = "drp-list";
+  list.innerHTML = '<span class="hint-inline">불러오는 중...</span>';
+  panel.appendChild(list);
+
+  const actions = document.createElement("div");
+  actions.className = "drp-actions";
+  const absHere = browse.path ? `${info.base}/${browse.path}` : info.base;
+  actions.appendChild(makeButton("이 폴더 선택", () => {
+    downloadRootDraft[kind] = absHere;
+    browse.open = false;
+    renderDownloadRootPicker(kind);
+  }));
+  actions.appendChild(makeButton("새 폴더 만들기", async () => {
+    const name = (prompt("새 폴더 이름") || "").trim();
+    if (!name) return;
+    if (/[\\/]/.test(name)) { alert("폴더 이름에는 / 나 \\ 를 쓸 수 없습니다."); return; }
+    try {
+      await apiCall("/api/archive/folders", { method: "POST", body: JSON.stringify({ path: browse.path ? `${browse.path}/${name}` : name, root: "download_base" }) });
+      renderDownloadRootPicker(kind);
+    } catch (e) {
+      alert(e.message);
+    }
+  }));
+  panel.appendChild(actions);
+  box.appendChild(panel);
+
+  try {
+    const data = await apiCall(`/api/archive/folders?path=${encodeURIComponent(browse.path)}&local_root=download_base`);
+    list.innerHTML = "";
+    if (data.folders.length === 0) list.innerHTML = '<span class="hint-inline">하위 폴더가 없습니다.</span>';
+    for (const folder of data.folders) {
+      list.appendChild(makeButton(`📁 ${folder.name}`, () => { browse.path = folder.path; renderDownloadRootPicker(kind); }));
+    }
+  } catch (e) {
+    list.innerHTML = `<span class="error">${escapeHtml(e.message)}</span>`;
+  }
+}
+
+function downloadRootsStatusText(data) {
+  const part = (label, side) => `${label}: ${side.effective}${side.effective_host ? ` (호스트: ${side.effective_host})` : ""}`;
+  return `현재 받는 폴더 — ${part("네이버", data.naver)}${kakaoWebtoonsEnabled ? ` / ${part("카카오페이지", data.kakao)}` : ""}`;
+}
+
 async function loadDownloadRoots() {
   const statusEl = document.getElementById("download-roots-status");
   syncDownloadRootsVisibility();
   try {
     const data = await apiCall("/api/settings/download-roots");
-    document.getElementById("naver-download-root").value = data.naver.path || "";
-    document.getElementById("kakao-download-root").value = data.kakao.path || "";
+    downloadRootsInfo = data;
+    downloadRootDraft.naver = data.naver.path || "";
+    downloadRootDraft.kakao = data.kakao.path || "";
+    renderDownloadRootPicker("naver");
+    renderDownloadRootPicker("kakao");
     statusEl.classList.remove("error");
-    statusEl.textContent = `현재 받는 폴더 — 네이버: ${data.naver.effective}${kakaoWebtoonsEnabled ? ` / 카카오페이지: ${data.kakao.effective}` : ""}`;
+    statusEl.textContent = downloadRootsStatusText(data);
   } catch (e) {
     statusEl.classList.add("error");
     statusEl.textContent = e.message;
@@ -2231,12 +2349,10 @@ document.getElementById("btn-download-roots-save").addEventListener("click", asy
   statusEl.classList.remove("error");
   statusEl.textContent = "";
   try {
-    const body = {
-      naver: document.getElementById("naver-download-root").value.trim(),
-      kakao: document.getElementById("kakao-download-root").value.trim(),
-    };
+    const body = { naver: downloadRootDraft.naver, kakao: downloadRootDraft.kakao };
     const data = await apiCall("/api/settings/download-roots", { method: "POST", body: JSON.stringify(body) });
-    statusEl.textContent = `저장했습니다. 네이버: ${data.naver.effective}${kakaoWebtoonsEnabled ? ` / 카카오페이지: ${data.kakao.effective}` : ""}`;
+    downloadRootsInfo = data;
+    statusEl.textContent = `저장했습니다. ${downloadRootsStatusText(data)}`;
   } catch (e) {
     statusEl.classList.add("error");
     statusEl.textContent = e.message;

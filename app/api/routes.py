@@ -565,11 +565,17 @@ class DownloadRootsIn(BaseModel):
 def _download_roots_state() -> dict:
     """설정 화면용: 네이버/카카오페이지 각각 (설정값, 실제로 쓰는 폴더). 카카오 폴더를 비워 두면 네이버 폴더를 쓴다."""
     settings = get_settings()
+    naver_effective, kakao_effective = download_roots.naver_root(settings), download_roots.kakao_root(settings)
     return {
-        "naver": {"path": repository.get_setting(download_roots.NAVER_ROOT_SETTING_KEY) or "", "effective": download_roots.naver_root(settings), "default": settings.download_root},
+        # base: 컨테이너에 마운트된 다운로드 폴더(폴더 찾아보기의 출발점), host_path: 호스트 쪽 실제 경로(알 때만)
+        "base": settings.download_root, "host_path": settings.webtoon_download_host_path,
+        "naver": {
+            "path": repository.get_setting(download_roots.NAVER_ROOT_SETTING_KEY) or "", "effective": naver_effective,
+            "effective_host": download_roots.host_path_of(naver_effective, settings), "default": settings.download_root,
+        },
         "kakao": {
-            "path": repository.get_setting(kakao_page_download.DOWNLOAD_ROOT_SETTING_KEY) or "", "effective": download_roots.kakao_root(settings),
-            "default": download_roots.naver_root(settings),
+            "path": repository.get_setting(kakao_page_download.DOWNLOAD_ROOT_SETTING_KEY) or "", "effective": kakao_effective,
+            "effective_host": download_roots.host_path_of(kakao_effective, settings), "default": naver_effective,
         },
     }
 
@@ -2317,7 +2323,7 @@ async def list_archive_folders(path: str = "", local_root: str = "archive"):
     자체가 예외를 던지는 경우가 실제로 있어서, 항목 하나하나 개별 예외 처리를 한다 —
     문제있는 항목 하나 때문에 폴더 찾아보기 전체가 500으로 죽으면 안 되기 때문."""
     if local_root not in download_roots.LOCAL_ROOT_NAMES:
-        raise HTTPException(status_code=400, detail="local_root는 archive, download, kakao_download 중 하나여야 합니다.")
+        raise HTTPException(status_code=400, detail="local_root는 archive, download, kakao_download, download_base 중 하나여야 합니다.")
     settings = get_settings()
     root_dir = download_roots.local_root_path(local_root, settings)
     if not root_dir:
@@ -2361,14 +2367,14 @@ class CreateFolderIn(BaseModel):
     @classmethod
     def root_must_be_known(cls, v: str) -> str:
         if v not in download_roots.LOCAL_ROOT_NAMES:
-            raise ValueError("root는 archive 또는 download여야 합니다.")
+            raise ValueError("root는 archive, download, kakao_download, download_base 중 하나여야 합니다.")
         return v
 
 
 @router.post("/archive/folders")
 async def create_archive_folder(payload: CreateFolderIn):
     settings = get_settings()
-    root_dir = settings.archive_root if payload.root == "archive" else download_roots.naver_root(settings)
+    root_dir = download_roots.local_root_path(payload.root, settings)
     if not root_dir:
         detail = "로컬 아카이빙 경로(ARCHIVE_ROOT)" if payload.root == "archive" else "다운로드 경로(DOWNLOAD_ROOT)"
         raise HTTPException(status_code=400, detail=f"{detail}가 설정되어 있지 않습니다.")

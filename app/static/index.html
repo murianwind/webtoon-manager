@@ -123,7 +123,7 @@
       <div id="kakao-manual-summary" class="kakao-manual-summary"></div>
       <div class="manual-actions">
         <button id="btn-kakao-manual-select-all">전체선택</button>
-        <button id="btn-kakao-manual-select-missing">받을 회차만 선택</button>
+        <button id="btn-kakao-manual-select-missing">미보유만 선택</button>
         <button id="btn-kakao-manual-select-none">선택해제</button>
         <button id="btn-kakao-manual-download">선택 다운로드</button>
       </div>
@@ -304,14 +304,14 @@
 
     <div class="settings-card" id="settings-card-download-roots">
       <h2>다운로드 폴더</h2>
-      <p class="hint">네이버와 카카오페이지를 서로 다른 폴더에 받을 수 있습니다. 컨테이너에 마운트되어 있는 기존 폴더만 지정할 수 있고(없는 폴더는 자동으로 만들지 않음), 비우면 기본 폴더를 씁니다. 폴더를 바꿔도 이미 받은 파일은 옮기지 않으니, 필요하면 직접 옮겨 주세요. 기존 아카이빙 설정은 바꿀 필요가 없습니다(웹툰 대상은 새 폴더를 자동으로 따라가고, 폴더 대상은 보관 폴더 기준). 일괄 이동에서는 "다운로드 폴더"(네이버)와 "카카오페이지 다운로드 폴더"를 각각 고를 수 있습니다.</p>
+      <p class="hint">네이버와 카카오페이지를 서로 다른 폴더에 받을 수 있습니다. 컨테이너에 마운트된 다운로드 폴더(<code>WEBTOON_DOWNLOAD_HOST_PATH</code>) 안에서 폴더를 고르거나 새로 만들 수 있고, 고르지 않으면 기본 폴더를 씁니다. 호스트(윈도우 등)의 실제 경로도 함께 보고 싶으면 컨테이너 환경변수에 <code>WEBTOON_DOWNLOAD_HOST_PATH</code>를 넘겨주세요. 폴더를 바꿔도 이미 받은 파일은 옮기지 않으니, 필요하면 직접 옮겨 주세요. 기존 아카이빙 설정은 바꿀 필요가 없습니다(웹툰 대상은 새 폴더를 자동으로 따라가고, 폴더 대상은 보관 폴더 기준). 일괄 이동에서는 "다운로드 폴더"(네이버)와 "카카오페이지 다운로드 폴더"를 각각 고를 수 있습니다.</p>
       <div class="field-group">
-        <label for="naver-download-root">네이버 다운로드 폴더</label>
-        <input id="naver-download-root" type="text" placeholder="비우면 기본 폴더(DOWNLOAD_ROOT)" />
+        <label>네이버 다운로드 폴더</label>
+        <div id="naver-download-root-picker" class="download-root-picker"></div>
       </div>
       <div class="field-group" id="kakao-download-root-group">
-        <label for="kakao-download-root">카카오페이지 다운로드 폴더</label>
-        <input id="kakao-download-root" type="text" placeholder="비우면 네이버 다운로드 폴더와 같은 폴더" />
+        <label>카카오페이지 다운로드 폴더</label>
+        <div id="kakao-download-root-picker" class="download-root-picker"></div>
         <p class="field-hint">받을 회차는 이 폴더 안의 작품 폴더를 보고 정합니다(폴더가 없으면 처음부터 전부, 파일이 여러 개면 누락된 회차, 파일이 하나뿐이면 그 파일 이후부터).</p>
       </div>
       <button id="btn-download-roots-save">저장</button>

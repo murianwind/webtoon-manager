@@ -17,6 +17,8 @@ services:
       - "${WEB_PORT:-8000}:8000"
     environment:
       DOWNLOAD_ROOT: /webtoon_download
+      # 선택: 설정 화면이 "받는 폴더"를 호스트 경로로도 보여주게 하려면 호스트 폴더 경로를 그대로 넘겨준다(위 volumes에서 쓰는 값과 같음).
+      WEBTOON_DOWNLOAD_HOST_PATH: ${WEBTOON_DOWNLOAD_HOST_PATH}
       # 아카이빙(웹툰 파일을 별도 보관 폴더로 자동 정리) 기능을 쓰고 싶을 때만
       # 필요하다. 안 쓰실 거면 이 줄과 아래 대응하는 volumes 줄을 통째로 지우면
       # "아카이빙" 탭에 안내 화면이 뜨고 나머지 기능엔 영향 없다.
