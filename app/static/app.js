@@ -917,12 +917,20 @@ function formatRemaining(isoString) {
   return `${Math.floor(minutes / 60)}시간 ${minutes % 60}분 남음`;
 }
 
+// 기다무는 작품마다 충전 주기가 다르다(3시간/1일/3일 등) — 이용권 응답의 실제 주기로 표시한다
+function formatWaitfreePeriod(minutes) {
+  if (!minutes) return "";
+  if (minutes % 1440 === 0) return `${minutes / 1440}일`;
+  if (minutes % 60 === 0) return `${minutes / 60}시간`;
+  return `${minutes}분`;
+}
+
 function kakaoTicketsHtml(t) {
   if (!t) return "";
   const waitfree = t.waitfree_ready
     ? "<b>지금 사용 가능</b>"
     : `사용 중${t.waitfree_available_at && formatRemaining(t.waitfree_available_at) ? ` (${formatRemaining(t.waitfree_available_at)})` : ""}`;
-  return `<div class="kakao-manual-tickets"><span>대여권 <b>${t.rental_count}</b>장</span><span>1일 기다무 대여권 ${waitfree}</span></div>`;
+  return `<div class="kakao-manual-tickets"><span>대여권 <b>${t.rental_count}</b>장</span><span>${formatWaitfreePeriod(t.waitfree_period_minutes)} 기다무 대여권 ${waitfree}</span></div>`;
 }
 
 function refreshKakaoManualSubscribeButton() {
@@ -1015,12 +1023,22 @@ function renderKakaoManualTable() {
 function kakaoManualCheckboxes() {
   return Array.from(document.querySelectorAll(".kakao-manual-ep-checkbox:not(:disabled)"));
 }
-document.getElementById("btn-kakao-manual-select-all").addEventListener("click", () => {
-  kakaoManualCheckboxes().forEach((cb) => (cb.checked = true));
-});
-document.getElementById("btn-kakao-manual-select-missing").addEventListener("click", () => {
-  kakaoManualCheckboxes().forEach((cb) => (cb.checked = cb.dataset.missing === "1"));
-});
+
+// 고른 회차 중 기다무가 필요한 회차는 사용할 수 있는 장수(작품당 한 장)만큼만 고른다 — 번호가 가장 앞선 것부터. 나머지는 열 수 없어서
+// 골라 봐야 "건너뜀"이 되기 때문이다. 이미 받은 회차를 다시 받으려고 기다무를 쓰는 일은 이 버튼들이 하지 않는다(직접 체크하면 가능).
+function selectKakaoManual(wanted) {
+  let waitfreeLeft = 1;
+  for (const cb of kakaoManualCheckboxes().sort((x, y) => Number(x.dataset.no) - Number(y.dataset.no))) {
+    let on = wanted(cb);
+    if (on && cb.dataset.waitfree === "1") {
+      on = waitfreeLeft > 0 && cb.dataset.downloaded !== "1";
+      if (on) waitfreeLeft -= 1;
+    }
+    cb.checked = on;
+  }
+}
+document.getElementById("btn-kakao-manual-select-all").addEventListener("click", () => selectKakaoManual(() => true));
+document.getElementById("btn-kakao-manual-select-missing").addEventListener("click", () => selectKakaoManual((cb) => cb.dataset.missing === "1"));
 document.getElementById("btn-kakao-manual-select-none").addEventListener("click", () => {
   kakaoManualCheckboxes().forEach((cb) => (cb.checked = false));
 });

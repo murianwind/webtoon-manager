@@ -706,6 +706,8 @@ async def kakao_manual_analyze(series_id: int):
         "tickets": None if tickets is None else {
             "rental_count": tickets.rental_count, "own_count": tickets.own_count,
             "waitfree_ready": tickets.waitfree_ready, "waitfree_available_at": tickets.waitfree_available_at,
+            # 기다무 충전 주기(3시간/1일/3일 등 작품마다 다름) — 이용권 응답에 없으면 작품 정보의 값을 쓴다
+            "waitfree_period_minutes": tickets.waitfree_period_minutes or int(series_item.get("waitfree_period_by_minute") or 0),
         },
         "episodes": [
             {

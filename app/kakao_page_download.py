@@ -49,6 +49,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import aiohttp
+from yarl import URL
 
 from app import comicinfo, kakao_api, kakao_cover, kakao_page_auth, repository
 from app.file_utils import remove_forbidden_str_kakao
@@ -110,6 +111,7 @@ class TicketInfo:
     own_count: int = 0  # 소장권
     waitfree_ready: bool = False  # 지금 기다무를 쓸 수 있음
     waitfree_available_at: str | None = None  # 기다무를 다시 쓸 수 있게 되는 시각(쓸 수 없을 때)
+    waitfree_period_minutes: int = 0  # 기다무가 다시 충전되는 주기(작품마다 3시간/1일/3일 등으로 다르다)
 
 
 @dataclass
@@ -426,6 +428,7 @@ class KakaoPageClient:
         return TicketInfo(
             rental_count=int(mine.get("ticket_rental_count") or 0), own_count=int(mine.get("ticket_own_count") or 0),
             waitfree_ready=ready, waitfree_available_at=None if ready else waitfree.get("charged_at"),
+            waitfree_period_minutes=int(waitfree.get("charged_period_by_minute") or 0),
         )
 
     async def use_waitfree_ticket(self, product_id: int) -> tuple[bool, str]:
@@ -468,17 +471,21 @@ class KakaoPageClient:
         return urls or None
 
     async def download_image(self, url: str) -> tuple[bytes, str] | None:
-        """이미지 하나를 (바이트, Content-Type)으로. 실패하면 잠깐 쉬고 몇 번 더 시도하고, 그래도 안 되면 None."""
+        """이미지 하나를 (바이트, Content-Type)으로. 실패하면 잠깐 쉬고 몇 번 더 시도하고, 그래도 안 되면 None.
+        서명된 주소(token/signature)는 한 글자만 달라져도 404가 되어서, 주소를 다시 인코딩하지 않고 받은 그대로 보낸다."""
+        target = URL(url, encoded=True)
         for attempt in range(_IMAGE_RETRIES):
             try:
-                async with self._session.get(url, headers=self._headers(image=True), timeout=self._timeout) as response:
+                async with self._session.get(target, headers=self._headers(image=True), timeout=self._timeout) as response:
                     self._absorb_cookies(response)
                     if response.status == 200:
                         body = await response.read()
                         if body:
                             return body, response.headers.get("Content-Type", "")
                     else:
-                        log.warning("카카오페이지 이미지 받기 실패: HTTP %s", response.status)
+                        # 토큰/서명은 남기지 않고, 어느 서버의 어느 경로가 어떤 응답이었는지만 기록한다(원인 파악용)
+                        snippet = (await response.text(errors="replace"))[:120].replace("\n", " ") if response.status != 200 else ""
+                        log.warning("카카오페이지 이미지 받기 실패: HTTP %s (%s%s) %s", response.status, target.host, target.path, snippet)
             except Exception as e:
                 log.warning("카카오페이지 이미지 받기 예외: %s", e)
             if attempt < _IMAGE_RETRIES - 1:
@@ -513,13 +520,22 @@ async def download_episode(client: KakaoPageClient, series_id: int, episode: Epi
     if not urls:
         return None
 
+    # 첫 이미지로 먼저 확인한다. 서명된 주소가 안 먹으면(만료/무효) 주소를 새로 받아서 한 번 더 해 보고, 그래도 안 되면 나머지 수백
+    # 장을 헛되이 요청하지 않고 바로 실패로 끝낸다.
+    first = await client.download_image(urls[0])
+    if first is None:
+        urls = await client.viewer_image_urls(series_id, episode.product_id) or urls
+        first = await client.download_image(urls[0])
+        if first is None:
+            return None
+
     semaphore = asyncio.Semaphore(IMAGE_CONCURRENCY)
 
     async def _one(url: str):
         async with semaphore:
             return await client.download_image(url)
 
-    images = await asyncio.gather(*[_one(u) for u in urls])
+    images = [first, *await asyncio.gather(*[_one(u) for u in urls[1:]])]
     if any(image is None for image in images):
         return None
 
