@@ -3124,11 +3124,11 @@ function enterArchiveTargetEditMode(target) {
   const banner = document.getElementById("archive-target-edit-banner");
   const bannerText = document.getElementById("archive-target-edit-banner-text");
   const currentLocation = `${target.dest_type === "rclone" ? "☁️" : "💾"} ${target.dest_base_path}`;
-  bannerText.textContent = `"${target.title_name}" 수정 중 — 현재 위치: ${currentLocation}`;
+  bannerText.textContent = `"${archiveTargetLabel(target)}" 수정 중 — 현재 위치: ${currentLocation}`;
   banner.classList.remove("hidden");
 
   const select = document.getElementById("archive-target-webtoon-select");
-  select.innerHTML = `<option value="${escapeHtml(target.title_id)}">${escapeHtml(target.title_name)}</option>`;
+  select.innerHTML = `<option value="${escapeHtml(target.title_id)}">${escapeHtml(archiveTargetLabel(target))}</option>`;
   select.disabled = true;
 
   document.getElementById("btn-add-archive-target").textContent = "수정 저장";
@@ -3256,22 +3256,31 @@ async function loadArchivePage() {
   await resumeBulkMoveStatusIfRunning(); // 탭을 나갔다 들어와도 실행 중이던 일괄이동을 이어서 보여줌
 }
 
+// 웹툰 유형 아카이빙 대상의 표시 이름 — 카카오페이지 작품은 "[카카오]"를 붙인다(대상 id는 "kakao_<시리즈 번호>")
+function archiveTargetLabel(t) {
+  return t.platform === "kakao" ? `[카카오] ${t.title_name}` : t.title_name;
+}
+
 async function loadArchiveTargetWebtoonOptions() {
   const select = document.getElementById("archive-target-webtoon-select");
   try {
-    const [webtoons, targets] = await Promise.all([
+    const [webtoons, kakaoWebtoons, targets] = await Promise.all([
       apiCall("/api/webtoons?status=active"),
+      // 구독 중인 카카오페이지 작품도 등록할 수 있다(카카오웹툰 관리를 켰을 때). 조회가 실패해도 네이버 목록은 그대로 보여준다.
+      kakaoWebtoonsEnabled ? apiCall("/api/kakao-webtoons?status=active").catch(() => []) : Promise.resolve([]),
       apiCall("/api/archive/targets"),
     ]);
     const registeredIds = new Set(targets.map((t) => t.title_id));
     select.innerHTML = "";
-    for (const w of webtoons) {
-      if (registeredIds.has(w.title_id)) continue; // 이미 등록된 웹툰은 다시 고를 필요가 없음
+    const addOption = (value, label) => {
+      if (registeredIds.has(value)) return; // 이미 등록된 웹툰은 다시 고를 필요가 없음
       const opt = document.createElement("option");
-      opt.value = w.title_id;
-      opt.textContent = w.title;
+      opt.value = value;
+      opt.textContent = label;
       select.appendChild(opt);
-    }
+    };
+    for (const w of webtoons) addOption(w.title_id, kakaoWebtoonsEnabled ? `[네이버] ${w.title}` : w.title);
+    for (const w of kakaoWebtoons) addOption(`kakao_${w.title_id}`, `[카카오] ${w.title}`);
     if (select.options.length === 0) {
       select.innerHTML = '<option value="">등록 가능한 웹툰이 없습니다</option>';
     }
@@ -3448,7 +3457,7 @@ async function loadArchiveTargetList() {
 
       const nameSpan = document.createElement("span");
       nameSpan.className = "job-history-name";
-      nameSpan.textContent = t.title_name;
+      nameSpan.textContent = archiveTargetLabel(t);
       summary.appendChild(nameSpan);
 
       const locationSpan = document.createElement("span");

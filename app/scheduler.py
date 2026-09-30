@@ -638,6 +638,7 @@ async def run_archive_job() -> None:
             moved = await asyncio.to_thread(
                 archiver.run_periodic_archive, settings.archive_root, download_roots.naver_root(settings), settings.rclone_config_path,
                 lambda msg: job_status.log_line("archive", msg), conflicts, failures,
+                download_roots.kakao_root(settings),  # 카카오페이지 웹툰 대상은 카카오 다운로드 폴더에서 옮긴다
             )
             job_status.log_line("archive", f"지정 웹툰 {moved}개 파일 이동 완료")
 

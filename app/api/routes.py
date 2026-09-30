@@ -1908,6 +1908,7 @@ class ArchiveTargetOut(BaseModel):
     source_path: str = ""
     filename_template_preset_id: int | None = None
     filename_template_preset_name: str | None = None  # None이면 "기본(전역)"
+    platform: str = "naver"  # 웹툰 유형 대상의 플랫폼(naver | kakao)
 
 
 class ArchiveTargetIn(BaseModel):
@@ -1951,8 +1952,8 @@ def _archive_target_to_out(target) -> ArchiveTargetOut:
             target.source_dest_type, target.source_path
         )
     else:
-        wt = repository.get(target.title_id)
-        title_name = wt.title if wt else target.title_id
+        source = archiver.resolve_webtoon_source(target.title_id)
+        title_name = source.title if source else target.title_id
     preset_name = None
     if target.filename_template_preset_id is not None:
         preset = repository.get_filename_template_preset(target.filename_template_preset_id)
@@ -1968,6 +1969,7 @@ def _archive_target_to_out(target) -> ArchiveTargetOut:
         source_path=target.source_path,
         filename_template_preset_id=target.filename_template_preset_id,
         filename_template_preset_name=preset_name,
+        platform="kakao" if target.title_id.startswith(archiver.KAKAO_TARGET_PREFIX) else "naver",
     )
 
 
@@ -1989,6 +1991,9 @@ async def add_archive_target(payload: ArchiveTargetIn):
     # 이미 파일이 있는 폴더도 허용한다 — "이미 파일이 있습니다" 경고는 프론트엔드의
     # 폴더 선택기 단계(/archive/folder-check)에서 이미 보여주고 확인받으므로,
     # 여기서는 그 경고를 다시 검사하지 않는다(등록 자체는 항상 그대로 진행).
+
+    if payload.title_id.startswith(archiver.KAKAO_TARGET_PREFIX) and await asyncio.to_thread(archiver.resolve_webtoon_source, payload.title_id) is None:
+        raise HTTPException(status_code=404, detail="등록되지 않은 카카오 웹툰입니다(먼저 구독해주세요).")
 
     if payload.filename_template_preset_id is not None:
         preset = await asyncio.to_thread(repository.get_filename_template_preset, payload.filename_template_preset_id)
@@ -2206,12 +2211,11 @@ async def preview_archive_filename(payload: PreviewFilenameIn):
         )
         return PreviewFilenameOut(**result)
 
-    wt = await asyncio.to_thread(repository.get, payload.title_id)
-    if wt is None:
+    source = await asyncio.to_thread(archiver.resolve_webtoon_source, payload.title_id)
+    if source is None:
         raise HTTPException(status_code=404, detail="웹툰을 찾을 수 없습니다.")
-    result = await asyncio.to_thread(
-        archiver.preview_filename_for_title, download_roots.naver_root(settings), wt.title, payload.template, wt.writer_names
-    )
+    root = download_roots.kakao_root(settings) if source.kakao else download_roots.naver_root(settings)
+    result = await asyncio.to_thread(archiver.preview_filename_for_title, root, source.title, payload.template, source.writer_names, source.kakao)
     return PreviewFilenameOut(**result)
 
 
@@ -2412,14 +2416,14 @@ async def run_archive_now(payload: ArchiveRunIn):
             if payload.title_ids:
                 moved = await asyncio.to_thread(
                     archiver.manual_archive_now, settings.archive_root, download_roots.naver_root(settings), payload.title_ids, settings.rclone_config_path,
-                    lambda msg: job_status.log_line("archive", msg), payload.full_move,
+                    lambda msg: job_status.log_line("archive", msg), payload.full_move, download_roots.kakao_root(settings),
                 )
                 job_status.log_line("archive", f"{moved}개 파일 이동 완료")
             else:
                 all_ids = [t.title_id for t in repository.list_archive_targets() if t.enabled]
                 moved = await asyncio.to_thread(
                     archiver.manual_archive_now, settings.archive_root, download_roots.naver_root(settings), all_ids, settings.rclone_config_path,
-                    lambda msg: job_status.log_line("archive", msg),
+                    lambda msg: job_status.log_line("archive", msg), False, download_roots.kakao_root(settings),
                 )
                 job_status.log_line("archive", f"지정 웹툰 {moved}개 파일 이동 완료")
 

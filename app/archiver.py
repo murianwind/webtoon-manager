@@ -18,6 +18,7 @@
   경고 후 진행 가능하도록 완화됨).
 """
 
+from dataclasses import dataclass
 import logging
 import os
 import re
@@ -26,7 +27,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 from app import kakao_cover, rclone_client, repository
-from app.file_utils import remove_forbidden_str
+from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
 from app.zipper import _LEADING_DIGITS_RE, _clean_name
 
 log = logging.getLogger(__name__)
@@ -312,11 +313,11 @@ def render_archive_filename(
     return rendered + suffix
 
 
-def preview_filename_for_title(download_root: str, title_name: str, template: str, writer_names: list[str]) -> dict:
+def preview_filename_for_title(download_root: str, title_name: str, template: str, writer_names: list[str], kakao: bool = False) -> dict:
     """설정 화면의 미리보기용 — 실제 다운로드 폴더에 있는 회차 zip 파일 하나를 골라서,
     템플릿을 적용하면 실제로 어떤 이름이 되는지 보여준다. 가장 번호가 큰(최근) 파일을
     보여준다 — 사용자가 알아보기 쉬운 최신 회차일 가능성이 높아서."""
-    title_dir = Path(download_root) / remove_forbidden_str(title_name)
+    title_dir = _title_folder(download_root, title_name, kakao)
     files = _list_episode_files_sorted(title_dir)
     if not files:
         return {"original_filename": None, "rendered_filename": None, "message": "다운로드 폴더에 zip 파일이 없습니다."}
@@ -467,12 +468,44 @@ def _move_episode_file(
     return move_file_with_conflict_policy(src, local_dest_dir, policy, dest_filename)
 
 
+KAKAO_TARGET_PREFIX = "kakao_"  # 카카오페이지 웹툰 대상의 id는 "kakao_<시리즈 번호>" — 네이버 title_id와 번호가 겹치지 않게
+
+
+@dataclass
+class WebtoonSource:
+    title: str
+    writer_names: list[str]
+    kakao: bool  # True면 카카오페이지 다운로드 폴더/카카오 폴더 이름 규칙을 쓴다
+
+
+def resolve_webtoon_source(title_id: str) -> "WebtoonSource | None":
+    """웹툰 유형 아카이빙 대상의 id로 작품 정보를 찾는다(네이버 title_id 또는 "kakao_<번호>"). 없으면 None."""
+    if title_id.startswith(KAKAO_TARGET_PREFIX):
+        try:
+            record = repository.get_kakao_webtoon(int(title_id[len(KAKAO_TARGET_PREFIX):]))
+        except ValueError:
+            return None
+        if record is None:
+            return None
+        # 카카오페이지 목록은 작가 이름만 알려줘서(역할 구분 없이) {author}에는 그 이름들을 그대로 쓴다
+        names = [n.strip() for n in (record["author_summary"] or "").split(",") if n.strip()]
+        return WebtoonSource(title=record["title"], writer_names=names, kakao=True)
+    wt = repository.get(title_id)
+    return None if wt is None else WebtoonSource(title=wt.title, writer_names=wt.writer_names, kakao=False)
+
+
+def _title_folder(download_root: str, title_name: str, kakao: bool) -> Path:
+    """다운로드 폴더 아래 작품 폴더 — 폴더 이름 규칙(금지문자 치환)이 플랫폼마다 다르다."""
+    return Path(download_root) / (remove_forbidden_str_kakao(title_name) if kakao else remove_forbidden_str(title_name))
+
+
 def _archive_title(
     archive_root: str, download_root: str, title_id: str, title_name: str,
     base_path: str, policy: str, trigger_type: str, keep_last: bool,
     dest_type: str = "local", rclone_config_path: str = "",
     progress_callback=None, conflict_log: list | None = None, failure_log: list | None = None,
     writer_names: list[str] | None = None, filename_template_preset_id: int | None = None,
+    kakao: bool = False,
 ) -> int:
     """실제로 파일들을 옮기고 이력을 남긴다. 반환값은 옮긴 개수.
     dest_type이 'rclone'이면 로컬 shutil 대신 rclone CLI로 처리한다(Windows 마운트를
@@ -491,7 +524,7 @@ def _archive_title(
         log.error("로컬 목적지인데 ARCHIVE_ROOT가 설정 안 되어 있어 건너뜀 (title_id=%s)", title_id)
         return 0
 
-    title_dir = Path(download_root) / remove_forbidden_str(title_name)
+    title_dir = _title_folder(download_root, title_name, kakao)
     files = _list_episode_files_sorted(title_dir)
     if keep_last and len(files) > 0:
         files = files[:-1]  # 마지막(가장 큰 번호)은 보존
@@ -555,6 +588,7 @@ def _archive_title(
 def run_periodic_archive(
     archive_root: str, download_root: str, rclone_config_path: str = "",
     progress_callback=None, conflict_log: list | None = None, failure_log: list | None = None,
+    kakao_download_root: str | None = None,
 ) -> int:
     """지정된(enabled) 웹툰/폴더 대상 전부, 마지막 파일 보존하며 이동. 반환값은 전체 이동 개수."""
     policy = get_conflict_policy()
@@ -568,22 +602,23 @@ def run_periodic_archive(
                 progress_callback=progress_callback, conflict_log=conflict_log, failure_log=failure_log,
             )
             continue
-        wt = repository.get(target.title_id)
-        if wt is None:
+        source = resolve_webtoon_source(target.title_id)
+        if source is None:
             continue
         total += _archive_title(
-            archive_root, download_root, target.title_id, wt.title,
+            archive_root, (kakao_download_root or download_root) if source.kakao else download_root, target.title_id, source.title,
             target.dest_base_path, policy, "periodic", keep_last=True,
             dest_type=target.dest_type, rclone_config_path=rclone_config_path,
             progress_callback=progress_callback, conflict_log=conflict_log, failure_log=failure_log,
-            writer_names=wt.writer_names, filename_template_preset_id=target.filename_template_preset_id,
+            writer_names=source.writer_names, filename_template_preset_id=target.filename_template_preset_id,
+            kakao=source.kakao,
         )
     return total
 
 
 def manual_archive_now(
     archive_root: str, download_root: str, title_ids: list[str], rclone_config_path: str = "",
-    progress_callback=None, full_move: bool = False,
+    progress_callback=None, full_move: bool = False, kakao_download_root: str | None = None,
 ) -> int:
     """수동 실행 — 기본은 지정된 것과 동일 규칙(마지막 파일 보존).
     full_move=True면 완결 자동이동과 동일하게 마지막 파일까지 전부 옮기고, 다 옮긴 뒤
@@ -605,21 +640,22 @@ def manual_archive_now(
                 progress_callback=progress_callback,
             )
             continue
-        wt = repository.get(title_id)
-        if wt is None:
+        source = resolve_webtoon_source(title_id)
+        if source is None:
             continue
+        root = (kakao_download_root or download_root) if source.kakao else download_root
         total += _archive_title(
-            archive_root, download_root, title_id, wt.title,
+            archive_root, root, title_id, source.title,
             target.dest_base_path, policy, trigger_type, keep_last=not full_move,
             dest_type=target.dest_type, rclone_config_path=rclone_config_path,
             progress_callback=progress_callback,
-            writer_names=wt.writer_names, filename_template_preset_id=target.filename_template_preset_id,
+            writer_names=source.writer_names, filename_template_preset_id=target.filename_template_preset_id,
+            kakao=source.kakao,
         )
         if full_move:
-            title_dir = Path(download_root) / remove_forbidden_str(wt.title)
-            _cleanup_empty_dirs(title_dir)
+            _cleanup_empty_dirs(_title_folder(root, source.title, source.kakao))
             if progress_callback:
-                progress_callback(f"[{wt.title}] 완결 처리 — 다운로드 폴더 정리 확인")
+                progress_callback(f"[{source.title}] 완결 처리 — 다운로드 폴더 정리 확인")
     return total
 
 
