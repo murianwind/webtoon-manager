@@ -5,13 +5,10 @@ import asyncio
 import logging
 from pathlib import Path
 
-import markdown
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
 
-from app import (
-    repository,
-)
+from app import help_page, repository
 
 
 log = logging.getLogger(__name__)
@@ -22,17 +19,13 @@ router = APIRouter()
 
 @router.get("/help", response_class=HTMLResponse)
 async def get_help_page():
-    """"도움말" 탭에 보여줄 README를 HTML로 변환해서 준다 — README.md 하나로
-    설치 안내/앱 안내를 둘 다 겸하고 있어서, 그중 앱을 쓰는 방법 부분만 이 화면에
-    나오면 되지만 굳이 분리하지 않고 전체를 그대로 보여준다(설치 안내도 나중에
-    다시 볼 일이 있을 수 있어서)."""
+    """"도움말" 탭에 보여줄 README(일반 사용자 설명서)를 목차가 붙은 HTML로 바꿔서 준다. 변환 규칙은 app/help_page.py."""
     readme_path = Path(__file__).resolve().parent.parent.parent / "README.md"
     try:
         text = await asyncio.to_thread(readme_path.read_text, encoding="utf-8")
     except FileNotFoundError:
         return HTMLResponse("<p>README.md를 찾을 수 없습니다.</p>", status_code=404)
-    html = markdown.markdown(text, extensions=["tables", "fenced_code"])
-    return HTMLResponse(html)
+    return HTMLResponse(help_page.render_help(text))
 
 
 @router.get("/backup")

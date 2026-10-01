@@ -3,3 +3,5 @@
 httpx==0.28.1        # tests/backend가 FastAPI 앱을 HTTP로 호출할 때(ASGITransport)
 pyflakes==3.4.0      # 미사용 임포트/변수, 미정의 이름 검사
 coverage==7.16.2     # python tests/run_backend.py --coverage
+actionlint-py==1.7.12.25   # 깃헙 액션 설정 파일 문법 검사(.github/workflows)
+PyYAML==6.0.3        # tests/backend/test_docs.py가 설치 YAML(docker-compose.yml)과 깃헙 액션 설정 파일을 읽을 때
