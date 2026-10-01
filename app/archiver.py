@@ -878,97 +878,87 @@ def _derive_folder_display_name(source_dest_type: str, source_path: str) -> str:
     return Path(source_path).name or source_path
 
 
-def _archive_folder_target(
-    target, policy: str, rclone_config_path: str, archive_root: str, keep_last: bool,
-    progress_callback=None, conflict_log: list | None = None, failure_log: list | None = None,
-) -> int:
-    """폴더-폴더 대상(웹툰 레코드가 없는 카카오웹툰 등) 아카이빙. _archive_title과
-    같은 규칙(마지막 파일 보존/완결 전체이동, 파일명 템플릿, 카카오 표지 갱신,
-    이력 기록)을 쓰되, 다운로드 루트의 title_id 대신 등록된 원본 폴더를 그대로 쓴다.
-
-    원본이 로컬이면 회차 zip 파일명 템플릿({page_count} 포함)을 전부 지원한다.
-    원본이 rclone이면 zip 내용을 굳이 내려받지 않기 위해 {page_count}가 들어간
-    템플릿은 적용하지 않고(파일마다 안전하게 원본 이름 유지) 나머지 이동/이름변경은
-    그대로 서버측으로 처리한다 — info.xml만 가볍게 읽어서 카카오 표지 갱신은 그대로 지원한다."""
-    display_name = target.display_name or _derive_folder_display_name(target.source_dest_type, target.source_path)
-    trigger_type = "manual_finish" if not keep_last else "manual"
-    template = _get_effective_filename_template(target.filename_template_preset_id)
-
+def _scan_folder_source(target, rclone_config_path: str, archive_root: str, display_name: str, failure_log: "list | None"):
+    """폴더 대상의 원본을 훑어서 (종류, 컨텍스트, [(번호, 회차 zip 이름)], [정보 파일 이름])을 돌려준다. 원본이 없거나 원격 정보/목록이 잘못이면
+    실패를 기록하고 None."""
     src_kind = target.source_dest_type
     if src_kind == "local":
         src_ctx = _local_archive_path(archive_root, target.source_path)
         if not src_ctx.is_dir():
             if failure_log is not None:
                 failure_log.append((display_name, "-", "원본 폴더가 존재하지 않습니다."))
-            return 0
+            return None
         rel_files = [(n, p.name) for n, p in _list_episode_files_sorted(src_ctx)]
-        meta_names = [p.name for p in _find_metadata_files(src_ctx)]
-    else:
-        remote, path = _parse_rclone_target(target.source_path)
-        if not remote:
-            if failure_log is not None:
-                failure_log.append((display_name, "-", "원본 원격 정보가 올바르지 않습니다."))
-            return 0
-        src_ctx = (remote, path)
-        try:
-            names = rclone_client.list_top_level_files(rclone_config_path, remote, path)
-        except rclone_client.RcloneError as e:
-            if failure_log is not None:
-                failure_log.append((display_name, "-", f"원본 원격 폴더 목록 조회 실패: {e}"))
-            return 0
-        rel_files = []
-        for name in names:
-            if not name.endswith(".zip"):
-                continue
-            m = _LEADING_DIGITS_RE.match(name)
-            if m:
-                rel_files.append((int(m.group(1)), name))
-        rel_files.sort(key=lambda t: t[0])
-        meta_names = [n for n in names if n == "info.xml" or n.startswith("cover.")]
+        return src_kind, src_ctx, rel_files, [p.name for p in _find_metadata_files(src_ctx)]
 
-    # 카카오 표지 갱신 (완결 처리일 때만)
-    if not keep_last:
-        try:
-            regenerated_local_cover = None
-            if src_kind == "local":
-                if kakao_cover.refresh_kakao_cover_if_applicable(src_ctx):
-                    if progress_callback:
-                        progress_callback(f"[{display_name}] 카카오 표지 갱신함")
-                    meta_names = [p.name for p in _find_metadata_files(src_ctx)]
-            elif "info.xml" in meta_names:
-                remote, path = src_ctx
-                xml_text = rclone_client.read_small_text_file(rclone_config_path, remote, path, "info.xml")
-                series_id = kakao_cover.parse_kakao_web_url(_extract_web_url_from_xml_text(xml_text) or "")
-                if series_id:
-                    regenerated_local_cover = _download_kakao_cover_to_temp_file(series_id)
-                    if regenerated_local_cover and progress_callback:
-                        progress_callback(f"[{display_name}] 카카오 표지 갱신함")
-        except Exception as e:
-            log.warning("카카오 표지 갱신 중 예외 (무시하고 계속) (%s): %s", display_name, e)
-            regenerated_local_cover = None
-    else:
-        regenerated_local_cover = None
+    remote, path = _parse_rclone_target(target.source_path)
+    if not remote:
+        if failure_log is not None:
+            failure_log.append((display_name, "-", "원본 원격 정보가 올바르지 않습니다."))
+        return None
+    try:
+        names = rclone_client.list_top_level_files(rclone_config_path, remote, path)
+    except rclone_client.RcloneError as e:
+        if failure_log is not None:
+            failure_log.append((display_name, "-", f"원본 원격 폴더 목록 조회 실패: {e}"))
+        return None
+    rel_files = []
+    for name in names:
+        if not name.endswith(".zip"):
+            continue
+        m = _LEADING_DIGITS_RE.match(name)
+        if m:
+            rel_files.append((int(m.group(1)), name))
+    rel_files.sort(key=lambda t: t[0])
+    return src_kind, (remote, path), rel_files, [n for n in names if n == "info.xml" or n.startswith("cover.")]
 
-    if keep_last and len(rel_files) > 0:
-        rel_files = rel_files[:-1]
 
-    if not rel_files and not meta_names and regenerated_local_cover is None:
-        return 0
+def _refresh_folder_cover(src_kind: str, src_ctx, meta_names: list[str], rclone_config_path: str, display_name: str, progress_callback):
+    """완결 처리일 때 카카오페이지 공식 표지로 새로 받는다. 로컬 원본은 폴더 안에서 바로 새 cover.jpg로 바꾸고(정보 파일 목록을 다시 읽음),
+    원격 원본은 info.xml만 가볍게 읽어 판별한 뒤 받은 표지를 임시 로컬 파일로만 만들어 둔다. (임시 표지 경로 또는 None, 정보 파일 목록)을
+    돌려준다. 실패해도 이동 자체는 계속한다."""
+    try:
+        if src_kind == "local":
+            if kakao_cover.refresh_kakao_cover_if_applicable(src_ctx):
+                if progress_callback:
+                    progress_callback(f"[{display_name}] 카카오 표지 갱신함")
+                meta_names = [p.name for p in _find_metadata_files(src_ctx)]
+            return None, meta_names
+        if "info.xml" in meta_names:
+            remote, path = src_ctx
+            xml_text = rclone_client.read_small_text_file(rclone_config_path, remote, path, "info.xml")
+            series_id = kakao_cover.parse_kakao_web_url(_extract_web_url_from_xml_text(xml_text) or "")
+            if series_id:
+                regenerated = _download_kakao_cover_to_temp_file(series_id)
+                if regenerated and progress_callback:
+                    progress_callback(f"[{display_name}] 카카오 표지 갱신함")
+                return regenerated, meta_names
+    except Exception as e:
+        log.warning("카카오 표지 갱신 중 예외 (무시하고 계속) (%s): %s", display_name, e)
+    return None, meta_names
 
+
+def _prepare_folder_dest(target, rclone_config_path: str, archive_root: str, display_name: str, failure_log: "list | None"):
+    """목적지(폴더/원격 경로)를 만들고 (종류, 컨텍스트)를 돌려준다. 원격 정보가 잘못이면 실패를 기록하고 None."""
     if target.dest_type == "local":
         dest_ctx = _local_archive_path(archive_root, target.dest_base_path)
         dest_ctx.mkdir(parents=True, exist_ok=True)
-    else:
-        remote, path = _parse_rclone_target(target.dest_base_path)
-        if not remote:
-            if failure_log is not None:
-                failure_log.append((display_name, "-", "목적지 원격 정보가 올바르지 않습니다."))
-            return 0
-        if path:
-            rclone_client.create_folder(rclone_config_path, remote, path)
-        dest_ctx = (remote, path)
-    dest_kind = target.dest_type
+        return target.dest_type, dest_ctx
+    remote, path = _parse_rclone_target(target.dest_base_path)
+    if not remote:
+        if failure_log is not None:
+            failure_log.append((display_name, "-", "목적지 원격 정보가 올바르지 않습니다."))
+        return None
+    if path:
+        rclone_client.create_folder(rclone_config_path, remote, path)
+    return target.dest_type, (remote, path)
 
+
+def _move_folder_files(
+    target, src_kind: str, src_ctx, rel_files: list, dest_kind: str, dest_ctx, policy: str, template: str, display_name: str,
+    trigger_type: str, rclone_config_path: str, progress_callback, conflict_log: "list | None", failure_log: "list | None",
+) -> int:
+    """회차 zip들을 하나씩 옮기고(파일명 템플릿, 충돌 정책, 이력) 옮긴 개수를 돌려준다. 한 파일이 실패해도 나머지는 계속한다."""
     moved = 0
     for _num, name in rel_files:
         try:
@@ -1007,7 +997,15 @@ def _archive_folder_target(
                 progress_callback(f"[{display_name}] 이동 실패: {name} — {e}")
             if failure_log is not None:
                 failure_log.append((display_name, name, str(e)))
+    return moved
 
+
+def _transfer_folder_metadata(
+    src_kind: str, src_ctx, dest_kind: str, dest_ctx, meta_names: list[str], regenerated_local_cover: "str | None",
+    keep_last: bool, rclone_config_path: str, display_name: str,
+) -> None:
+    """info.xml/cover를 옮긴다 — 주기/수동은 복사(커버는 목적지에 이미 있으면 건너뜀), 완결 처리는 이동. 새로 받은 임시 표지가 있으면 목적지
+    cover.jpg로 올리고 임시 파일은 항상 지운다. 어느 쪽이든 실패는 무시하고 계속한다(이동 자체를 막지 않는다)."""
     for name in meta_names:
         try:
             if keep_last:
@@ -1032,13 +1030,59 @@ def _archive_folder_target(
         finally:
             Path(regenerated_local_cover).unlink(missing_ok=True)
 
-    if not keep_last:
-        if src_kind == "local":
-            _cleanup_empty_dirs(src_ctx)
-        else:
-            remote, path = src_ctx
-            rclone_client.rmdirs_if_empty(rclone_config_path, remote, path)
 
+def _cleanup_source_folder(src_kind: str, src_ctx, rclone_config_path: str) -> None:
+    """옮기고 나서 원본 쪽에 파일이 하나도 안 남은 빈 폴더를 정리한다."""
+    if src_kind == "local":
+        _cleanup_empty_dirs(src_ctx)
+    else:
+        remote, path = src_ctx
+        rclone_client.rmdirs_if_empty(rclone_config_path, remote, path)
+
+
+def _archive_folder_target(
+    target, policy: str, rclone_config_path: str, archive_root: str, keep_last: bool,
+    progress_callback=None, conflict_log: list | None = None, failure_log: list | None = None,
+) -> int:
+    """폴더-폴더 대상(웹툰 레코드가 없는 카카오웹툰 등) 아카이빙. _archive_title과
+    같은 규칙(마지막 파일 보존/완결 전체이동, 파일명 템플릿, 카카오 표지 갱신,
+    이력 기록)을 쓰되, 다운로드 루트의 title_id 대신 등록된 원본 폴더를 그대로 쓴다.
+
+    원본이 로컬이면 회차 zip 파일명 템플릿({page_count} 포함)을 전부 지원한다.
+    원본이 rclone이면 zip 내용을 굳이 내려받지 않기 위해 {page_count}가 들어간
+    템플릿은 적용하지 않고(파일마다 안전하게 원본 이름 유지) 나머지 이동/이름변경은
+    그대로 서버측으로 처리한다 — info.xml만 가볍게 읽어서 카카오 표지 갱신은 그대로 지원한다."""
+    display_name = target.display_name or _derive_folder_display_name(target.source_dest_type, target.source_path)
+    trigger_type = "manual_finish" if not keep_last else "manual"
+    template = _get_effective_filename_template(target.filename_template_preset_id)
+
+    scanned = _scan_folder_source(target, rclone_config_path, archive_root, display_name, failure_log)
+    if scanned is None:
+        return 0
+    src_kind, src_ctx, rel_files, meta_names = scanned
+
+    regenerated_local_cover = None
+    if not keep_last:  # 카카오 표지 갱신은 완결 처리일 때만
+        regenerated_local_cover, meta_names = _refresh_folder_cover(src_kind, src_ctx, meta_names, rclone_config_path, display_name, progress_callback)
+
+    if keep_last and len(rel_files) > 0:
+        rel_files = rel_files[:-1]  # 마지막(가장 큰 번호)은 보존
+
+    if not rel_files and not meta_names and regenerated_local_cover is None:
+        return 0
+
+    dest = _prepare_folder_dest(target, rclone_config_path, archive_root, display_name, failure_log)
+    if dest is None:
+        return 0
+    dest_kind, dest_ctx = dest
+
+    moved = _move_folder_files(
+        target, src_kind, src_ctx, rel_files, dest_kind, dest_ctx, policy, template, display_name, trigger_type,
+        rclone_config_path, progress_callback, conflict_log, failure_log,
+    )
+    _transfer_folder_metadata(src_kind, src_ctx, dest_kind, dest_ctx, meta_names, regenerated_local_cover, keep_last, rclone_config_path, display_name)
+    if not keep_last:
+        _cleanup_source_folder(src_kind, src_ctx, rclone_config_path)
     return moved
 
 
@@ -1067,6 +1111,84 @@ def _download_kakao_cover_to_temp_file(series_id: str) -> str | None:
     os.close(fd)
     Path(tmp_path).write_bytes(jpeg_bytes)
     return tmp_path
+
+
+def _bulk_prepare_cover(
+    regenerate: bool, source_type: str, source_local_root: str, source_path: str, rclone_config_path: str, progress_callback
+) -> "str | None":
+    """카카오 표지 갱신 옵션. 로컬 원본은 목록을 모으기 전에 그 자리에서 바로 새 cover.jpg로 바꿔 두면(원본 폴더 안의 파일을 실제로
+    바꾸는 것이므로) 이후 목록 조회에 자연스럽게 새 파일로 잡힌다. 원격 원본은 폴더 전체를 내려받을 수 없으니 info.xml만 가볍게 읽어
+    판별한 뒤 받은 표지를 임시 파일로만 만들어 두고(그 경로를 돌려준다), 이동 반복에서 원본 cover.*를 이 파일로 교체해서 옮긴다.
+    꺼져 있거나 카카오 작품이 아니거나 실패하면 None — 실패해도 이동은 계속한다."""
+    if not regenerate:
+        return None
+    temp_path = None
+    try:
+        if source_type == "local":
+            local_src_dir = _local_archive_path(source_local_root, source_path)
+            if kakao_cover.refresh_kakao_cover_if_applicable(local_src_dir) and progress_callback:
+                progress_callback("카카오 표지 갱신함")
+        else:
+            remote, path = _parse_rclone_target(source_path)
+            xml_text = rclone_client.read_small_text_file(rclone_config_path, remote, path, "info.xml")
+            series_id = kakao_cover.parse_kakao_web_url(_extract_web_url_from_xml_text(xml_text) or "")
+            if series_id:
+                temp_path = _download_kakao_cover_to_temp_file(series_id)
+                if temp_path and progress_callback:
+                    progress_callback("카카오 표지 갱신함")
+    except Exception as e:
+        log.warning("일괄 이동 중 카카오 표지 갱신 실패 (무시하고 계속): %s", e)
+    return temp_path
+
+
+def _bulk_prepare_dest(dest_type: str, dest_local_root: str, dest_path: str, rclone_config_path: str):
+    """목적지 컨텍스트(로컬이면 폴더 Path, 원격이면 (remote, base_path))를 만들어 돌려준다. 원격 정보가 잘못이면 ValueError."""
+    if dest_type == "local":
+        dest_ctx = _local_archive_path(dest_local_root, dest_path)
+        dest_ctx.mkdir(parents=True, exist_ok=True)
+        return dest_ctx
+    remote, base_path = _parse_rclone_target(dest_path)
+    if not remote:
+        raise ValueError("목적지 원격 정보가 올바르지 않습니다.")
+    if base_path:
+        rclone_client.create_folder(rclone_config_path, remote, base_path)
+    return remote, base_path
+
+
+def _bulk_place_refreshed_cover(
+    temp_cover: str, rel: PurePosixPath, policy: str, dest_type: str, dest_ctx, src_ctx, rclone_config_path: str
+) -> "str | None":
+    """받아 둔 새 표지로 원본 cover.*를 대체해서 목적지의 cover.jpg로 둔다(원본 cover는 지우고 임시 파일도 정리). 목적지에 이미 있고
+    정책이 건너뛰기면 None — 그러면 호출부가 원본 cover를 일반 파일처럼 처리한다. 둔 최종 상대경로를 돌려준다."""
+    dest_cover_rel = str(rel.parent / "cover.jpg") if str(rel.parent) != "." else "cover.jpg"
+    final_rel = _bulk_move_resolve_final_rel(policy, dest_type, dest_ctx, dest_cover_rel, rclone_config_path)
+    if final_rel is None:
+        return None
+    dest_spec = _generic_file_spec(dest_type, dest_ctx, final_rel)
+    if dest_type == "local":
+        Path(dest_spec).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(temp_cover, dest_spec)
+    else:
+        rclone_client.copyto(rclone_config_path, temp_cover, dest_spec)
+    remote_src, base_src = src_ctx
+    del_dir = f"{base_src}/{rel.parent}" if str(rel.parent) != "." else base_src
+    rclone_client.delete_file(rclone_config_path, remote_src, del_dir, rel.name)
+    Path(temp_cover).unlink(missing_ok=True)
+    return final_rel
+
+
+def _bulk_desired_rel_path(rel_path: str, filename_template: str, source_type: str, source_path: str, src_ctx) -> str:
+    """파일명 템플릿을 적용한 목적지 상대경로. {title}은 하위 폴더 안 파일이면 그 바로 위 폴더명, 최상위 파일이면 원본 폴더 이름이다.
+    템플릿이 없거나 파일명 구조를 인식 못 하면 원래 상대경로 그대로(그 파일만 — 일부 인식 안 되는 파일이 있다고 전체가 실패하지 않는다)."""
+    if not filename_template.strip():
+        return rel_path
+    rel = PurePosixPath(rel_path)
+    title_candidate = rel.parent.name if str(rel.parent) != "." else _derive_folder_display_name(source_type, source_path)
+    zip_path_for_page_count = (src_ctx / rel_path) if source_type == "local" else None
+    rendered = render_archive_filename(filename_template, rel.name, title_candidate, [], zip_path_for_page_count=zip_path_for_page_count)
+    if rendered is None:
+        return rel_path
+    return str(rel.parent / rendered) if str(rel.parent) != "." else rendered
 
 
 def bulk_move_folder(
@@ -1104,88 +1226,35 @@ def bulk_move_folder(
     (화면 표시용 job_status 등) 전혀 모른다 — 호출부(routes.py)가 원하는 대로
     쓰도록 콜백으로만 분리해서, 이 모듈이 웹/잡 상태 계층에 의존하지 않게 한다."""
     policy = get_conflict_policy()
-
-    # 카카오 표지 갱신: 로컬 원본은 목록을 모으기 전에 그 자리에서 바로 새 cover.jpg로
-    # 바꿔치기해두면, 아래 목록 조회에 자연스럽게 새 파일로 잡힌다(원본 폴더 안의
-    # 파일을 실제로 바꾸는 것이므로 별도 처리가 필요 없음). 원격 원본은 폴더 전체를
-    # 내려받을 수 없으니, info.xml만 가볍게 읽어 판별한 뒤 받은 표지를 임시 파일로만
-    # 만들어두고, 아래 반복문에서 원본 cover.*를 이 파일로 교체해서 옮긴다.
-    kakao_cover_temp_path = None
-    if regenerate_kakao_cover:
-        try:
-            if source_type == "local":
-                local_src_dir = _local_archive_path(source_local_root, source_path)
-                if kakao_cover.refresh_kakao_cover_if_applicable(local_src_dir) and progress_callback:
-                    progress_callback("카카오 표지 갱신함")
-            else:
-                remote, path = _parse_rclone_target(source_path)
-                xml_text = rclone_client.read_small_text_file(rclone_config_path, remote, path, "info.xml")
-                series_id = kakao_cover.parse_kakao_web_url(_extract_web_url_from_xml_text(xml_text) or "")
-                if series_id:
-                    kakao_cover_temp_path = _download_kakao_cover_to_temp_file(series_id)
-                    if kakao_cover_temp_path and progress_callback:
-                        progress_callback("카카오 표지 갱신함")
-        except Exception as e:
-            log.warning("일괄 이동 중 카카오 표지 갱신 실패 (무시하고 계속): %s", e)
+    kakao_cover_temp_path = _bulk_prepare_cover(
+        regenerate_kakao_cover, source_type, source_local_root, source_path, rclone_config_path, progress_callback
+    )
 
     rel_files, src_ctx = _bulk_move_collect_source_files(source_type, source_local_root, rclone_config_path, source_path)
     total = len(rel_files)
     if progress_callback:
         progress_callback(f"이동할 파일 {total}개 확인, 시작합니다")
 
-    # 이력에는 파일 하나마다 한 줄씩 남긴다 — 주기/수동/완결 이동과 같은 단위로
-    # 남겨야, "이력 → 아카이빙 이력"에서 어떤 이동 방식이든 항상 같은 수준의
-    # 기록을 볼 수 있다(예전엔 일괄 이동만 작업 전체에 한 줄만 남겨서 단위가 달랐음).
+    # 이력에는 파일 하나마다 한 줄씩 남긴다 — 주기/수동/완결 이동과 같은 단위로 남겨야, "이력 → 아카이빙 이력"에서 어떤 이동
+    # 방식이든 항상 같은 수준의 기록을 볼 수 있다(예전엔 일괄 이동만 작업 전체에 한 줄만 남겨서 단위가 달랐음).
     batch_label = f"{source_path} → {dest_path}"
-
-    if dest_type == "local":
-        dest_ctx = _local_archive_path(dest_local_root, dest_path)
-        dest_ctx.mkdir(parents=True, exist_ok=True)
-    else:
-        remote, base_path = _parse_rclone_target(dest_path)
-        if not remote:
-            raise ValueError("목적지 원격 정보가 올바르지 않습니다.")
-        if base_path:
-            rclone_client.create_folder(rclone_config_path, remote, base_path)
-        dest_ctx = (remote, base_path)
+    dest_ctx = _bulk_prepare_dest(dest_type, dest_local_root, dest_path, rclone_config_path)
 
     moved = 0
-    cover_replaced = False
     for index, rel_path in enumerate(rel_files, start=1):
         try:
             rel = PurePosixPath(rel_path)
-            if kakao_cover_temp_path and not cover_replaced and rel.name.lower().startswith("cover."):
-                dest_cover_rel = str(rel.parent / "cover.jpg") if str(rel.parent) != "." else "cover.jpg"
-                final_rel = _bulk_move_resolve_final_rel(policy, dest_type, dest_ctx, dest_cover_rel, rclone_config_path)
-                if final_rel is not None:
-                    dest_spec = _generic_file_spec(dest_type, dest_ctx, final_rel)
-                    if dest_type == "local":
-                        Path(dest_spec).parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(kakao_cover_temp_path, dest_spec)
-                    else:
-                        rclone_client.copyto(rclone_config_path, kakao_cover_temp_path, dest_spec)
-                    remote_src, base_src = src_ctx
-                    del_dir = f"{base_src}/{rel.parent}" if str(rel.parent) != "." else base_src
-                    rclone_client.delete_file(rclone_config_path, remote_src, del_dir, rel.name)
-                    Path(kakao_cover_temp_path).unlink(missing_ok=True)
-                    kakao_cover_temp_path = None
-                    cover_replaced = True
+            if kakao_cover_temp_path and rel.name.lower().startswith("cover."):
+                placed = _bulk_place_refreshed_cover(kakao_cover_temp_path, rel, policy, dest_type, dest_ctx, src_ctx, rclone_config_path)
+                if placed is not None:
+                    kakao_cover_temp_path = None  # 표지는 한 번만 대체한다(임시 파일은 위에서 지움)
                     moved += 1
-                    repository.add_archive_history("-", batch_label, final_rel, "bulk_move")
+                    repository.add_archive_history("-", batch_label, placed, "bulk_move")
                     if progress_callback:
-                        progress_callback(f"[{index}/{total}] 이동 완료(표지 갱신): {final_rel}")
+                        progress_callback(f"[{index}/{total}] 이동 완료(표지 갱신): {placed}")
                     continue
 
-            desired_rel_path = rel_path
-            if filename_template.strip():
-                title_candidate = rel.parent.name if str(rel.parent) != "." else _derive_folder_display_name(source_type, source_path)
-                zip_path_for_page_count = (src_ctx / rel_path) if source_type == "local" else None
-                rendered = render_archive_filename(
-                    filename_template, rel.name, title_candidate, [], zip_path_for_page_count=zip_path_for_page_count
-                )
-                if rendered is not None:
-                    desired_rel_path = str(rel.parent / rendered) if str(rel.parent) != "." else rendered
-
+            desired_rel_path = _bulk_desired_rel_path(rel_path, filename_template, source_type, source_path, src_ctx)
             final_rel = _bulk_move_resolve_final_rel(policy, dest_type, dest_ctx, desired_rel_path, rclone_config_path)
             if final_rel is None:
                 log.info("일괄 이동 건너뜀 (이미 존재): %s", rel_path)
@@ -1205,15 +1274,10 @@ def bulk_move_folder(
             if progress_callback:
                 progress_callback(f"[{index}/{total}] 실패(건너뜀): {rel_path} — {e}")
 
-    if kakao_cover_temp_path:
+    if kakao_cover_temp_path:  # 원본에 cover 파일이 없어 쓰이지 않은 임시 표지
         Path(kakao_cover_temp_path).unlink(missing_ok=True)
 
     if progress_callback:
         progress_callback("원본 쪽 빈 폴더 정리 중")
-    if source_type == "local":
-        _cleanup_empty_dirs(src_ctx)
-    else:
-        remote, base_path = src_ctx
-        rclone_client.rmdirs_if_empty(rclone_config_path, remote, base_path)
-
+    _cleanup_source_folder(source_type, src_ctx, rclone_config_path)
     return moved

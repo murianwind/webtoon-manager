@@ -233,7 +233,7 @@ Windows에서 rclone으로 마운트한 드라이브/폴더는 **Docker Desktop�
 - 백엔드: `python tests/run_backend.py [이름조각] [--coverage]` — 테스트마다 새 임시 폴더(DB/다운로드/보관/쿠키)로 별도 프로세스에서 돌립니다. 실제 카카오/네이버 서버는 부르지 않고, 응답 형태는 `tests/fixtures/`의 실제 캡처에서 뽑은 샘플을 씁니다.
 - 화면: `cd tests/js && npm install && npm test` — jsdom으로 `index.html`과 스크립트들을 브라우저처럼 순서대로 로드해서 확인하고, 스크립트 오류(파일 사이 로드 순서 문제 포함)는 실패로 처리합니다.
 - 테스트 실행에 필요한 패키지: 백엔드는 `requirements.txt`와 같고, 화면 테스트만 Node.js가 필요합니다.
-- **커버리지가 낮은 곳(리팩터링 전에 특성 테스트가 필요)**: `archiver._archive_folder_target`, `archiver.bulk_move_folder`, `scheduler._download_new_episodes_for_one`, `scheduler._run_report_job_impl`, `manual_download.download_selected`는 현재 테스트가 거의 거치지 않습니다(`--coverage`로 확인).
+- **큰 함수와 특성 테스트**: 80줄을 넘던 함수(아카이빙 폴더 대상/일괄 이동, 네이버 수동·자동 다운로드, 리포트 작업 등)는 "지금 동작을 그대로 고정하는" 특성 테스트를 먼저 쓴 뒤 단계별 작은 함수로 나눴습니다. 이제 코드 줄 기준으로 80줄을 넘는 함수는 없습니다(`bulk_move_folder`는 설명 문서가 길어서 파일상 90줄). rclone이 낀 분기는 `tests/backend/fake_rclone.py`(메모리 안의 원격 폴더)로 흉내 내서 테스트합니다 — 새 테스트에서 `FakeRclone().install()`만 부르면 됩니다. 커버리지는 `python tests/run_backend.py --coverage`로 확인합니다.
 
 ---
 
