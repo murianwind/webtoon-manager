@@ -26,13 +26,11 @@ async function loadDiscordSettings() {
   }
 }
 
-// "디스코드 설정"(웹훅) -> "실행 스케줄"/"다운로드 리포트" -> (그 안의 "미등록 웹툰
-// 중 새 에피소드" 토글) -> "카카오웹툰 관리" 순으로 하나씩 조건이 채워져야 다음
-// 카드가 나타난다 — 신작 알림/리포트를 보낼 데가 없으면 스케줄이나 리포트 세부
-// 설정 자체가 의미 없고, 카카오는 그 리포트의 한 항목(미등록 새 에피소드)에
-// 얹혀서 나가는 기능이라 그게 꺼져 있으면 역시 의미가 없어서 이 순서로 숨겨둔다.
-// 기존 저장된 설정 값 자체는 전혀 안 건드리고 화면에 보일지만 정할 뿐이라, 다시
-// 조건을 채우면 이미 저장해뒀던 값 그대로 나타난다.
+// 설정 카드 중 조건이 있는 것은 "다운로드 리포트" 하나뿐이다 — 보낼 곳(디스코드 웹훅)이 있어야
+// 의미가 있어서 웹훅이 저장돼야 나타난다. "카카오웹툰 관리"는 예전엔 리포트의 한 항목(미등록 새
+// 에피소드)에 얹힌 기능이라 웹훅과 그 옵션 뒤에 숨겼지만, 이제 카카오페이지 다운로드(로그인 쿠키
+// 입력 포함)를 하는 곳이라 항상 보인다. 웹훅이 없으면 그 카드에 "알림은 못 받는다"는 안내만 띄운다.
+// 화면에 보일지만 정할 뿐, 저장된 설정 값은 건드리지 않는다.
 function updateSettingsCardVisibility() {
   // "실행 스케줄"은 신작 스캔/다운로드/아카이빙처럼 디스코드와 무관한 것도 다루니
   // 웹훅 여부와 상관없이 항상 보인다. "다운로드 리포트"(발송 시각 포함)만 보낼 곳이
@@ -40,8 +38,7 @@ function updateSettingsCardVisibility() {
   const webhookConfigured = document.getElementById("discord-webhook-url").dataset.masked === "true";
   document.getElementById("settings-card-report").classList.toggle("hidden", !webhookConfigured);
 
-  const unregisteredEnabled = document.getElementById("report-unregistered-toggle").checked;
-  document.getElementById("settings-card-kakao").classList.toggle("hidden", !(webhookConfigured && unregisteredEnabled));
+  document.getElementById("kakao-no-webhook-hint").classList.toggle("hidden", webhookConfigured);
 }
 
 document.getElementById("discord-webhook-url").addEventListener("focus", (e) => {

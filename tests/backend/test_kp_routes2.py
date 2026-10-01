@@ -57,6 +57,7 @@ kp.asyncio.sleep = _nosleep
 alerts = []
 async def fake_send(session, settings, message): alerts.append(message)
 auth.discord_notify.send_webhook_notification = fake_send
+auth.discord_config.set_webhook_url("https://discord.com/api/webhooks/1/test")   # 실제처럼 웹훅이 있어야 쿠키 알림이 나간다(없으면 보내지도 기록하지도 않음)
 
 def export(days=25): return json.dumps([{"domain": ".kakao.com", "name": n, "value": f"val-{n}", "path": "/", "expirationDate": time.time() + days * 86400} for n in auth.REQUIRED_COOKIES])
 DEFAULT_ROOT = Path(os.environ["DOWNLOAD_ROOT"]); KROOT = Path(tempfile.mkdtemp())

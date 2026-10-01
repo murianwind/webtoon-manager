@@ -15,7 +15,7 @@ import math
 import time
 from datetime import datetime, timezone
 
-from app import crypto, discord_notify, repository
+from app import crypto, discord_config, discord_notify, repository
 
 log = logging.getLogger(__name__)
 
@@ -151,6 +151,9 @@ async def notify_if_needed(session, settings, logged_in: bool | None, days_left:
         return False
     key = _ALERT_EXPIRED_KEY if logged_in is False else _ALERT_SOON_KEY
     if _recently_sent(key):
+        return False
+    if not discord_config.get_webhook_url():
+        # 보낼 곳이 없으면 "보냈다"고 기록하지 않는다 — 기록하면 나중에 웹훅을 달았을 때 같은 알림이 최대 하루 늦어진다
         return False
     await discord_notify.send_webhook_notification(session, settings, message)
     repository.set_setting(key, str(time.time()))

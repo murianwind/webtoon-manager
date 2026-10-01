@@ -269,7 +269,6 @@ async function loadUnregisteredNewEpisodesToggle() {
   try {
     const data = await apiCall("/api/settings/report-unregistered-new-episodes");
     document.getElementById("report-unregistered-toggle").checked = data.enabled;
-    updateSettingsCardVisibility(); // loadDiscordSettings보다 늦게 끝날 수 있어서, 여기서도 다시 반영
   } catch (e) {
     // 조용히 무시 — 이 필드 하나 때문에 설정 탭 전체 로드가 막히면 안 됨
   }
@@ -281,7 +280,6 @@ document.getElementById("report-unregistered-toggle").addEventListener("change",
       method: "POST",
       body: JSON.stringify({ enabled: e.target.checked }),
     });
-    updateSettingsCardVisibility(); // 켜면 즉시 "카카오웹툰 관리" 카드가 나타나게(꺼도 즉시 숨겨지게)
   } catch (err) {
     alert(err.message);
     e.target.checked = !e.target.checked; // 저장 실패하면 화면도 원래대로 되돌림
