@@ -1,0 +1,63 @@
+name: Tests
+
+# 코드가 바뀔 때마다(브랜치 푸시, PR) 백엔드/화면 테스트를 돌린다. 수동 실행(workflow_dispatch)과
+# 다른 워크플로에서 불러 쓰는 것(workflow_call)도 가능하다. 실제 카카오/네이버 서버는 부르지 않는다.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: 백엔드 테스트 (Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # Dockerfile과 같은 버전
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: 의존성 설치
+        run: pip install -r requirements-dev.txt
+
+      - name: 정적 검사 (미사용 임포트/변수, 미정의 이름)
+        run: python -m pyflakes app tests/backend
+
+      - name: 백엔드 테스트
+        run: python tests/run_backend.py
+
+  frontend:
+    name: 화면 테스트 (Node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: tests/js/package-lock.json
+
+      - name: 스크립트 문법 검사
+        run: for f in app/static/js/*.js; do node --check "$f"; done
+
+      - name: 의존성 설치
+        working-directory: tests/js
+        run: npm ci
+
+      - name: 화면 테스트
+        working-directory: tests/js
+        run: npm test
