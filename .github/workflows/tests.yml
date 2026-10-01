@@ -1,9 +1,11 @@
 name: Tests
 
-# 코드가 바뀔 때마다(브랜치 푸시, PR) 백엔드/화면 테스트를 돌린다. 수동 실행(workflow_dispatch)과
-# 다른 워크플로에서 불러 쓰는 것(workflow_call)도 가능하다. 실제 카카오/네이버 서버는 부르지 않는다.
+# 코드가 바뀔 때마다(main이 아닌 브랜치 푸시, PR) 백엔드/화면 테스트를 돌린다. 수동 실행(workflow_dispatch)도 가능하다.
+# main 푸시는 build.yml이 이 워크플로를 불러서(workflow_call) 테스트한 뒤 이미지를 빌드하므로, 여기서 따로 돌지 않는다(중복 방지).
+# 실제 카카오/네이버 서버는 부르지 않는다.
 on:
   push:
+    branches-ignore: ["main"]
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -11,8 +13,10 @@ on:
 permissions:
   contents: read
 
+# 같은 브랜치에 푸시가 잇따라 오면 이전 실행은 취소하고 가장 마지막 것만 실행한다.
+# 그룹 이름에 event_name을 넣는 이유: build.yml이 이 파일을 불러 쓸 때 그쪽 그룹(build-...)과 이름이 같으면 서로 취소해 버린다.
 concurrency:
-  group: tests-${{ github.ref }}
+  group: tests-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -34,6 +38,9 @@ jobs:
 
       - name: 정적 검사 (미사용 임포트/변수, 미정의 이름)
         run: python -m pyflakes app tests/backend
+
+      - name: 깃헙 액션 설정 검사 (actionlint)
+        run: actionlint .github/workflows/*.yml
 
       - name: 백엔드 테스트
         run: python tests/run_backend.py
