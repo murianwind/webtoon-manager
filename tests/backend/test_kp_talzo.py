@@ -44,6 +44,21 @@ plan6 = kp.plan_by_folder_rules(eps, scan(["0030_탈조클럽 29화.zip", "0031_
 assert {r.episode.number for r in plan6.rows if r.downloaded} == {29, 30, 31}                                    # 29화는 번호가 아니라 부제목(작품명 제거)으로 이미 받은 것으로 인식
 print("1) 작품명이 붙은 표식 OK")
 
+# ── 1-2. 실제 응답(내림차순 첫 페이지): 32~36화는 hidden=True + 유료 + 미래의 free_change_dt — 사이트는 "N일 후 무료"로 보여 준다 ──
+from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+DESC = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fixtures", "talzo_club_product_list_desc.json"), encoding="utf-8"))["result"]
+real = {x["item"]["order_value"]: x["item"] for x in DESC["list"]}
+assert all(real[n]["hidden"] is True and real[n]["is_free"] is False for n in range(32, 37)) and all(real[n]["hidden"] is False and real[n]["is_free"] is True for n in range(12, 32))
+real_eps = sorted((kp._parse_episode(i, "탈조클럽", _dt.now()) for i in real.values()), key=lambda e: e.number)
+marker = [kp.ExistingFile(number=31, subtitle="탈조클럽 31화", name="0031_탈조클럽 31화.zip")]
+real_plan = kp.plan_by_folder_rules(real_eps, marker, "탈조클럽")
+assert [e.number for e in real_plan.locked] == [32, 33, 34, 35, 36] and real_plan.to_download == [] and real_plan.marker.warning is False       # 표에서 사라지지 않고 잠금으로 남는다
+assert 36 in [r.episode.number for r in real_plan.rows] and all(not e.accessible for e in real_plan.locked)                                       # 절대 받지 않는다
+now = _dt(2026, 10, 1, 12, 0, tzinfo=_tz(_td(hours=9)))
+assert [kp.free_date_of(e, now) for e in real_plan.locked] == ["2026-10-06", "2026-10-13", "2026-10-20", "2026-10-27", "2026-11-03"]          # 실제 날짜(36화: 34일 후 = 11-03)
+assert kp.free_date_of(real_plan.locked[0], _dt(2026, 10, 7, tzinfo=_tz(_td(hours=9)))) is None                                                  # 날짜가 지나면 표시 안 함
+print("1-2) 실제 응답 OK (숨김 예정 회차는 잠금 + 무료 날짜, 받지 않음)")
+
 # ── 2. 기다무가 없는 작품: 이용권 표시/사용 안 함 ──
 kp_calls = []
 class R:

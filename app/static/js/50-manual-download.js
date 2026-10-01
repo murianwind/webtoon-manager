@@ -180,8 +180,7 @@ function kakaoManualSummaryHtml(a) {
   // 사이트가 말하는 전체 회차 수(동영상으로 뺀 것 포함)보다 가져온 회차가 적으면, 목록에서 회차가 빠졌을 수 있다고 알려 준다
   const fetched = a.listed_count + a.excluded_video_count;
   if (a.site_total > 0 && fetched < a.site_total) {
-    const hidden = a.hidden_count > 0 ? ` (그중 숨김 처리된 회차 ${a.hidden_count}개는 표에서 뺐습니다)` : "";
-    lines.push(`<span class="warn">⚠ 사이트 회차는 ${a.site_total}개인데 ${a.listed_count}개만 가져왔습니다${hidden}. 빠진 회차가 있을 수 있습니다.</span>`);
+    lines.push(`<span class="warn">⚠ 사이트 회차는 ${a.site_total}개인데 ${a.listed_count}개만 가져왔습니다. 빠진 회차가 있을 수 있습니다.</span>`);
   }
   if (!a.cookie_saved) lines.push('<span class="warn">⚠ 로그인 쿠키가 없습니다(설정에서 저장). 지금은 무료 회차만 받을 수 있습니다.</span>');
   else if (a.logged_in === false) lines.push('<span class="warn">⚠ 로그인이 풀려 있습니다. 설정에서 쿠키를 다시 저장해주세요.</span>');

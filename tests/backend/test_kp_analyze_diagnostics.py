@@ -1,4 +1,4 @@
-"""수동 다운로드 분석의 진단 정보 — 사이트 회차 수와 가져온 회차 수 비교(회차가 빠져도 알 수 있게), 숨김/동영상 제외 수, "N일 후 무료" 날짜."""
+"""수동 다운로드 분석의 진단 정보 — 사이트 회차 수와 가져온 회차 수 비교(회차가 빠져도 알 수 있게), 동영상 제외 수, 숨김 예정 회차, "N일 후 무료" 날짜."""
 import asyncio, copy, json, os
 from datetime import datetime, timedelta, timezone
 from http.cookies import SimpleCookie
@@ -41,14 +41,16 @@ async def main():
         # ── 1. 사이트는 36개인데 31개만 가져온 경우(탈조클럽 스크린샷 상황) — 숫자로 드러난다 ──
         STATE["items"] = [item(n) for n in range(1, 32)]
         a = await analyze(c)
-        assert (a["site_total"], a["listed_count"], a["hidden_count"], a["excluded_video_count"]) == (36, 31, 0, 0) and len(a["episodes"]) == 31, a
+        assert (a["site_total"], a["listed_count"], a["excluded_video_count"]) == (36, 31, 0) and len(a["episodes"]) == 31 and "hidden_count" not in a, a
         print("1) 빠진 회차 진단 OK (사이트 36 / 가져온 31)")
-        # ── 2. 숨김 처리된 회차는 표에서 빠지지만 몇 개인지 알려 준다 / 동영상은 따로 센다 ──
-        STATE["items"] = [item(n, hidden=n in (30, 31)) for n in range(1, 32)]
-        a = await analyze(c); assert a["hidden_count"] == 2 and a["listed_count"] == 31 and len(a["episodes"]) == 29, a
+        # ── 2. 숨김 처리된 회차(=N일 후 무료로 열릴 예정)도 표에 잠금으로 남는다 / 동영상은 따로 센다 ──
+        STATE["items"] = [item(n) for n in range(1, 32)] + [item(n, free=False, hidden=True, free_in_days=n - 26) for n in range(32, 37)]
+        a = await analyze(c); ep = {e["number"]: e for e in a["episodes"]}
+        assert a["listed_count"] == 36 and len(a["episodes"]) == 36 and [ep[n]["state"] for n in range(32, 37)] == ["locked"] * 5 and not any(ep[n]["selectable"] for n in range(32, 37)), a
+        assert ep[32]["free_at"] == (datetime.now(KST) + timedelta(days=6)).strftime("%Y-%m-%d") and ep[31]["free_at"] is None
         STATE["items"] = [item(1, video=True)] + [item(n) for n in range(2, 37)]
         a = await analyze(c); assert a["excluded_video_count"] == 1 and a["listed_count"] == 35 and a["site_total"] == 36 and a["episodes"][0]["number"] == 1, a
-        print("2) 숨김/동영상 제외 수 OK")
+        print("2) 숨김 예정 회차/동영상 제외 수 OK")
         # ── 3. "N일 후 무료" 회차: 잠긴 회차에 무료가 되는 날짜를 알려 준다(이미 지났거나 무료인 회차는 없음) ──
         STATE["items"] = [item(n) for n in range(1, 32)] + [item(32, free=False, free_in_days=6), item(33, free=False, free_in_days=13), item(34, free=False, free_in_days=-1)]
         a = await analyze(c); ep = {e["number"]: e for e in a["episodes"]}

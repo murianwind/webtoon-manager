@@ -159,9 +159,9 @@ async def kakao_manual_analyze(series_id: int):
         "downloaded_count": sum(1 for row in plan.rows if row.downloaded),
         "before_start_count": sum(1 for row in plan.rows if row.before_start),
         "cookie_saved": cookie_saved, "logged_in": logged_in,
-        # 진단: 사이트가 말하는 전체 회차 수와 우리가 가져온 수(숨김/동영상 제외 수 포함) — 목록에서 회차가 빠졌을 때 화면이 알려 준다
+        # 진단: 사이트가 말하는 전체 회차 수와 우리가 가져온 수(동영상으로 뺀 수 포함) — 목록에서 회차가 빠졌을 때 화면이 알려 준다
         "site_total": int(series_item.get("on_sale_count") or 0), "listed_count": len(episodes),
-        "hidden_count": sum(1 for e in episodes if e.hidden), "excluded_video_count": int(series_item.get("_excluded_video_count") or 0),
+        "excluded_video_count": int(series_item.get("_excluded_video_count") or 0),
         "thumbnail_url": kakao_api._thumbnail_url(series_item), "authors": series_item.get("authors") or "",
         "subscription": tracked["status"] if tracked else None,  # 이 프로그램의 구독 상태(active 등, 없으면 None)
         "tickets": None if tickets is None else {

@@ -12,7 +12,7 @@
 - 로그인 확인: user/get_profile → result_code 0 이고 profile.uid가 있으면 로그인 상태.
 - **파일 앞의 번호는 "N화"가 아니라 회차 순서 번호다** — 프롤로그/예고편/후기도 번호를 하나씩 차지해서(예:
   `0003_프롤로그`, `0002_1화`) 번호와 화수의 차이가 작품마다 다르다. 번호는 사이트의 order_value를 따르고, 프롤로그
-  같은 이미지 회차도 받는다(숨김 처리된 것만 뺀다). **동영상(예: "동영상 트레일러")은 받을 수 없어서 목록에서 빼고,
+  같은 이미지 회차도 받는다(숨김 처리된 회차 — "N일 후 무료"로 열릴 예정인 회차 — 는 목록에 잠금으로 남기고 받지는 않는다). **동영상(예: "동영상 트레일러")은 받을 수 없어서 목록에서 빼고,
   그만큼 뒤 회차의 번호를 당긴다** — 예전 도구는 동영상에 번호를 주지 않았기 때문에, 그러지 않으면 같은 회차의
   번호가 하나씩 어긋난다.
 - **기다무(RT05) 대여권**: ticket/my로 기다무를 쓸 수 있는지 보고(waitfree.charged_complete), ticket/ready_to_use가
@@ -243,7 +243,9 @@ def plan_by_folder_rules(episodes: list[Episode], existing: list[ExistingFile], 
     """폴더 규칙(모듈 설명 참고)으로 받을 회차를 정한다. 받을 수 있는 회차를 앞에서부터 이어서 받다가 처음
     잠긴 회차에서 멈춘다 — 순서를 건너뛰지 않아야 "번호 순서대로"가 지켜진다. series_title은 파일 이름 속 부제목에 붙은
     작품명을 떼고 비교하는 데 쓴다(없으면 있는 그대로 비교)."""
-    visible = sorted((e for e in episodes if not e.hidden and e.number > 0), key=lambda e: e.number)
+    # 숨김(hidden) 회차는 "아직 무료/대여로 열리지 않은 예정 회차"다 — 사이트는 "N일 후 무료"로 목록에 보여 주므로 빼지 않고 잠긴 회차로
+    # 센다(번호 순서대로 받다가 여기서 멈추게 되고, 화면에는 무료가 되는 날짜가 보인다). 받을 수는 없다.
+    visible = sorted((e for e in episodes if e.number > 0), key=lambda e: e.number)
     marker: MarkerInfo | None = None
 
     lower_bound = 0  # 이 번호보다 앞 회차는 자동으로 받지 않는다
@@ -278,7 +280,7 @@ def plan_by_folder_rules(episodes: list[Episode], existing: list[ExistingFile], 
         plan.rows.append(EpisodeRow(episode=episode, downloaded=done, before_start=skipped))
         if done or skipped:
             continue
-        if not blocked and episode.accessible:
+        if not blocked and episode.accessible and not episode.hidden:
             plan.to_download.append(episode)
         else:
             blocked = True
@@ -321,7 +323,7 @@ def is_video_item(item: dict) -> bool:
 def _parse_episode(item: dict, series_title: str, now_kst: datetime) -> Episode:
     title = item.get("title") or ""
     purchase = ((item.get("service_property") or {}).get("purchase_info")) or {}
-    accessible = _is_accessible(item, now_kst)
+    accessible = _is_accessible(item, now_kst) and not item.get("hidden")  # 숨김 회차는 받을 수 없다
     return Episode(
         product_id=item["product_id"], title=title, number=int(item.get("order_value") or 0),
         subtitle=derive_subtitle(title, series_title), is_free=bool(item.get("is_free")), accessible=accessible,
@@ -738,16 +740,16 @@ async def download_selected(
     return result
 
 
-def free_date_of(episode: Episode) -> str | None:
+def free_date_of(episode: Episode, now: datetime | None = None) -> str | None:
     """아직 못 받는 회차가 무료로 열리는 날짜("YYYY-MM-DD", 한국시간) — 연재무료 작품의 "N일 후 무료". 이미 받을 수 있거나, 날짜가 지났거나,
-    날짜를 모르면 None."""
+    날짜를 모르면 None. now는 테스트에서 기준 시각을 고정하려고 받는다(시간대가 있는 시각)."""
     if episode.accessible or not episode.free_change_dt:
         return None
     try:
         when = datetime.fromisoformat(episode.free_change_dt).astimezone(_KST)
     except ValueError:
         return None
-    return when.strftime("%Y-%m-%d") if when > datetime.now(_KST) else None
+    return when.strftime("%Y-%m-%d") if when > (now or datetime.now(_KST)) else None
 
 
 def waitfree_supported(series_item: dict) -> bool:

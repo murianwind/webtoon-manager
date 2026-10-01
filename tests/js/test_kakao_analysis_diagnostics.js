@@ -13,8 +13,6 @@ const { makeApp, sleep, ok, done } = require("./harness");
 
   let t = await analyze(base);
   ok(t.includes("사이트 회차는 36개인데 31개만 가져왔습니다"), "사이트 36개인데 31개만 가져오면 경고가 나옴: " + t.slice(-90));
-  t = await analyze({ ...base, hidden_count: 5, listed_count: 31 });
-  ok(t.includes("사이트 회차는 36개인데 31개만 가져왔습니다") && t.includes("숨김 처리된 회차 5개"), "숨김 회차 수도 함께 보여 줌");
   t = await analyze({ ...base, site_total: 36, listed_count: 35, excluded_video_count: 1 });
   ok(!t.includes("가져왔습니다"), "동영상으로 뺀 회차까지 더해 맞으면 경고 없음");
   t = await analyze({ ...base, site_total: 31, listed_count: 31 });

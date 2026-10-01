@@ -61,11 +61,13 @@ assert [(f.number, f.subtitle) for f in files] == [(43, "43화")] and kp.scan_ex
 print("2) 폴더 스캔 OK (zip만, 임시/cover/info 제외)")
 
 # ═════ 3. 규칙 1 — 폴더가 없거나 zip이 없으면 전부(프롤로그 포함) 받는다 ═════
-eps = [E(1, "프롤로그"), E(2, "1화"), E(3, "2화"), E(4, "3화", acc=False), E(5, "4화", acc=False), E(6, "숨김", hidden=True)]
+eps = [E(1, "프롤로그"), E(2, "1화"), E(3, "2화"), E(4, "3화", acc=False), E(5, "4화", acc=False), E(6, "예정", acc=False, hidden=True)]
 plan = kp.plan_by_folder_rules(eps, [])
-assert plan.mode == "new_folder" and [e.number for e in plan.to_download] == [1, 2, 3] and [e.number for e in plan.locked] == [4, 5]
-assert all(not r.downloaded for r in plan.rows) and 6 not in [r.episode.number for r in plan.rows]
-print("3) 규칙1 OK (폴더 없음 → 프롤로그부터 전부, 숨김 제외, 잠긴 회차에서 멈춤)")
+assert plan.mode == "new_folder" and [e.number for e in plan.to_download] == [1, 2, 3] and [e.number for e in plan.locked] == [4, 5, 6]
+assert all(not r.downloaded for r in plan.rows) and 6 in [r.episode.number for r in plan.rows]               # 숨김(= N일 후 무료로 열릴 예정) 회차도 목록에 남고 잠금으로 센다
+# 숨김이면 접근 가능으로 표시돼 있어도 받지 않는다(사이트에 안 보이는 회차를 받지 않도록)
+plan_h = kp.plan_by_folder_rules([E(1, "1화"), E(2, "2화", hidden=True)], []); assert [e.number for e in plan_h.to_download] == [1] and [e.number for e in plan_h.locked] == [2]
+print("3) 규칙1 OK (폴더 없음 → 프롤로그부터 전부, 숨김은 잠금으로 표시하고 받지 않음, 잠긴 회차에서 멈춤)")
 
 # ═════ 4. 규칙 3 — zip이 하나면 그 파일 이후부터 (실제 사례: 개미 43화, 유부녀 킬러 179) ═════
 eps = [E(n) for n in range(38, 50)]
