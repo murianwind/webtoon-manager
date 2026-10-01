@@ -21,6 +21,7 @@ from app import kakao_cover
 from app import archiver
 from app.config import get_settings
 
+from app import kakao_authors
 from app.api.common import (
     _is_author_auto_register_enabled,
     _render_exclude_confirm_html,
@@ -228,13 +229,15 @@ async def subscribe_kakao_webtoon(title_id: int, payload: KakaoWebtoonEntryIn):
     await asyncio.to_thread(repository.set_kakao_webtoon_status, title_id, repository.STATUS_ACTIVE)
     await asyncio.to_thread(repository.refresh_kakao_webtoon_author_summary, title_id, payload.author_summary)
     about = await _kakao_about(title_id)
-    # 글 작가를 저장해 둔다 — 아카이빙 파일명 템플릿의 {author}가 네이버처럼 "글" 작가가 되게(작품 정보를 못 받으면 받을 때 채워진다)
-    await asyncio.to_thread(repository.set_kakao_writer_names, title_id, kakao_page_download.split_authors(about)[0])
+    # 글 작가(아카이빙 파일명 템플릿의 {author}가 네이버처럼 "글" 작가가 되게)와 원작 작가(관심 작가 화면의 "(원작)" 표시)를 저장해
+    # 둔다 — 작품 정보를 못 받으면 받을 때/메타 동기화 때 채워진다
+    writers, _, originals = kakao_authors.split_authors(about)
+    await asyncio.to_thread(repository.set_kakao_authors, title_id, writers, originals)
     if await asyncio.to_thread(_is_author_auto_register_enabled):
         # 구독하면 그 작품의 작가를 관심 작가로 자동 등록한다(네이버와 같은 설정, 같은 규칙): 작품 "정보" 탭의 글/그림/원작
         # 구분으로 원작자가 있으면 원작자를, 없으면 글 작가를 등록한다. 정보 탭을 못 받으면 등록하지 않는다(그림 작가 등을
         # 잘못 등록하지 않도록 이름 전부를 등록하는 대신 건너뛴다).
-        for author_name in kakao_page_download.authors_to_register(about):
+        for author_name in kakao_authors.authors_to_register(about):
             await asyncio.to_thread(repository.upsert_watched_author, author_name, author_name, True, "kakao")
     return KakaoWebtoonOut(**await asyncio.to_thread(repository.get_kakao_webtoon, title_id))
 

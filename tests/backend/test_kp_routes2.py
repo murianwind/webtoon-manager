@@ -28,7 +28,7 @@ def handler(method, url, params, data):
         return FakeResp(200, {"result_code": 0, "profile": {"uid": 1}}) if S["profile"] == "ok" else (FakeResp(200, {"result_code": 401}) if S["profile"] == "out" else FakeResp(403))
     if "product/list" in url:
         if S["fail_list"]: return FakeResp(500)
-        return FakeResp(200, {"result": {"series_item": {"title": SERIES}, "list": S["eps"] or default_eps(), "has_next": False}})
+        return FakeResp(200, {"result": {"series_item": {"title": SERIES, "is_waitfree": True}, "list": S["eps"] or default_eps(), "has_next": False}})
     if "viewer/data" in url:
         files = [{"no": i, "secureUrl": f"https://page-edge.kakao.com/sdownload/resource?kid=k{params['product_id']}_{i}&signature=S"} for i in (1, 2)]
         return FakeResp(200, {"item": {}, "viewer_data": {"imageDownloadData": {"files": files}}})
@@ -170,7 +170,7 @@ async def main():
         # ── 4-2. 이용권 표시 + 기다무 상태 + 구독 상태 ──
         S["waitfree"] = True
         r = (await c.get("/api/kakao-manual/analyze", params={"series_id": 111})).json()
-        assert r["tickets"] == {"rental_count": 2, "own_count": 0, "waitfree_ready": True, "waitfree_available_at": None, "waitfree_period_minutes": 0}
+        assert r["tickets"] == {"rental_count": 2, "own_count": 0, "waitfree_supported": True, "waitfree_ready": True, "waitfree_available_at": None, "waitfree_period_minutes": 0}
         by = {e["number"]: e for e in r["episodes"]}
         assert by[5]["state"] == "waitfree" and by[5]["selectable"] is True and by[4]["state"] == "owned" and by[2]["state"] == "free"     # 잠긴 회차는 기다무를 쓸 수 있으면 "기다무"
         assert r["subscription"] is None and "thumbnail_url" in r and "authors" in r

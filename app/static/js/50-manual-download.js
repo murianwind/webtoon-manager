@@ -124,6 +124,7 @@ function formatWaitfreePeriod(minutes) {
 
 function kakaoTicketsHtml(t) {
   if (!t) return "";
+  if (t.waitfree_supported === false) return `<div class="kakao-manual-tickets"><span>대여권 <b>${t.rental_count}</b>장</span></div>`; // 기다무가 없는 작품(연재무료 등)은 기다무 항목을 숨긴다
   const waitfree = t.waitfree_ready
     ? "<b>지금 사용 가능</b>"
     : `사용 중${t.waitfree_available_at && formatRemaining(t.waitfree_available_at) ? ` (${formatRemaining(t.waitfree_available_at)})` : ""}`;
@@ -166,13 +167,22 @@ function kakaoManualSummaryHtml(a) {
   } else {
     lines.push(`폴더에 받은 회차가 ${a.existing_count}개 있어서, 가장 이른 파일 이후에 빠진 회차만 받습니다.`);
   }
-  if (a.marker && a.marker.warning) lines.push(`<span class="warn">⚠ ${escapeHtml(a.marker.warning)}</span>`);
+  // warning은 true/false(불리언)다 — 값을 그대로 찍으면 "true"가 보이므로 사람이 읽는 안내문을 만든다
+  if (a.marker && a.marker.warning) {
+    lines.push(`<span class="warn">⚠ 폴더의 파일(${a.marker.number}번 ${escapeHtml(a.marker.subtitle)})이 사이트 회차와 맞지 않아 번호대로 이어받습니다. 폴더의 파일 이름을 확인해 주세요.</span>`);
+  }
   else if (a.marker && a.marker.resolved_number !== a.marker.number) {
     lines.push(`파일의 번호(${a.marker.number})가 사이트와 달라서 제목으로 찾은 ${a.marker.resolved_number}번 이후부터 받습니다.`);
   }
   const counts = [`이미 받음 ${a.downloaded_count}개`, `받을 회차 ${a.to_download_count}개`, `잠겨서 대기 ${a.locked_count}개`];
   if (a.before_start_count > 0) counts.push(`시작 지점 이전 ${a.before_start_count}개`);
   lines.push(counts.join(" · "));
+  // 사이트가 말하는 전체 회차 수(동영상으로 뺀 것 포함)보다 가져온 회차가 적으면, 목록에서 회차가 빠졌을 수 있다고 알려 준다
+  const fetched = a.listed_count + a.excluded_video_count;
+  if (a.site_total > 0 && fetched < a.site_total) {
+    const hidden = a.hidden_count > 0 ? ` (그중 숨김 처리된 회차 ${a.hidden_count}개는 표에서 뺐습니다)` : "";
+    lines.push(`<span class="warn">⚠ 사이트 회차는 ${a.site_total}개인데 ${a.listed_count}개만 가져왔습니다${hidden}. 빠진 회차가 있을 수 있습니다.</span>`);
+  }
   if (!a.cookie_saved) lines.push('<span class="warn">⚠ 로그인 쿠키가 없습니다(설정에서 저장). 지금은 무료 회차만 받을 수 있습니다.</span>');
   else if (a.logged_in === false) lines.push('<span class="warn">⚠ 로그인이 풀려 있습니다. 설정에서 쿠키를 다시 저장해주세요.</span>');
   else if (a.logged_in === null) lines.push('<span class="warn">로그인 상태를 확인하지 못했습니다(잠시 뒤 다시 분석해보세요).</span>');
@@ -198,7 +208,8 @@ function renderKakaoManualTable() {
       : e.before_start
         ? '<span class="kp-before">이전 회차</span>'
         : '<span class="kp-wait">대기</span>';
-    const expire = e.expire ? String(e.expire).replace("T", " ").slice(0, 16) : "";
+    // 대여 중이면 만료 시각, 잠긴 연재무료 회차면 무료가 되는 날짜
+    const expire = e.expire ? String(e.expire).replace("T", " ").slice(0, 16) : e.free_at ? `${e.free_at} 무료` : "";
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td><input type="checkbox" class="kakao-manual-ep-checkbox" data-no="${e.number}" ${e.selectable ? "" : "disabled"} /></td>

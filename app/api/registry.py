@@ -30,6 +30,7 @@ class WatchedAuthorOut(BaseModel):
     author_id: str
     author_name: str
     enabled: bool
+    is_origin: bool = False  # (카카오) 작품 정보에서 원작 작가로 나온 이름
 
 
 class WatchedTagOut(BaseModel):
@@ -155,7 +156,14 @@ class KakaoWatchedAuthorIn(BaseModel):
 @router.get("/kakao/watched-authors", response_model=list[WatchedAuthorOut])
 async def list_kakao_watched_authors():
     rows = await asyncio.to_thread(repository.list_watched_authors, "kakao")
-    return [WatchedAuthorOut(author_id=r.author_id, author_name=r.author_name, enabled=r.enabled) for r in rows]
+    origins = await asyncio.to_thread(repository.list_kakao_origin_names)
+    return [WatchedAuthorOut(author_id=r.author_id, author_name=r.author_name, enabled=r.enabled, is_origin=r.author_name in origins) for r in rows]
+
+
+@router.get("/kakao/origin-authors", response_model=list[str])
+async def list_kakao_origin_authors():
+    """원작 작가로 나온 적 있는 이름들 — 화면이 후보 칩에도 "(원작)"을 붙이는 데 쓴다(카카오 목록은 역할을 안 알려준다)."""
+    return sorted(await asyncio.to_thread(repository.list_kakao_origin_names))
 
 
 @router.post("/kakao/watched-authors", response_model=WatchedAuthorOut)

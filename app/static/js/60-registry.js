@@ -264,10 +264,19 @@ document.getElementById("tag-catalog-search").addEventListener("input", renderAl
 let kakaoWatchedAuthorsCache = [];
 let kakaoAuthorCandidatesCache = [];
 
+let kakaoOriginNames = new Set(); // 원작 작가로 나온 적 있는 이름(카카오 목록은 역할을 안 알려줘서 작품 정보에서 모은 것)
+
+function kakaoAuthorLabel(name) {
+  return kakaoOriginNames.has(name) ? `${name} (원작)` : name;
+}
+
 async function loadKakaoAuthorList() {
   const registeredEl = document.getElementById("kakao-author-registered-chips");
   try {
-    kakaoWatchedAuthorsCache = await apiCall("/api/kakao/watched-authors");
+    [kakaoWatchedAuthorsCache, kakaoOriginNames] = await Promise.all([
+      apiCall("/api/kakao/watched-authors"),
+      apiCall("/api/kakao/origin-authors").then((names) => new Set(names)).catch(() => new Set()),
+    ]);
   } catch (e) {
     registeredEl.innerHTML = `<p class="error">${escapeHtml(e.message)}</p>`;
     return;
@@ -295,7 +304,7 @@ function renderKakaoRegisteredAuthors() {
   }
   for (const a of registered) {
     container.appendChild(
-      buildChip(a.author_name, true, async () => {
+      buildChip(kakaoAuthorLabel(a.author_name), true, async () => {
         await apiCall(`/api/kakao/watched-authors/${encodeURIComponent(a.author_id)}/disable`, { method: "POST" });
         loadKakaoAuthorList();
       })
@@ -319,13 +328,13 @@ function renderKakaoAllAuthors() {
   const items = [];
   for (const a of disabledKnown) {
     if (query && !a.author_name.toLowerCase().includes(query)) continue;
-    items.push({ label: a.author_name, onClick: () => enableKnownKakaoAuthor(a) });
+    items.push({ label: kakaoAuthorLabel(a.author_name), onClick: () => enableKnownKakaoAuthor(a) });
   }
   for (const name of kakaoAuthorCandidatesCache) {
     if (enabledNames.has(name) || knownNames.has(name)) continue;
     if (query && !name.toLowerCase().includes(query)) continue;
     items.push({
-      label: name,
+      label: kakaoAuthorLabel(name),
       onClick: async () => {
         try {
           await apiCall("/api/kakao/watched-authors", { method: "POST", body: JSON.stringify({ author_name: name }) });

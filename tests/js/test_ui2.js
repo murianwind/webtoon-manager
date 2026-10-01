@@ -122,6 +122,15 @@ const kakao = (id, title, extra = {}) => ({ title_id: id, title, thumbnail_url: 
   $("btn-kakao-manual-select-all").click();
   ok(Array.from(w.document.querySelectorAll(".kakao-manual-ep-checkbox:checked")).map((c) => c.dataset.no).join() === "1,4", "전체선택도 기다무는 1장만큼만: " + Array.from(w.document.querySelectorAll(".kakao-manual-ep-checkbox:checked")).map((c) => c.dataset.no).join());
   const periods = await w.eval("[180, 1440, 4320, 90, 0].map(formatWaitfreePeriod)") ; ok(JSON.stringify(Array.from(periods)) === '["3시간","1일","3일","90분",""]', "기다무 주기 표기: 180→3시간, 1440→1일, 4320→3일: " + Array.from(periods));
+  // 경고 문구: 불리언 true가 그대로 보이면 안 되고, 기다무가 없는 작품은 기다무 항목을 숨긴다
+  current = analysis({ marker: { number: 31, subtitle: "전혀 다른 제목", resolved_number: 31, warning: true }, tickets: { rental_count: 0, own_count: 0, waitfree_supported: false, waitfree_ready: false, waitfree_available_at: null, waitfree_period_minutes: 1440 } });
+  $("btn-manual-analyze").click(); await sleep(30);
+  const warnText = $("kakao-manual-summary").querySelector(".warn").textContent, sumText = $("kakao-manual-summary").textContent;
+  ok(!/true\b/.test(warnText) && warnText.includes("31번 전혀 다른 제목") && warnText.includes("번호대로 이어받습니다"), "표식 불일치 경고가 'true'가 아니라 안내문으로 나옴: " + warnText);
+  ok(sumText.includes("대여권 0장") && !sumText.includes("기다무"), "기다무가 없는 작품(waitfree_supported=false)은 기다무 항목이 안 보임");
+  current = analysis({ tickets: { rental_count: 0, own_count: 0, waitfree_supported: true, waitfree_ready: false, waitfree_available_at: new Date(Date.now() + 3600e3).toISOString(), waitfree_period_minutes: 1440 } });
+  $("btn-manual-analyze").click(); await sleep(30);
+  ok($("kakao-manual-summary").textContent.includes("1일 기다무 대여권 사용 중"), "기다무가 있는 작품은 예전처럼 표시됨");
   console.log("4) 표 서식: 네이버 표와 같은 규칙 적용");
   const css = require("fs").readFileSync(require("path").join(__dirname, "..", "..", "app", "static", "style.css"), "utf8");
   ok(/#manual-table,\s*#kakao-manual-table\s*\{/.test(css) && /#kakao-manual-table td/.test(css) && /#kakao-manual-table th\b/.test(css), "카카오 표가 네이버 표와 같은 표 스타일을 받음");

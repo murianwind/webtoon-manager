@@ -52,6 +52,7 @@ import aiohttp
 from yarl import URL
 
 from app import comicinfo, kakao_api, kakao_cover, kakao_page_auth, repository
+from app.kakao_authors import split_authors
 from app.file_utils import remove_forbidden_str_kakao
 
 log = logging.getLogger(__name__)
@@ -101,6 +102,7 @@ class Episode:
     hidden: bool
     rent_expire: str | None = None  # 대여 중이면 대여 만료 시각
     waitfree_blocked: bool = False  # 기다무로 열 수 없는 회차(최신 회차 등)
+    free_change_dt: str | None = None  # 무료로 바뀌는 시각(연재무료 작품의 "N일 후 무료") — 이미 무료인 회차는 아주 옛 날짜가 온다
 
 
 @dataclass
@@ -227,9 +229,20 @@ def scan_existing_files(folder: Path) -> list[ExistingFile]:
     return sorted(files, key=lambda f: f.number)
 
 
-def plan_by_folder_rules(episodes: list[Episode], existing: list[ExistingFile]) -> DownloadPlan:
+def _subtitle_key(subtitle: str, series_title: str) -> str:
+    """파일에 적힌 부제목을 사이트 부제목과 비교할 수 있는 형태로 — 예전 도구가 받은 파일은 "탈조클럽 31화"처럼 작품명이 앞에
+    붙어 있는데 사이트 부제목은 작품명을 뺀 "31화"라서, 같은 치환을 거친 작품명이 앞에 붙어 있으면 떼고 비교한다."""
+    text = normalize_subtitle(subtitle)
+    prefix = normalize_subtitle(series_title)
+    if prefix and text.startswith(prefix) and text[len(prefix):].strip():
+        return text[len(prefix):].strip()
+    return text
+
+
+def plan_by_folder_rules(episodes: list[Episode], existing: list[ExistingFile], series_title: str = "") -> DownloadPlan:
     """폴더 규칙(모듈 설명 참고)으로 받을 회차를 정한다. 받을 수 있는 회차를 앞에서부터 이어서 받다가 처음
-    잠긴 회차에서 멈춘다 — 순서를 건너뛰지 않아야 "번호 순서대로"가 지켜진다."""
+    잠긴 회차에서 멈춘다 — 순서를 건너뛰지 않아야 "번호 순서대로"가 지켜진다. series_title은 파일 이름 속 부제목에 붙은
+    작품명을 떼고 비교하는 데 쓴다(없으면 있는 그대로 비교)."""
     visible = sorted((e for e in episodes if not e.hidden and e.number > 0), key=lambda e: e.number)
     marker: MarkerInfo | None = None
 
@@ -240,10 +253,11 @@ def plan_by_folder_rules(episodes: list[Episode], existing: list[ExistingFile]) 
         mode = "single_marker"
         only = existing[0]
         resolved, warning = only.number, False
+        only_key = _subtitle_key(only.subtitle, series_title)
         at_number = next((e for e in visible if e.number == only.number), None)
-        if at_number is None or normalize_subtitle(at_number.subtitle) != only.subtitle:
+        if at_number is None or normalize_subtitle(at_number.subtitle) != only_key:
             # 번호가 사이트와 안 맞으면 부제목으로 위치를 다시 찾는다(예전 도구와 번호가 밀려 있는 경우)
-            same_title = [e for e in visible if normalize_subtitle(e.subtitle) == only.subtitle]
+            same_title = [e for e in visible if normalize_subtitle(e.subtitle) == only_key]
             if len(same_title) == 1:
                 resolved = same_title[0].number
             else:
@@ -255,7 +269,7 @@ def plan_by_folder_rules(episodes: list[Episode], existing: list[ExistingFile]) 
         lower_bound = min(f.number for f in existing)
 
     have_numbers = {f.number for f in existing}
-    have_subtitles = {f.subtitle for f in existing}
+    have_subtitles = {_subtitle_key(f.subtitle, series_title) for f in existing}
     plan = DownloadPlan(mode=mode, marker=marker, existing_count=len(existing))
     blocked = False
     for episode in visible:
@@ -314,6 +328,7 @@ def _parse_episode(item: dict, series_title: str, now_kst: datetime) -> Episode:
         page_count=int(item.get("page_count") or 0), hidden=bool(item.get("hidden")),
         rent_expire=purchase.get("rent_expire_dt") if accessible and not item.get("is_free") else None,
         waitfree_blocked=bool(item.get("waitfree_blocked")),
+        free_change_dt=item.get("free_change_dt"),
     )
 
 
@@ -420,6 +435,7 @@ class KakaoPageClient:
             if not result.get("has_next") or new_count == 0 or cursor is None:
                 break
             await asyncio.sleep(_PAGE_INTERVAL_SECONDS)
+        series_item["_excluded_video_count"] = len(video_orders)  # 동영상이라 목록에서 뺀 회차 수(분석 화면의 "사이트 회차 수" 비교용)
         images = [e for e in episodes.values() if e is not None and e.number > 0]
         for episode in images:
             episode.number -= sum(1 for order in video_orders if order < episode.number)
@@ -608,7 +624,7 @@ async def run_download(
     series_item, episodes = listing
     folder_title = title or series_item.get("title") or str(series_id)
     folder = series_folder(download_root, folder_title)
-    plan = plan_by_folder_rules(episodes, scan_existing_files(folder))
+    plan = plan_by_folder_rules(episodes, scan_existing_files(folder), series_item.get("title") or "")
     downloaded: list[int] = []
     items: list[tuple[int, str]] = []
     failed: int | None = None
@@ -624,7 +640,7 @@ async def run_download(
         if on_progress:
             on_progress(f"{episode.number}번 회차 받음 ({path.name})")
     ticket_used: int | None = None
-    if failed is None and len(downloaded) < max_episodes and plan.locked:
+    if failed is None and len(downloaded) < max_episodes and plan.locked and waitfree_supported(series_item):
         # 받을 수 있는 건 다 받았고 잠긴 회차가 남았으면, 첫 잠긴 회차를 기다무로 열어 받는다(한 장뿐이라 그 뒤는 대기)
         ticket_used, failed = await _download_first_locked_with_waitfree(
             client, series_id, plan.locked[0], folder, downloaded, items, on_progress
@@ -674,7 +690,7 @@ async def download_selected(
     series_item, episodes = listing
     result.title = title or series_item.get("title") or str(series_id)
     folder = series_folder(download_root, result.title)
-    plan = plan_by_folder_rules(episodes, scan_existing_files(folder))
+    plan = plan_by_folder_rules(episodes, scan_existing_files(folder), series_item.get("title") or "")
     rows = {row.episode.number: row for row in plan.rows}
     ticket = None  # 잠긴 회차를 고른 경우에만 조회한다
     waitfree_spent = False  # 기다무는 한 장이라 고른 잠긴 회차 중 번호가 가장 앞선 하나만 연다
@@ -688,6 +704,8 @@ async def download_selected(
             reason = "잠김(대여권 필요)"
             if waitfree_spent:
                 reason = "기다무는 한 장이라 하나만 열 수 있습니다"
+            elif not waitfree_supported(series_item):
+                reason = "이 작품은 기다무가 없습니다"
             elif row.episode.waitfree_blocked:
                 reason = "기다무로 열 수 없는 회차입니다"
             else:
@@ -720,25 +738,28 @@ async def download_selected(
     return result
 
 
-def split_authors(about: dict | None) -> tuple[list[str], list[str], list[str]]:
-    """작품 "정보"의 author_list에서 (글, 그림, 원작) 이름 목록. 같은 이름은 한 번만."""
-    groups: dict[str, list[str]] = {"writer": [], "illustrator": [], "original_author": []}
-    for author in (about or {}).get("author_list") or []:
-        names = groups.get(author.get("role"))
-        if names is not None and author.get("name") and author["name"] not in names:
-            names.append(author["name"])
-    return groups["writer"], groups["illustrator"], groups["original_author"]
+def free_date_of(episode: Episode) -> str | None:
+    """아직 못 받는 회차가 무료로 열리는 날짜("YYYY-MM-DD", 한국시간) — 연재무료 작품의 "N일 후 무료". 이미 받을 수 있거나, 날짜가 지났거나,
+    날짜를 모르면 None."""
+    if episode.accessible or not episode.free_change_dt:
+        return None
+    try:
+        when = datetime.fromisoformat(episode.free_change_dt).astimezone(_KST)
+    except ValueError:
+        return None
+    return when.strftime("%Y-%m-%d") if when > datetime.now(_KST) else None
 
 
-def authors_to_register(about: dict | None) -> list[str]:
-    """구독할 때 관심 작가로 등록할 이름 — 원작자가 있으면 원작자, 없으면 글 작가(네이버와 같은 규칙)."""
-    writers, _, originals = split_authors(about)
-    return originals or writers
+def waitfree_supported(series_item: dict) -> bool:
+    """이 작품에 기다무(기다리면 무료)가 있는지. 이용권 응답(ticket/my)은 기다무가 없는 작품에도 기다무 항목을 채워 주므로(충전 주기 기본값
+    등) 그걸로 판단하면 안 되고, 작품 정보의 is_waitfree를 본다(연재무료 작품 등은 False)."""
+    return bool(series_item.get("is_waitfree"))
 
 
 def write_info_xml(series_item: dict, series_id: int, folder: Path, about: dict | None = None) -> None:
     """작품 폴더의 info.xml을 최신 정보로 (다시) 쓰고, 파일명 템플릿 {author}용 글 작가도 저장한다. 받을 때마다/메타 동기화 때마다 같은 규칙."""
-    repository.set_kakao_writer_names(series_id, split_authors(about)[0])
+    writers, _, originals = split_authors(about)
+    repository.set_kakao_authors(series_id, writers, originals)
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "info.xml").write_text(comicinfo.build_kakao_comicinfo_xml(series_item, series_id, about), encoding="utf-8")
 

@@ -6,9 +6,11 @@ id_list.txt + webtoon_state.json을 대체하는 단일 저장소. WAL 모드로
 (동시성 이슈: 스케줄러 잡과 웹 API가 동시에 같은 파일을 건드릴 수 있으므로).
 """
 
+import re
 import sqlite3
 import threading
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 from app.config import get_settings
 
@@ -79,6 +81,7 @@ CREATE TABLE IF NOT EXISTS kakao_webtoons (
     thumbnail_url TEXT NOT NULL DEFAULT '',
     author_summary TEXT NOT NULL DEFAULT '',
     writer_names TEXT NOT NULL DEFAULT '[]',      -- JSON 배열: 작품 정보의 "글" 작가(파일명 템플릿의 {author}에 쓴다)
+    origin_names TEXT NOT NULL DEFAULT '[]',      -- JSON 배열: 작품 정보의 "원작" 작가(관심 작가 화면에서 "(원작)"으로 표시)
     is_finished INTEGER NOT NULL DEFAULT 0,      -- 완결이고 받을 회차를 다 받음(완결 확인 알림 대상)
     finish_notified INTEGER NOT NULL DEFAULT 0,  -- 완결 확인 디스코드 메시지를 보냄
     finish_ack INTEGER NOT NULL DEFAULT 0,       -- "알람 제외"를 누름(구독은 유지)
@@ -178,6 +181,7 @@ _MIGRATIONS = [
     ("archive_targets", "source_path", "ALTER TABLE archive_targets ADD COLUMN source_path TEXT NOT NULL DEFAULT ''"),
     ("kakao_webtoons", "author_summary", "ALTER TABLE kakao_webtoons ADD COLUMN author_summary TEXT NOT NULL DEFAULT ''"),
     ("kakao_webtoons", "writer_names", "ALTER TABLE kakao_webtoons ADD COLUMN writer_names TEXT NOT NULL DEFAULT '[]'"),
+    ("kakao_webtoons", "origin_names", "ALTER TABLE kakao_webtoons ADD COLUMN origin_names TEXT NOT NULL DEFAULT '[]'"),
     ("kakao_webtoons", "is_finished", "ALTER TABLE kakao_webtoons ADD COLUMN is_finished INTEGER NOT NULL DEFAULT 0"),
     ("kakao_webtoons", "finish_notified", "ALTER TABLE kakao_webtoons ADD COLUMN finish_notified INTEGER NOT NULL DEFAULT 0"),
     ("kakao_webtoons", "finish_ack", "ALTER TABLE kakao_webtoons ADD COLUMN finish_ack INTEGER NOT NULL DEFAULT 0"),
@@ -245,8 +249,32 @@ def get_connection() -> sqlite3.Connection:
         # 다시 쌓는다(이미 지운 뒤에는 옛 번호 행이 없어서 매번 실행돼도 아무 일도 안 함).
         _connection.execute("DELETE FROM kakao_seen_titles WHERE title_id < ?", (LEGACY_KAKAO_ID_LIMIT,))
         _fix_episode_history_platforms(_connection)
+        _fix_combined_kakao_authors(_connection)
         _connection.commit()
     return _connection
+
+
+def _fix_combined_kakao_authors(conn: sqlite3.Connection) -> int:
+    """한 항목에 여러 명이 "A, B, C"로 묶여 저장된 카카오 관심 작가를 한 명씩 나눈다(작품 정보의 원작 항목 하나에 여러 이름이 들어 있던
+    경우). 나뉜 작가는 묶인 항목의 켜짐/꺼짐을 이어받고, 이미 따로 있던 작가는 그대로 둔다. 묶인 항목은 지운다. 나눈 항목 수를 돌려준다."""
+    combined = conn.execute(
+        "SELECT author_id, enabled FROM watched_authors WHERE platform = 'kakao' AND (author_id LIKE '%,%' OR author_id LIKE '%，%')"
+    ).fetchall()
+    now = datetime.now(timezone.utc).isoformat()
+    for row in combined:
+        for name in [n.strip() for n in re.split(r"[,，]", row["author_id"]) if n.strip()]:
+            conn.execute(
+                "INSERT OR IGNORE INTO watched_authors (author_id, author_name, enabled, platform, created_at, updated_at) VALUES (?, ?, ?, 'kakao', ?, ?)",
+                (name, name, row["enabled"], now, now),
+            )
+        conn.execute("DELETE FROM watched_authors WHERE author_id = ? AND platform = 'kakao'", (row["author_id"],))
+    return len(combined)
+
+
+def fix_combined_kakao_authors() -> int:
+    """(테스트/수동 점검용) 묶여 저장된 카카오 작가를 나눈다 — 시작할 때 자동으로도 실행된다."""
+    with write_transaction() as conn:
+        return _fix_combined_kakao_authors(conn)
 
 
 def fix_episode_history_platforms() -> int:

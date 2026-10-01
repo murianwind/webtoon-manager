@@ -509,65 +509,49 @@ def _title_folder(download_root: str, title_name: str, kakao: bool) -> Path:
     return Path(download_root) / (remove_forbidden_str_kakao(title_name) if kakao else remove_forbidden_str(title_name))
 
 
-def _archive_title(
-    archive_root: str, download_root: str, title_id: str, title_name: str,
-    base_path: str, policy: str, trigger_type: str, keep_last: bool,
-    dest_type: str = "local", rclone_config_path: str = "",
-    progress_callback=None, conflict_log: list | None = None, failure_log: list | None = None,
-    writer_names: list[str] | None = None, filename_template_preset_id: int | None = None,
-    kakao: bool = False,
-) -> int:
-    """실제로 파일들을 옮기고 이력을 남긴다. 반환값은 옮긴 개수.
-    dest_type이 'rclone'이면 로컬 shutil 대신 rclone CLI로 처리한다(Windows 마운트를
-    거치지 않아서, Docker Desktop이 WinFsp 가상 드라이브를 못 읽는 문제를 우회함).
-
-    progress_callback(선택): 파일 하나 처리할 때마다 진행 메시지 문자열로 호출한다
-    (일괄 이동과 동일한 방식) — 이 함수는 그 메시지를 화면에 어떻게 보여줄지 모른다.
-    conflict_log/failure_log(선택): 지정하면, 이번 파일에서 이름 충돌이 실제로
-    있었거나(정책이 작동함) 이동 자체가 실패했을 때 (title_name, file_name, 상세)를
-    그 리스트에 추가한다 — 호출부(scheduler.py)가 실행이 다 끝난 뒤 모아서 디스코드로
-    알릴 때 쓴다."""
+def _dest_settings_missing(dest_type: str, archive_root: str, rclone_config_path: str, title_id: str) -> bool:
+    """목적지에 필요한 설정이 없으면 로그를 남기고 True — 그 작품은 건너뛴다."""
     if dest_type == "rclone" and not (rclone_config_path and Path(rclone_config_path).is_file()):
         log.error("rclone 목적지인데 RCLONE_CONFIG_PATH가 설정 안 되어 있어 건너뜀 (title_id=%s)", title_id)
-        return 0
+        return True
     if dest_type == "local" and not archive_root:
         log.error("로컬 목적지인데 ARCHIVE_ROOT가 설정 안 되어 있어 건너뜀 (title_id=%s)", title_id)
-        return 0
+        return True
+    return False
 
-    title_dir = _title_folder(download_root, title_name, kakao)
-    files = _list_episode_files_sorted(title_dir)
-    if keep_last and len(files) > 0:
-        files = files[:-1]  # 마지막(가장 큰 번호)은 보존
 
-    if not keep_last:
-        # 완결 처리(수동 "완결 처리로 이동"이든 완결 자동이동이든)일 때만 —
-        # 이 폴더가 카카오페이지 작품이면(info.xml의 <Web> 태그로 판단) 표지를 카카오페이지의
-        # 공식 표지로 새로 받아 교체한다. 실패해도 아카이빙 자체는 계속 진행한다.
-        try:
-            if kakao_cover.refresh_kakao_cover_if_applicable(title_dir):
-                if progress_callback:
-                    progress_callback(f"[{title_name}] 카카오 표지 갱신함")
-        except Exception as e:
-            log.warning("카카오 표지 갱신 중 예외 (무시하고 계속) (%s): %s", title_dir, e)
+def _refresh_kakao_cover_for_finish(title_dir: Path, title_name: str, progress_callback) -> None:
+    """완결 처리(수동 "완결 처리로 이동"이든 완결 자동이동이든)일 때만 — 이 폴더가 카카오페이지 작품이면(info.xml의 <Web> 태그로 판단)
+    표지를 카카오페이지의 공식 표지로 새로 받아 교체한다. 실패해도 아카이빙 자체는 계속 진행한다."""
+    try:
+        if kakao_cover.refresh_kakao_cover_if_applicable(title_dir) and progress_callback:
+            progress_callback(f"[{title_name}] 카카오 표지 갱신함")
+    except Exception as e:
+        log.warning("카카오 표지 갱신 중 예외 (무시하고 계속) (%s): %s", title_dir, e)
 
-    metadata_files = _find_metadata_files(title_dir)
-    if not files and not metadata_files:
-        return 0
 
+def _resolve_title_dest(dest_type: str, archive_root: str, rclone_config_path: str, title_name: str, base_path: str) -> tuple[str, str, "Path | None"]:
+    """(rclone 원격 이름, rclone 목적지 경로, 로컬 목적지 폴더) — 해당하지 않는 쪽은 빈 값. 목적지 폴더를 만들고 돌려준다."""
     force_subfolder = base_path == get_default_base_path()
-    template = _get_effective_filename_template(filename_template_preset_id)
-
-    remote, rclone_dest_path, local_dest_dir = "", "", None
     if dest_type == "rclone":
         dest_target = _resolve_archive_dest_rclone(rclone_config_path, title_name, base_path, force_subfolder=force_subfolder)
         remote, rclone_dest_path = _parse_rclone_target(dest_target)
-    else:
-        local_dest_dir = resolve_archive_dest(archive_root, title_name, base_path, force_subfolder=force_subfolder)
+        return remote, rclone_dest_path, None
+    return "", "", resolve_archive_dest(archive_root, title_name, base_path, force_subfolder=force_subfolder)
 
+
+def _move_title_files(
+    files: list, title_id: str, title_name: str, dest_type: str, policy: str, trigger_type: str, template: str, writer_names: list[str],
+    rclone_config_path: str, remote: str, rclone_dest_path: str, local_dest_dir: "Path | None",
+    progress_callback, conflict_log: "list | None", failure_log: "list | None",
+) -> int:
+    """회차 zip들을 하나씩 옮기고(파일명 템플릿 적용, 충돌 정책, 이력) 옮긴 개수를 돌려준다. 한 파일이 실패해도 나머지는 계속한다."""
     moved = 0
     for _num, src in files:
         try:
-            dest_filename = render_archive_filename(template, src.name, title_name, writer_names or [], zip_path_for_page_count=src) if template else None
+            dest_filename = (
+                render_archive_filename(template, src.name, title_name, writer_names, zip_path_for_page_count=src) if template else None
+            )
             saved_name, had_conflict = _move_episode_file(
                 dest_type, src, dest_filename, policy, rclone_config_path, remote, rclone_dest_path, local_dest_dir
             )
@@ -586,6 +570,48 @@ def _archive_title(
                 progress_callback(f"[{title_name}] 이동 실패: {src.name} — {e}")
             if failure_log is not None:
                 failure_log.append((title_name, src.name, str(e)))
+    return moved
+
+
+def _archive_title(
+    archive_root: str, download_root: str, title_id: str, title_name: str,
+    base_path: str, policy: str, trigger_type: str, keep_last: bool,
+    dest_type: str = "local", rclone_config_path: str = "",
+    progress_callback=None, conflict_log: list | None = None, failure_log: list | None = None,
+    writer_names: list[str] | None = None, filename_template_preset_id: int | None = None,
+    kakao: bool = False,
+) -> int:
+    """실제로 파일들을 옮기고 이력을 남긴다. 반환값은 옮긴 개수.
+    dest_type이 'rclone'이면 로컬 shutil 대신 rclone CLI로 처리한다(Windows 마운트를
+    거치지 않아서, Docker Desktop이 WinFsp 가상 드라이브를 못 읽는 문제를 우회함).
+
+    progress_callback(선택): 파일 하나 처리할 때마다 진행 메시지 문자열로 호출한다
+    (일괄 이동과 동일한 방식) — 이 함수는 그 메시지를 화면에 어떻게 보여줄지 모른다.
+    conflict_log/failure_log(선택): 지정하면, 이번 파일에서 이름 충돌이 실제로
+    있었거나(정책이 작동함) 이동 자체가 실패했을 때 (title_name, file_name, 상세)를
+    그 리스트에 추가한다 — 호출부(scheduler.py)가 실행이 다 끝난 뒤 모아서 디스코드로
+    알릴 때 쓴다."""
+    if _dest_settings_missing(dest_type, archive_root, rclone_config_path, title_id):
+        return 0
+
+    title_dir = _title_folder(download_root, title_name, kakao)
+    files = _list_episode_files_sorted(title_dir)
+    if keep_last and len(files) > 0:
+        files = files[:-1]  # 마지막(가장 큰 번호)은 보존
+
+    if not keep_last:
+        _refresh_kakao_cover_for_finish(title_dir, title_name, progress_callback)
+
+    metadata_files = _find_metadata_files(title_dir)
+    if not files and not metadata_files:
+        return 0
+
+    template = _get_effective_filename_template(filename_template_preset_id)
+    remote, rclone_dest_path, local_dest_dir = _resolve_title_dest(dest_type, archive_root, rclone_config_path, title_name, base_path)
+    moved = _move_title_files(
+        files, title_id, title_name, dest_type, policy, trigger_type, template, writer_names or [],
+        rclone_config_path, remote, rclone_dest_path, local_dest_dir, progress_callback, conflict_log, failure_log,
+    )
 
     if metadata_files:
         if dest_type == "rclone":

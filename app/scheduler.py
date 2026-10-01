@@ -874,7 +874,7 @@ async def _run_discovery_job_impl() -> None:
         try:
             job_status.log_line("discovery", "카카오웹툰 작가 신작 스캔 시작")
             kakao_new_count = await tracker.scan_kakao_authors_for_new_titles(session, settings)
-            job_status.log_line("discovery", f"카카오웹툰 신작 {kakao_new_count}건 발견")
+            job_status.log_line("discovery", f"카카오웹툰 신작 {kakao_new_count}건 자동 추가")
         except Exception as e:
             had_error = True
             log.error("카카오웹툰 신작 스캔 중 예외: %s", e)

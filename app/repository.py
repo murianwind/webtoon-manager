@@ -410,18 +410,37 @@ def _row_to_kakao_webtoon(row) -> dict:
     return {
         "title_id": row["title_id"], "title": row["title"], "status": row["status"],
         "ever_subscribed": bool(row["ever_subscribed"]), "thumbnail_url": row["thumbnail_url"],
-        "author_summary": row["author_summary"], "writer_names": json.loads(row["writer_names"] or "[]"),
+        "author_summary": row["author_summary"], "writer_names": json.loads(row["writer_names"] or "[]"), "origin_names": json.loads(row["origin_names"] or "[]"),
         "is_finished": bool(row["is_finished"]),
         "finish_notified": bool(row["finish_notified"]), "finish_ack": bool(row["finish_ack"]),
     }
 
 
-def set_kakao_writer_names(title_id: int, writer_names: list[str]) -> None:
-    """작품 정보의 "글" 작가 이름들(파일명 템플릿 {author}용). 추적 중인 작품일 때만 저장하고, 빈 목록은 기존 값을 지우지 않는다."""
-    if not writer_names:
+def set_kakao_authors(title_id: int, writer_names: list[str], origin_names: list[str]) -> None:
+    """작품 정보의 "글" 작가(파일명 템플릿 {author}용)와 "원작" 작가(관심 작가 화면의 "(원작)" 표시용)를 저장한다. 추적 중인 작품일 때만
+    저장하고, 정보를 못 받아 글/원작이 모두 비어 있으면 기존 값을 지우지 않는다(하나라도 있으면 둘 다 그 내용으로 갱신 — 원작자가 없어진 것도
+    반영된다)."""
+    if not writer_names and not origin_names:
         return
     with write_transaction() as conn:
-        conn.execute("UPDATE kakao_webtoons SET writer_names = ? WHERE title_id = ?", (json.dumps(writer_names, ensure_ascii=False), title_id))
+        conn.execute(
+            "UPDATE kakao_webtoons SET writer_names = ?, origin_names = ? WHERE title_id = ?",
+            (json.dumps(writer_names, ensure_ascii=False), json.dumps(origin_names, ensure_ascii=False), title_id),
+        )
+
+
+def list_kakao_origin_names() -> set[str]:
+    """추적 중인 카카오 작품 어딘가에서 원작 작가로 나온 이름들."""
+    names: set[str] = set()
+    for row in fetchall("SELECT origin_names FROM kakao_webtoons"):
+        names.update(json.loads(row["origin_names"] or "[]"))
+    return names
+
+
+def is_author_auto_register_enabled() -> bool:
+    """구독(자동 구독 포함) 시 그 작품 작가를 '등록된 작가'(자동 신작추가 대상)로 자동 등록할지 여부. 값이 명시적으로 '0'일 때만
+    꺼짐 — 기존 사용자는 값이 아예 없을 테니 켜짐 유지."""
+    return get_setting("auto_register_author_on_subscribe") != "0"
 
 
 def set_kakao_finished(title_id: int, finished: bool) -> None:
@@ -1077,7 +1096,7 @@ _WATCHED_AUTHOR_COLUMNS = ("author_id", "author_name", "enabled", "platform", "c
 _WATCHED_TAG_COLUMNS = ("tag_id", "tag_name", "enabled", "created_at", "updated_at")
 _KAKAO_SEEN_TITLE_COLUMNS = ("author_name", "title_id", "title_name", "seen_at")
 _KAKAO_WEBTOON_COLUMNS = (
-    "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "author_summary", "writer_names",
+    "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "author_summary", "writer_names", "origin_names",
     "is_finished", "finish_notified", "finish_ack", "created_at", "updated_at",
 )
 _FILENAME_TEMPLATE_PRESET_COLUMNS = ("id", "name", "template", "created_at", "updated_at")

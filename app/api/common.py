@@ -18,9 +18,8 @@ log = logging.getLogger(__name__)
 
 
 def _is_author_auto_register_enabled() -> bool:
-    """구독 시 그 작품 작가를 '등록된 작가'(자동 신작추가 대상)로 자동 등록할지 여부.
-    값이 명시적으로 '0'일 때만 꺼짐 — 기존 사용자는 값이 아예 없을 테니 켜짐 유지."""
-    return repository.get_setting("auto_register_author_on_subscribe") != "0"
+    """구독 시 그 작품 작가를 '등록된 작가'(자동 신작추가 대상)로 자동 등록할지 여부(저장소의 같은 기준을 쓴다)."""
+    return repository.is_author_auto_register_enabled()
 
 
 def _render_exclude_confirm_html(title_id, title: str, exclude_endpoint: str, payload: dict) -> HTMLResponse:

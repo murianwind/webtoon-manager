@@ -8,6 +8,7 @@ from pathlib import Path
 from app import db
 db.get_connection()
 from app import kakao_page_download as kp, comicinfo
+from app import kakao_authors
 
 class R:
     def __init__(self, status=200, data=None, body=b"", ctype="application/json"):
@@ -33,7 +34,7 @@ class Site:
     def __init__(self, items, waitfree=True, ticket_type="RT05", gift=0):
         self.items, self.waitfree, self.ticket_type, self.gift = items, waitfree, ticket_type, gift
         self.posts, self.opened = [], set()
-    def series_item(self): return {"id": 1, "title": "작품", "authors": "가,나", "description": "d", "sub_category": "드라마", "age_grade": 0, "on_issue": "Y"}
+    def series_item(self): return {"id": 1, "is_waitfree": True, "title": "작품", "authors": "가,나", "description": "d", "sub_category": "드라마", "age_grade": 0, "on_issue": "Y"}
     def get(self, url, params=None, headers=None, timeout=None):
         url = str(url)
         p = params or {}
@@ -203,10 +204,10 @@ async def main():
 
     # ── 6. 작가 역할 ──
     about = await client(Site(items)).fetch_about(1)
-    assert kp.split_authors(about) == (["김용회"], ["김용회"], ["베르나르 베르베르"])
-    assert kp.authors_to_register(about) == ["베르나르 베르베르"]                                              # 원작자가 있으면 원작자
+    assert kakao_authors.split_authors(about) == (["김용회"], ["김용회"], ["베르나르 베르베르"])
+    assert kakao_authors.authors_to_register(about) == ["베르나르 베르베르"]                                              # 원작자가 있으면 원작자
     only_writer = {"author_list": [{"name": "글쓴이", "role": "writer"}, {"name": "그린이", "role": "illustrator"}]}
-    assert kp.authors_to_register(only_writer) == ["글쓴이"] and kp.authors_to_register(None) == [] and kp.authors_to_register({}) == []
+    assert kakao_authors.authors_to_register(only_writer) == ["글쓴이"] and kakao_authors.authors_to_register(None) == [] and kakao_authors.authors_to_register({}) == []
     xml = comicinfo.build_kakao_comicinfo_xml({"title": "개미", "authors": "김용회,베르나르 베르베르", "sub_category": "드라마", "age_grade": 0, "on_issue": "Y"}, 68239972, about)
     assert "<Writer>김용회</Writer>" in xml and "<CoverArtist>김용회</CoverArtist>" in xml and "<Notes>원작: 베르나르 베르베르</Notes>" in xml and "<Tags>추리물,가족</Tags>" in xml
     assert "<Writer>김용회, 베르나르 베르베르</Writer>" in comicinfo.build_kakao_comicinfo_xml({"title": "개미", "authors": "김용회,베르나르 베르베르"}, 1, None)    # 정보 탭을 못 받으면 이름 전부

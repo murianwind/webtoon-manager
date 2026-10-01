@@ -4,17 +4,18 @@ import httpx
 from app import db, repository, tracker, naver_api, kakao_page_download as kp, comicinfo
 db.get_connection()
 import app.main as m
+from app import kakao_authors
 
 def names(platform): return {a.author_id: a.enabled for a in repository.list_watched_authors(platform)}
 
 # ── 카카오: 원작 3명(연상호, 민홍남, 황은영) ──
 about3 = {"author_list": [{"name": "글쓴이", "role": "writer"}, {"name": "그림쓴이", "role": "illustrator"},
                           {"name": "연상호", "role": "original_author"}, {"name": "민홍남", "role": "original_author"}, {"name": "황은영", "role": "original_author"}]}
-assert kp.authors_to_register(about3) == ["연상호", "민홍남", "황은영"]                              # 원작자가 있으면 원작자 전원(글 작가는 제외), 순서 유지
-assert kp.split_authors(about3) == (["글쓴이"], ["그림쓴이"], ["연상호", "민홍남", "황은영"])
+assert kakao_authors.authors_to_register(about3) == ["연상호", "민홍남", "황은영"]                              # 원작자가 있으면 원작자 전원(글 작가는 제외), 순서 유지
+assert kakao_authors.split_authors(about3) == (["글쓴이"], ["그림쓴이"], ["연상호", "민홍남", "황은영"])
 # 글 작가가 여러 명이고 원작이 없으면 글 작가 전원
 about_w = {"author_list": [{"name": "글A", "role": "writer"}, {"name": "글B", "role": "writer"}, {"name": "글A", "role": "writer"}, {"name": "그림", "role": "illustrator"}]}
-assert kp.authors_to_register(about_w) == ["글A", "글B"]                                              # 같은 이름은 한 번만
+assert kakao_authors.authors_to_register(about_w) == ["글A", "글B"]                                              # 같은 이름은 한 번만
 xml = comicinfo.build_kakao_comicinfo_xml({"title": "t", "authors": ""}, 1, about3)
 assert "<Writer>글쓴이</Writer>" in xml and "원작: 연상호, 민홍남, 황은영" in xml                        # info.xml에는 원작자 전원
 assert "<Writer>글A, 글B</Writer>" in comicinfo.build_kakao_comicinfo_xml({"title": "t"}, 1, about_w)

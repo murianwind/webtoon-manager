@@ -23,6 +23,7 @@ from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
 from app.config import Settings
 from app.discord_notify import send_webhook_notification
 from app.models import TitleInfo
+from app import kakao_authors
 
 log = logging.getLogger(__name__)
 
@@ -192,16 +193,39 @@ async def enrich_one(
     return True, "작가 정보 없음 (API 응답에 작가 필드가 비어있음)"
 
 
+async def _record_kakao_title_authors(series_id: int, settings) -> None:
+    """신작 스캔으로 자동 추가한 카카오 작품의 작가 정보(글/그림/원작 구분)를 작품 정보에서 받아 저장하고, 구독할 때와 같은 규칙(원작자가
+    있으면 원작자, 없으면 글 작가)으로 관심 작가를 등록한다(구독 시 작가 자동 등록 설정이 켜져 있을 때). 사용자가 꺼 둔 작가는 다시 켜지
+    않는다. 작품 정보를 못 받으면 조용히 건너뛴다 — 작품 추가와 알림은 이미 끝났고, 작가 정보는 다음 다운로드/재동기화 때 채워진다."""
+    try:
+        async with kakao_page_download.new_session() as kakao_session:
+            about = await kakao_page_download.client_or_anonymous(kakao_session, settings.request_timeout_seconds).fetch_about(series_id)
+    except Exception as e:
+        log.warning("카카오 신작 작품 정보(series_id=%s) 조회 실패 — 작가 정보는 나중에 채웁니다: %s", series_id, e)
+        return
+    if about is None:
+        return
+    writers, _, originals = kakao_authors.split_authors(about)
+    repository.set_kakao_authors(series_id, writers, originals)
+    if repository.is_author_auto_register_enabled():
+        for name in kakao_authors.authors_to_register(about):
+            repository.upsert_watched_author(name, name, True, "kakao")
+
+
 async def scan_kakao_authors_for_new_titles(session: aiohttp.ClientSession, settings) -> int:
     """
     등록된 카카오웹툰 작가(이름 기준) 각각을 검색해서, 그 작가의 작품 중 이번에 처음
-    보는 것(kakao_seen_titles에 없는 title_id)이 있으면 디스코드로 알린다.
+    보는 것(kakao_seen_titles에 없는 title_id)이 있으면 구독 상태로 자동 추가하고 디스코드로 알린다
+    (네이버 신작 스캔과 같은 동작). 이미 이 앱이 추적 중인 작품(구독/구독해제/목록/제외됨)은 다시 추가하거나
+    알리지 않는다 — 특히 사용자가 제외한 작품이 되살아나면 안 된다. 카카오웹툰 관리를 꺼 두었으면 아예 돌지 않는다.
 
     최초로 어떤 작가를 등록한 직후 첫 스캔에서는, 그 작가의 기존 작품 전체가
     "새로 발견됨"으로 잡혀서 전부 알림이 가버린다 — 그래서 그 작가를 이번에 처음
     스캔하는 거라면(seen 목록이 비어있으면) 지금 있는 작품 전체를 기준선으로만
     저장하고 알림은 보내지 않는다(다운로드 리포트 기능과 동일한 패턴).
     """
+    if repository.get_setting("kakao_webtoons_enabled") != "1":
+        return 0
     authors = [a for a in repository.list_watched_authors(platform="kakao") if a.enabled]
     if not authors:
         return 0
@@ -234,9 +258,18 @@ async def scan_kakao_authors_for_new_titles(session: aiohttp.ClientSession, sett
             if is_first_scan:
                 continue  # 기준선 저장만, 알림 없음
 
+            if repository.get_kakao_webtoon(item["title_id"]) is not None:
+                job_status.log_line("discovery", f"[카카오/{author.author_name}] {item['title_name']}: 이미 추적 중이라 건너뜀")
+                continue
+
             new_titles_found += 1
+            repository.upsert_new_kakao_webtoon(
+                item["title_id"], item["title_name"], item.get("thumbnail_url") or "", repository.STATUS_ACTIVE,
+                ", ".join(item.get("author_names") or []),
+            )
+            await _record_kakao_title_authors(item["title_id"], settings)
             message = (
-                f"🆕 **카카오웹툰 신작 발견**\n"
+                f"🆕 **카카오웹툰 신작 자동 추가**\n"
                 f"작가: {author.author_name}\n"
                 f"제목: {item['title_name']}\n"
                 f"ID: {item['title_id']}"
@@ -245,7 +278,7 @@ async def scan_kakao_authors_for_new_titles(session: aiohttp.ClientSession, sett
                 await discord_notify.send_webhook_notification(session, settings, message)
             except Exception as e:
                 log.error("카카오 신작 알림 전송 실패: %s", e)
-            job_status.log_line("discovery", f"[카카오/{author.author_name}] 신작 발견: {item['title_name']} (id={item['title_id']})")
+            job_status.log_line("discovery", f"[카카오/{author.author_name}] 신작 자동 추가: {item['title_name']} (id={item['title_id']})")
 
         await asyncio.sleep(settings.delay_seconds)
 
@@ -443,9 +476,9 @@ async def resync_kakao_registry(client: kakao_page_download.KakaoPageClient, set
             if about is None:
                 job_status.log_line("registry", f"[카카오] {title} — 작품 정보 조회 실패")
                 return False
-            writers, _, originals = kakao_page_download.split_authors(about)
-            repository.set_kakao_writer_names(row["title_id"], writers)
-            names = kakao_page_download.authors_to_register(about)
+            writers, _, originals = kakao_authors.split_authors(about)
+            repository.set_kakao_authors(row["title_id"], writers, originals)
+            names = kakao_authors.authors_to_register(about)
             if not names:
                 job_status.log_line("registry", f"[카카오] {title} — 작가 정보 없음")
                 return False

@@ -14,6 +14,7 @@ import aiohttp
 
 from app.constants import DEFAULT_HEADERS, NAVER_SERIES_URL_TEMPLATE
 from app.file_utils import guess_image_extension
+from app import kakao_authors
 from app.models import TitleInfo
 
 log = logging.getLogger(__name__)
@@ -92,15 +93,8 @@ def build_kakao_comicinfo_xml(series_item: dict, series_id: int, about: dict | N
     """카카오페이지 작품 정보로 info.xml을 만든다. 작품 "정보" 탭(about)을 받았으면 글은 Writer, 그림은 CoverArtist,
     원작은 Notes("원작: ...")에 나눠 적고 테마 키워드는 Tags에 적는다. 못 받았으면 목록 응답의 작가 이름 전부를
     Writer에 적는다(역할을 알 수 없어서)."""
-    groups: dict[str, list[str]] = {"writer": [], "illustrator": [], "original_author": []}
-    tags: list[str] = []
-    if about:
-        for author in about.get("author_list") or []:
-            names = groups.get(author.get("role"))
-            if names is not None and author.get("name") and author["name"] not in names:
-                names.append(author["name"])
-        tags = [t["title"] for t in about.get("theme_keyword_list") or [] if t.get("title")]
-    writers, illustrators, originals = groups["writer"], groups["illustrator"], groups["original_author"]
+    writers, illustrators, originals = kakao_authors.split_authors(about)
+    tags = [t["title"] for t in (about or {}).get("theme_keyword_list") or [] if t.get("title")]
     if not (writers or illustrators or originals):
         writers = [a.strip() for a in (series_item.get("authors") or "").split(",") if a.strip()]
     return render_comicinfo(
