@@ -204,10 +204,66 @@ async def run_download_job(target: str = "naver") -> None:
         _download_claimed_platforms.difference_update(platforms)
 
 
-# 카카오페이지 자동 다운로드 — 작품 하나당 한 번 실행에 받는 최대 회차 수. 폴더가 없는 작품은 처음부터 전부
-# 받아야 해서 회차가 수백 개일 수 있는데, 한 번에 다 받으면 이 작업이 몇 시간씩 걸리므로 나눠서 받는다(다음 실행에
-# 이어서 받는다).
-_KAKAO_AUTO_MAX_EPISODES_PER_TITLE = 20
+# 카카오페이지 자동 다운로드는 네이버와 같은 설정(작품당 상한 max_new_episodes_per_title, 배치 사이 쉬는 시간 batch_rest_minutes)을
+# 쓴다. 상한 0 이하는 "제한 없음"이라 한 번에 전부 받는다(아래 값은 그 경우의 요청당 상한일 뿐이다).
+_KAKAO_UNLIMITED_EPISODES = 100_000
+# 비정상 응답(계속 "받을 게 남았다"고만 하는 경우)으로 한 작품에서 무한히 도는 걸 막는 안전장치 — 상한 10이면 2000회차까지.
+_KAKAO_MAX_BATCHES_PER_TITLE = 200
+
+
+def _kakao_remaining_free(result) -> int:
+    """이번 배치 뒤에도 받을 수 있는 회차가 몇 개 남았는지(상한에 걸려 못 받은 것). 기다무로 연 회차는 "받을 회차"가 아니라 잠긴 회차였으므로
+    받은 개수에서 뺀다. 오류/실패가 있으면 0 — 그 작품은 여기서 멈춘다."""
+    if result.error is not None or result.failed is not None:
+        return 0
+    downloaded_free = len(result.downloaded) - (1 if result.ticket_used is not None else 0)
+    return max(0, len(result.plan.to_download) - downloaded_free)
+
+
+def _record_kakao_batch(webtoon: dict, result, failures: list[dict]) -> None:
+    """한 배치의 결과를 이력/로그/실패 목록에 남긴다."""
+    title, series_id = webtoon["title"], str(webtoon["title_id"])
+    for number, subtitle in result.downloaded_items:
+        repository.add_episode_history(series_id, result.title, number, subtitle, "success", platform="kakao")
+    if result.error:
+        job_status.log_line("download", f"[{title}] {result.error}")
+    elif result.failed is not None:
+        repository.add_episode_history(series_id, result.title, result.failed, "", "failed", "이미지 받기 실패", platform="kakao")
+        failures.append({"title_name": result.title, "episode_no": result.failed, "subtitle": "이미지 받기 실패"})
+    elif not result.downloaded and result.plan.marker is not None and result.plan.marker.warning:
+        job_status.log_line("download", f"[{title}] ⚠ 폴더의 파일(표식)이 사이트 회차와 맞지 않아 번호대로 이어받았습니다")
+
+
+async def _download_kakao_title(client, settings, webtoon: dict, root: str, failures: list[dict]):
+    """작품 하나를 받는다. 상한(작품당 한 번에 받는 수)에 걸려 받을 회차가 남으면, 네이버와 같이 batch_rest_minutes만큼 쉬었다가 같은
+    실행 안에서 이어서 받는다(다음 정기 실행까지 기다리지 않는다). 실패/오류가 나면 거기서 멈춘다. 마지막 배치의 결과를 돌려준다(예외로
+    중단되면 None) — 완결 판정은 이 결과로 한다."""
+    title, series_id = webtoon["title"], webtoon["title_id"]
+    cap = settings.max_new_episodes_per_title
+    max_episodes = cap if cap > 0 else _KAKAO_UNLIMITED_EPISODES
+    result = None
+    for batch in range(1, _KAKAO_MAX_BATCHES_PER_TITLE + 1):
+        try:
+            result = await kakao_page_download.run_download(
+                client, series_id=series_id, title=None, download_root=root, max_episodes=max_episodes,
+                on_progress=lambda line, t=title: job_status.log_line("download", f"[{t}] {line}"),
+            )
+        except Exception as e:
+            log.error("카카오페이지 웹툰(series_id=%s) 다운로드 중 예외 — 다음으로 진행: %s", series_id, e)
+            job_status.log_line("download", f"[{title}] 처리 중 오류: {e}")
+            failures.append({"title_name": title, "episode_no": None, "subtitle": str(e)})
+            return None
+        _record_kakao_batch(webtoon, result, failures)
+        remaining = _kakao_remaining_free(result)
+        if remaining <= 0:
+            break
+        if batch == _KAKAO_MAX_BATCHES_PER_TITLE:
+            job_status.log_line("download", f"[{title}] 한 번에 받을 배치가 너무 많아 여기서 멈춥니다(남은 {remaining}화는 다음 실행에서)")
+            break
+        rest_minutes = settings.batch_rest_minutes
+        job_status.log_line("download", f"[{title}] {len(result.downloaded)}화 받음, 남은 {remaining}화는 {rest_minutes:g}분 쉬었다가 이어받기")
+        await asyncio.sleep(rest_minutes * 60)
+    return result
 
 
 async def _download_kakao_subscriptions(settings, failures: list[dict]) -> None:
@@ -234,35 +290,16 @@ async def _download_kakao_subscriptions(settings, failures: list[dict]) -> None:
                 return
 
             for webtoon in subscribed:
-                title = webtoon["title"]
-                try:
-                    result = await kakao_page_download.run_download(
-                        client, series_id=webtoon["title_id"], title=None, download_root=root,
-                        max_episodes=_KAKAO_AUTO_MAX_EPISODES_PER_TITLE,
-                        on_progress=lambda line, t=title: job_status.log_line("download", f"[{t}] {line}"),
-                    )
-                except Exception as e:
-                    log.error("카카오페이지 웹툰(series_id=%s) 다운로드 중 예외 — 다음으로 진행: %s", webtoon["title_id"], e)
-                    job_status.log_line("download", f"[{title}] 처리 중 오류: {e}")
-                    failures.append({"title_name": title, "episode_no": None, "subtitle": str(e)})
+                result = await _download_kakao_title(client, settings, webtoon, root, failures)
+                # 쉬는 시간이 긴 이어받기 중에 쿠키가 갱신될 수 있어서 작품마다 저장한다(중간에 멈춰도 갱신분이 남도록)
+                kakao_page_download.persist_refreshed_cookies(client)
+                if result is None:
                     continue
-                for number, subtitle in result.downloaded_items:
-                    repository.add_episode_history(str(webtoon["title_id"]), result.title, number, subtitle, "success", platform="kakao")
-                if result.error:
-                    job_status.log_line("download", f"[{title}] {result.error}")
-                elif result.failed is not None:
-                    repository.add_episode_history(
-                        str(webtoon["title_id"]), result.title, result.failed, "", "failed", "이미지 받기 실패", platform="kakao"
-                    )
-                    failures.append({"title_name": result.title, "episode_no": result.failed, "subtitle": "이미지 받기 실패"})
-                elif not result.downloaded and result.plan.marker is not None and result.plan.marker.warning:
-                    job_status.log_line("download", f"[{title}] ⚠ 폴더의 파일(표식)이 사이트 회차와 맞지 않아 번호대로 이어받았습니다")
                 # 완결이고 받을 회차를 다 받았으면 완결 확인 대상으로 기록한다(완결인데 받을 게 남았으면 아직 알리지 않는다).
                 # 연재 중으로 돌아왔으면 기록을 되돌려 다음 완결 때 다시 알린다.
                 if result.error is None:
                     repository.set_kakao_finished(webtoon["title_id"], result.finished and result.nothing_left)
                 await asyncio.sleep(settings.delay_seconds)
-            kakao_page_download.persist_refreshed_cookies(client)
         await _notify_kakao_newly_finished()
 
 
@@ -739,6 +776,8 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
         return
 
     rows, used_fallback = _select_report_rows(since, force_test)
+    if not force_test:
+        rows = report_seen.filter_unseen_rows(rows)  # 이미 보고한 회차는 뺀다(같은 회차는 한 번만) — 테스트 발송은 전부 보여준다
     success_rows = [r for r in rows if r["status"] == "success"]
     failed_rows = [r for r in rows if r["status"] == "failed"]
     app_public_base_url = repository.get_setting("app_public_base_url") or ""
@@ -761,7 +800,9 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
                 message = "🧪 **[테스트 발송 — 오늘 기록 없어 어제 기록으로 대체됨]**\n" + message
             await discord_notify.send_webhook_notification(session, settings, message)
             if not force_test:
-                report_seen.remember(unregistered_new_episodes, kakao_new_episodes)  # 전송이 성공한 뒤에만 기록(실패하면 다음에 다시 시도)
+                # 전송이 성공한 뒤에만 기록(실패하면 다음에 다시 시도)
+                report_seen.remember(unregistered_new_episodes, kakao_new_episodes)
+                report_seen.remember_rows(rows)
 
         if not force_test:
             repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, now_iso)

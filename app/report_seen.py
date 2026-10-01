@@ -5,6 +5,11 @@ UP 표시는 새 회차가 나온 뒤 한동안 그대로 남아 있어서, 하�
 이제 작품마다 "마지막으로 알린 회차"를 기억하고, 그 회차와 같으면 건너뛴다(더 새로운 회차가 나오면 다시 알린다).
 
 - 네이버: 식별값 = 최신 회차 번호 / 카카오: 식별값 = 최신 회차 주소(구독 여부가 바뀌어도 같은 회차면 반복하지 않음)
+
+"받은 작품/실패한 작품" 섹션도 같은 원칙이다 — **같은 회차는 한 번만 보고한다**. 지난 발송 시각 이후의 이력만 모으는 것이 기본이지만,
+같은 회차의 이력이 다시 쌓이거나(재다운로드, 시각 비교가 어긋난 경우 등) 어떤 이유로든 이미 알린 회차가 다시 들어오더라도 반복하지 않도록
+회차 단위(플랫폼+작품+회차 번호)로 따로 기억한다. 실패는 같은 회차의 실패를 한 번만 알리고, 그 회차를 성공하면 실패 기록을 지워서
+나중에 다시 실패하면 새 문제로 다시 알린다.
 - 전송이 성공한 뒤에만 기록한다(호출부 책임) — 실패하면 다음 리포트에서 다시 시도된다.
 - 기억하는 작품 수는 MAX_ENTRIES로 제한한다(오래된 것부터 잊음).
 """
@@ -34,6 +39,33 @@ def _naver_key(item: NaverItem) -> tuple[str, str]:
 
 def _kakao_key(item: KakaoItem) -> tuple[str, str]:
     return f"kakao:{item[0]}", item[2]
+
+
+def _row_key(row: dict) -> str:
+    prefix = "dl" if row["status"] == "success" else "fail"
+    return f"{prefix}:{row.get('platform') or 'naver'}:{row['title_id']}:{row['episode_no']}"
+
+
+def filter_unseen_rows(rows: list[dict]) -> list[dict]:
+    """이미 보고한 회차(성공/실패 각각)의 이력을 뺀 목록."""
+    seen = _load()
+    return [r for r in rows if _row_key(r) not in seen]
+
+
+def remember_rows(rows: list[dict]) -> None:
+    """방금 보고한 회차들을 기록한다. 성공한 회차는 그 회차의 실패 기록을 지운다(나중에 다시 실패하면 새 문제로 다시 알리도록)."""
+    if not rows:
+        return
+    seen = _load()
+    for row in rows:
+        if row["status"] == "success":
+            seen.pop(f"fail:{row.get('platform') or 'naver'}:{row['title_id']}:{row['episode_no']}", None)
+        key = _row_key(row)
+        seen.pop(key, None)  # 다시 넣어서 "가장 최근에 알린" 위치로(크기 제한 때 오래된 것부터 잊기 위해)
+        seen[key] = "1"
+    while len(seen) > MAX_ENTRIES:
+        seen.pop(next(iter(seen)))
+    repository.set_setting(SETTING_KEY, json.dumps(seen, ensure_ascii=False))
 
 
 def filter_unseen(naver_items: list[NaverItem], kakao_items: list[KakaoItem]) -> tuple[list[NaverItem], list[KakaoItem]]:

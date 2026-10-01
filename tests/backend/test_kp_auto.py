@@ -84,15 +84,16 @@ async def main():
     names = lambda t: sorted(p.name for p in (KROOT / t).glob("*.zip"))
     assert names("작품A") == ["0001_1화.zip", "0002_2화.zip", "0003_3화.zip"]                           # 폴더 없음 → 처음부터 전부(폴더 자동 생성)
     assert names("작품B") == ["0002_2화#9.zip", "0003_3화.zip"]                                              # 표식(2) 이후 3만 — 4는 잠겨서 멈추므로 5도 안 받음
-    assert len(names("작품C")) == 20 and names("작품C")[0] == "0001_1화.zip" and names("작품C")[-1] == "0020_20화.zip"   # 작품당 20개 상한
+    # 작품C(25개): 상한(기본 10)에 걸려도 쉬었다가 같은 실행 안에서 끝까지 받는다(10+10+5) — 다음 정기 실행을 기다리지 않는다
+    assert len(names("작품C")) == 25 and names("작품C")[0] == "0001_1화.zip" and names("작품C")[-1] == "0025_25화.zip"
     assert names("작품D") == [] and not list((KROOT / "작품D").glob("*.part")) if (KROOT / "작품D").exists() else True
     assert not (KROOT / "제외작").exists() and not (KROOT / "작품E").exists()                                   # 구독 중이 아닌 것/목록 실패는 폴더도 안 만듦
     assert [f["title_name"] for f in failures] == ["작품D"] and failures[0]["episode_no"] == 1                   # 실패는 격리되고 목록에 담김
     rows, total = repository.list_episode_history(status="success"); done = {(r["title_name"], r["episode_no"]) for r in rows}
-    assert ("작품A", 3) in done and ("작품B", 3) in done and ("작품C", 20) in done and ("작품B", 2) not in done and total == 3 + 1 + 20
+    assert ("작품A", 3) in done and ("작품B", 3) in done and ("작품C", 25) in done and ("작품B", 2) not in done and total == 3 + 1 + 25
     rows, total = repository.list_episode_history(status="failed"); assert total == 1 and rows[0]["title_name"] == "작품D"
     assert "[작품A]" in log_text() and "작품E" in log_text() and "회차 목록을 가져오지 못했습니다" in log_text()
-    print("2) 정상 실행 OK (폴더 없음→전부, 표식 폴더→그 이후, 20개 상한, 잠긴 회차에서 멈춤, 실패 격리, 이력 기록)")
+    print("2) 정상 실행 OK (폴더 없음→전부, 표식 폴더→그 이후, 상한 넘으면 쉬었다 이어받기, 잠긴 회차에서 멈춤, 실패 격리, 이력 기록)")
 
     # 5. 다시 실행 — 남은 것만
     S["fail_images_for"] = set(); failures = []
