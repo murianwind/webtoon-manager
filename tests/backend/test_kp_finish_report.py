@@ -158,7 +158,7 @@ CREATE TABLE episode_history (id INTEGER PRIMARY KEY AUTOINCREMENT, title_id TEX
 INSERT INTO kakao_webtoons VALUES (1, '옛작품', 'active', 1, '', '', 'x', 'x'); INSERT INTO episode_history (title_id, title_name, episode_no, status, downloaded_at) VALUES ('7', '옛이력', 3, 'success', 'x');""")
 con.commit(); con.close()
 code = "from app import db, repository; db.get_connection(); w = repository.get_kakao_webtoon(1); h = repository.list_episode_history_since('0')[0]; print(w['status'], w['is_finished'], w['finish_notified'], h['platform'], h['title_name'])"
-out = subprocess.run([sys.executable, "-c", code], env={**os.environ, "DATABASE_PATH": path, "PYTHONPATH": "."}, capture_output=True, text=True, cwd="/home/claude/wm/webtoon-manager-main")
+out = subprocess.run([sys.executable, "-c", code], env={**os.environ, "DATABASE_PATH": path, "PYTHONPATH": "."}, capture_output=True, text=True, cwd=str(Path(__file__).resolve().parents[2]))
 assert out.stdout.strip().splitlines()[-1] == "active False False naver 옛이력", (out.stdout, out.stderr[-400:])
 print("7) 예전 DB 마이그레이션 OK (열 추가, 기존 이력은 네이버로, 값 유지)")
 print("\n전부 통과")

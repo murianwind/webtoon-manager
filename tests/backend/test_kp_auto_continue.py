@@ -5,7 +5,9 @@ from types import SimpleNamespace as NS
 from app import db, repository, scheduler, job_status, kakao_page_download as kp, kakao_page_auth as auth
 db.get_connection()
 
-S = NS(request_timeout_seconds=5, delay_seconds=0, max_new_episodes_per_title=10, batch_rest_minutes=5.0, download_root="/dl")
+import tempfile
+DL = tempfile.mkdtemp()   # 실제로 폴더가 만들어지는 경로 — 시스템 루트(/dl)가 아니라 임시 폴더를 쓴다(일반 사용자 권한의 CI에서도 되도록)
+S = NS(request_timeout_seconds=5, delay_seconds=0, max_new_episodes_per_title=10, batch_rest_minutes=5.0, download_root=DL)
 sleeps = []; calls = []; persisted = []; STATE = {}
 async def fake_sleep(x): sleeps.append(x)
 scheduler.asyncio.sleep = fake_sleep

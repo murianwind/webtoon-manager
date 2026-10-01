@@ -231,6 +231,7 @@ Windows에서 rclone으로 마운트한 드라이브/폴더는 **Docker Desktop�
 **테스트** (`tests/`)
 - **깃헙 액션**(`.github/workflows/tests.yml`): 푸시/PR/수동 실행마다 ① 백엔드(Python 3.12, `requirements-dev.txt` 설치 → `pyflakes` 정적 검사 → `python tests/run_backend.py`)와 ② 화면(Node 20, 스크립트 문법 검사 → `npm ci` → `npm test`)을 돌립니다. `tests/backend/test_*.py`와 `tests/js/test_*.js`는 이름 규칙으로 자동 포함되므로 새 테스트는 파일만 추가하면 됩니다. 로컬과 같은 명령이라 깨끗한 환경(가상환경 + `npm ci`)에서 먼저 재현해 볼 수 있습니다.
 - 백엔드: `python tests/run_backend.py [이름조각] [--coverage]` — 테스트마다 새 임시 폴더(DB/다운로드/보관/쿠키)로 별도 프로세스에서 돌립니다. 실제 카카오/네이버 서버는 부르지 않고, 응답 형태는 `tests/fixtures/`의 실제 캡처에서 뽑은 샘플을 씁니다.
+- **테스트는 일반 사용자 권한으로 돌려 보세요**: 루트로 돌리면 `/dl` 같은 시스템 루트 폴더를 만들 수 있어서 통과해 버리지만, 깃헙 액션(일반 사용자)에서는 `PermissionError`로 실패합니다(실제로 그랬습니다). 테스트에서 실제로 폴더가 만들어지는 경로는 항상 `tempfile` 임시 폴더를 쓰고, 개발 환경 전용 경로를 박지 마세요 — `tests/backend/test_hygiene.py`가 이를 자동으로 검사합니다.
 - 화면: `cd tests/js && npm install && npm test` — jsdom으로 `index.html`과 스크립트들을 브라우저처럼 순서대로 로드해서 확인하고, 스크립트 오류(파일 사이 로드 순서 문제 포함)는 실패로 처리합니다.
 - 테스트 실행에 필요한 패키지: 백엔드는 `requirements.txt`와 같고, 화면 테스트만 Node.js가 필요합니다.
 - **큰 함수와 특성 테스트**: 80줄을 넘던 함수(아카이빙 폴더 대상/일괄 이동, 네이버 수동·자동 다운로드, 리포트 작업 등)는 "지금 동작을 그대로 고정하는" 특성 테스트를 먼저 쓴 뒤 단계별 작은 함수로 나눴습니다. 이제 코드 줄 기준으로 80줄을 넘는 함수는 없습니다(`bulk_move_folder`는 설명 문서가 길어서 파일상 90줄). rclone이 낀 분기는 `tests/backend/fake_rclone.py`(메모리 안의 원격 폴더)로 흉내 내서 테스트합니다 — 새 테스트에서 `FakeRclone().install()`만 부르면 됩니다. 커버리지는 `python tests/run_backend.py --coverage`로 확인합니다.

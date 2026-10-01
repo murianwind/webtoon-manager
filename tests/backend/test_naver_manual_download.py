@@ -5,7 +5,9 @@ from types import SimpleNamespace as NS
 from app import db, repository, manual_download as md, job_status, naver_api
 
 db.get_connection()
-S = NS(request_timeout_seconds=5, cookie_file_path="/none", folder_zero_fill=4, image_zero_fill=3, max_concurrent_downloads=2, download_root="/dl")
+import tempfile
+DL = tempfile.mkdtemp()   # 실제로 폴더가 만들어지는 경로 — 시스템 루트(/dl)가 아니라 임시 폴더를 쓴다(일반 사용자 권한의 CI에서도 되도록)
+S = NS(request_timeout_seconds=5, cookie_file_path=DL + "/cookies.json", folder_zero_fill=4, image_zero_fill=3, max_concurrent_downloads=2, download_root=DL)
 EP = lambda n, locked=False: NS(episode_no=n, subtitle=f"{n}화", is_locked=locked)
 state = {}
 async def fake_info(session, title_id, timeout): return state["info"]
@@ -41,7 +43,7 @@ async def main():
     assert state["attempts"] == [1, 5] and s["status"] == "success" and state["xml"] == ["작품"] and state["cover"] == 1 and len(state["zips"]) == 2
     assert "3화: 유료/잠김 — 건너뜀" in logs(s) and "3개 회차 다운로드 시작" in logs(s) and "✅ 1화 \"1화\" 완료" in logs(s) and logs(s).rstrip().endswith("수동 다운로드 종료")
     assert hist("1") == [(1, "success"), (5, "success")]
-    kw = state["kw"]; assert kw["title_id"] == "1" and kw["folder_zero_fill"] == 4 and kw["download_root"] == "/dl" and kw["cookies"] == {}
+    kw = state["kw"]; assert kw["title_id"] == "1" and kw["folder_zero_fill"] == 4 and kw["download_root"] == DL and kw["cookies"] == {}
     print("2) 선택 회차 다운로드 OK (번호순, 잠김 건너뜀, 이력, 압축)")
 
     # ── 3. 성인 웹툰은 쿠키로 받는다 ──

@@ -5,8 +5,10 @@ from types import SimpleNamespace as NS
 from app import db, repository, scheduler, job_status, comicinfo, naver_api, cookie_health
 db.get_connection()
 
-S = NS(request_timeout_seconds=5, cookie_file_path="/none", folder_zero_fill=4, image_zero_fill=3, max_concurrent_downloads=2, delay_seconds=0,
-       max_new_episodes_per_title=2, batch_rest_minutes=7, download_root="/dl")
+import tempfile
+DL = tempfile.mkdtemp()   # 실제로 폴더가 만들어지는 경로 — 시스템 루트(/dl)가 아니라 임시 폴더를 쓴다(일반 사용자 권한의 CI에서도 되도록)
+S = NS(request_timeout_seconds=5, cookie_file_path=DL + "/cookies.json", folder_zero_fill=4, image_zero_fill=3, max_concurrent_downloads=2, delay_seconds=0,
+       max_new_episodes_per_title=2, batch_rest_minutes=7, download_root=DL)
 EP = lambda n: NS(episode_no=n, subtitle=f"{n}화")
 state = {}
 async def fake_info(session, title_id, timeout): return state["info"]
@@ -70,7 +72,7 @@ async def main():
     assert state["attempts"] == [1, 2, 3, 4, 5] and len(state["zips"]) == 5 and get().last_downloaded_no == 5
     assert sorted(history()) == [(n, "success") for n in range(1, 6)]
     assert rests() == [7 * 60, 7 * 60] and "새 회차 5개 다운로드 시작" in logs() and "2화 받음, 남은 3화는 7분 쉬었다가 이어받기" in logs()   # 2+2+1 → 배치 사이 휴식 2번
-    kw = state["download_kw"]; assert kw["title_id"] == "1" and kw["folder_zero_fill"] == 4 and kw["image_zero_fill"] == 3 and kw["max_concurrent_downloads"] == 2 and kw["download_root"] == "/dl"
+    kw = state["download_kw"]; assert kw["title_id"] == "1" and kw["folder_zero_fill"] == 4 and kw["image_zero_fill"] == 3 and kw["max_concurrent_downloads"] == 2 and kw["download_root"] == DL
     print("4) 새 회차 다운로드 OK (순서, 압축, 이력, 배치 휴식)")
 
     # ── 5. 실패하면 그 작품은 거기서 중단: 실패 이력/알림 목록에 기록, 남은 회차는 안 받음, 마지막 회차는 성공한 데까지 ──
