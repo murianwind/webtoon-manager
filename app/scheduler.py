@@ -466,18 +466,23 @@ _KAKAO_NEW_EPISODE_CANDIDATE_LIMIT = 150
 async def _collect_unregistered_new_episodes(
     session: aiohttp.ClientSession, settings
 ) -> list[tuple[str, str, int]]:
-    """네이버 '요일별 전체목록'에는 있지만 이 앱에는 아예 등록(구독/구독해제/제외
-    전부 포함)돼 있지 않은 작품 중, 새 에피소드(UP 표시)가 있는 것만 골라서
-    (title_id, title_name, 최신 회차 번호)로 반환한다. 구독을 안 해서 놓치고
-    있었을 수도 있는 신작을 리포트에서 바로 발견할 수 있게 해주는 용도라, 없는
-    게 정상인 경우가 대부분이고 실패해도 리포트 자체는 계속 보내야 한다."""
+    """네이버 "웹툰 전체목록"에 보이는 **미구독** 작품 중 새 에피소드(UP 표시)가 있는 것만 골라서
+    (title_id, title_name, 최신 회차 번호)로 반환한다(카카오 _collect_kakao_new_episodes와 같은 규칙).
+    미구독 = 기록이 없거나, 구독한 적이 있지만 "목록으로" 되돌려 "목록" 상태인 작품. 구독 중인 작품은
+    다운로드로 알리고, 구독해제/제외됨은 "안 챙겨본다"는 뜻이라 알리지 않는다. 구독을 안 해서 놓치고
+    있었을 수도 있는 신작을 리포트에서 바로 발견하게 해 주는 용도라, 없는 게 정상인 경우가 대부분이고
+    실패해도 리포트 자체는 계속 보내야 한다."""
     try:
         items = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
     except Exception as e:
         log.error("미등록 신규 에피소드 확인 중 목록 조회 실패(무시하고 계속): %s", e)
         return []
 
-    candidates = [item for item in items if item.has_update and not repository.exists(item.title_id)]
+    def _not_subscribed_in_list(title_id: str) -> bool:
+        record = repository.get(title_id)
+        return record is None or record.status == repository.STATUS_UNREGISTERED
+
+    candidates = [item for item in items if item.has_update and _not_subscribed_in_list(item.title_id)]
     candidates = candidates[:_UNREGISTERED_NEW_EPISODE_LIMIT]
     if not candidates:
         return []
