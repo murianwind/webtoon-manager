@@ -117,21 +117,64 @@ document.getElementById("btn-backup-download").addEventListener("click", async (
   }
 });
 
+// 복원이 끝난 뒤 화면을 새로고침한다(테스트에서 바꿔 끼울 수 있게 함수로 둔다).
+function scheduleReload() {
+  setTimeout(() => location.reload(), 1500);
+}
+
+// 복원 결과를 보여 준다. 확인할 것(warnings)이나 다시 입력할 것(reenter)이 있으면 목록으로 보여 주고 직접 새로고침하게 두고(읽을 시간),
+// 없으면 잠시 뒤 자동으로 새로고침한다.
+function renderRestoreReport(report) {
+  const box = document.getElementById("backup-report");
+  const resultEl = document.getElementById("backup-result");
+  const warnings = report.warnings || [];
+  const reenter = report.reenter || [];
+  resultEl.style.color = "";
+  box.innerHTML = "";
+  if (warnings.length === 0 && reenter.length === 0) {
+    box.classList.add("hidden");
+    resultEl.textContent = "복원 완료. 잠시 뒤 자동으로 새로고침합니다.";
+    scheduleReload();
+    return;
+  }
+  resultEl.textContent = "복원 완료. 아래 안내를 확인해 주세요.";
+  const addList = (title, cssClass, lines) => {
+    if (lines.length === 0) return;
+    const heading = document.createElement("strong");
+    heading.textContent = title;
+    const list = document.createElement("ul");
+    list.className = cssClass;
+    for (const line of lines) {
+      const li = document.createElement("li");
+      li.textContent = line;
+      list.appendChild(li);
+    }
+    box.append(heading, list);
+  };
+  addList("⚠ 확인해 주세요", "backup-warnings", warnings);
+  addList("🔑 다시 입력해 주세요(백업에 들어 있지 않습니다)", "backup-reenter", reenter);
+  const reloadButton = document.createElement("button");
+  reloadButton.textContent = "확인했습니다 — 새로고침";
+  reloadButton.addEventListener("click", () => location.reload());
+  box.appendChild(reloadButton);
+  box.classList.remove("hidden");
+}
+
 document.getElementById("restore-file-input").addEventListener("change", async (event) => {
   const file = event.target.files[0];
   if (!file) return;
   const resultEl = document.getElementById("backup-result");
   resultEl.textContent = "";
+  document.getElementById("backup-report").classList.add("hidden");
   try {
     const text = await file.text();
     const data = JSON.parse(text);
-    if (!confirm("현재 데이터를 모두 지우고 이 백업으로 복원합니다. 계속할까요?")) {
+    if (!confirm("현재 데이터를 모두 지우고 이 백업으로 복원합니다. 디스코드 웹훅/봇 토큰과 카카오페이지 로그인 정보는 지금 설정된 그대로 유지됩니다. 계속할까요?")) {
       event.target.value = "";
       return;
     }
-    await apiCall("/api/restore", { method: "POST", body: JSON.stringify(data) });
-    resultEl.style.color = "";
-    resultEl.textContent = "복원 완료. 페이지를 새로고침해주세요.";
+    const report = await apiCall("/api/restore", { method: "POST", body: JSON.stringify(data) });
+    renderRestoreReport(report);
   } catch (e) {
     resultEl.textContent = `복원 실패: ${e.message}`;
   }

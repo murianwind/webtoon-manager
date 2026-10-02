@@ -4,7 +4,7 @@
 UP 표시는 새 회차가 나온 뒤 한동안 그대로 남아 있어서, 하루에 리포트를 여러 번 받으면 같은 작품이 매번 나왔다.
 이제 작품마다 "마지막으로 알린 회차"를 기억하고, 그 회차와 같으면 건너뛴다(더 새로운 회차가 나오면 다시 알린다).
 
-- 네이버: 식별값 = 최신 회차 번호 / 카카오: 식별값 = 최신 회차 주소(구독 여부가 바뀌어도 같은 회차면 반복하지 않음)
+- 네이버: 식별값 = 최신 회차 번호 / 카카오: 식별값 = 최신 회차 주소
 
 "받은 작품/실패한 작품" 섹션도 같은 원칙이다 — **같은 회차는 한 번만 보고한다**. 지난 발송 시각 이후의 이력만 모으는 것이 기본이지만,
 같은 회차의 이력이 다시 쌓이거나(재다운로드, 시각 비교가 어긋난 경우 등) 어떤 이유로든 이미 알린 회차가 다시 들어오더라도 반복하지 않도록
@@ -22,7 +22,7 @@ SETTING_KEY = "report_seen_new_episodes"
 MAX_ENTRIES = 5000
 
 NaverItem = tuple[str, str, int]  # (title_id, title_name, 최신 회차 번호)
-KakaoItem = tuple[int, str, str, bool]  # (title_id, title_name, 바로가기 URL, 구독 중 여부)
+KakaoItem = tuple[int, str, str]  # (title_id, title_name, 바로가기 URL)
 
 
 def _load() -> dict[str, str]:

@@ -426,6 +426,8 @@
         <input id="restore-file-input" type="file" accept="application/json" />
       </label>
       <span id="backup-result" class="error"></span>
+      <p class="hint">백업에는 구독/제외 목록, 작가·태그, 다운로드·아카이빙 이력, 아카이빙 대상, 각종 설정(카카오페이지 포함)이 들어갑니다. 디스코드 웹훅·봇 토큰과 카카오페이지·네이버 로그인 쿠키, 다운로드한 파일은 들어가지 않습니다. 복원하면 현재 데이터가 백업 내용으로 바뀌지만, <b>지금 설정된 디스코드/카카오페이지 로그인 정보는 그대로 유지</b>됩니다. 완전히 새로운 컨테이너에 복원했다면 아래에 나오는 안내대로 다시 입력해 주세요.</p>
+      <div id="backup-report" class="backup-report hidden"></div>
     </div>
   </section>
 

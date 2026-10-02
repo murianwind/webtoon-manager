@@ -504,16 +504,14 @@ async def _collect_unregistered_new_episodes(
 
 async def _collect_kakao_new_episodes(
     session: aiohttp.ClientSession, settings
-) -> list[tuple[int, str, str, bool]]:
-    """"웹툰 전체목록"에 있는(=요일 7개, 목록제외 안 한) 카카오페이지 웹툰 중 새 회차(UP
-    표시)가 있는 것만 골라서 (title_id, title_name, 바로가기 URL, 구독 중 여부)로
-    반환한다. 네이버의 _collect_unregistered_new_episodes와 비슷한 역할이지만, 카카오는
-    "구독"이 다운로드를 뜻하지 않고 웹툰 뷰어 서버에 그 작품이 있다는 표시일 뿐이다 —
-    그래서 지금 구독 중(active)이고 뷰어 서버 주소도 설정돼 있으면 그 뷰어의 바로가기
-    URL을 먼저 시도하고, 조회에 실패하면(사용자가 실수로 뷰어에 없는 작품을
-    구독했을 수 있으므로) 카카오페이지 자체 링크로 조용히 대체한다. 구독 중 여부는
-    리포트에서 "목록 제외" 링크를 붙일지 정할 때 쓴다(이미 구독해서 챙겨보고 있는
-    작품에 "제외" 링크를 붙이는 건 의미가 없다)."""
+) -> list[tuple[int, str, str]]:
+    """네이버의 _collect_unregistered_new_episodes와 같은 취지로, 카카오페이지 "웹툰 전체목록"에 있는 **미구독** 웹툰 중 새 회차(UP
+    표시)가 있는 것만 골라 (title_id, title_name, 카카오페이지 바로가기 URL)로 반환한다. 구독을 안 해서 놓치고 있던 신작을 리포트에서
+    발견하게 해 주는 용도다.
+
+    구독 중인 작품은 이 앱이 직접 받아서 "받은 작품"에 나오므로 여기서는 뺀다(예전엔 카카오 "구독"이 웹툰 뷰어에 있다는 표시일 뿐이라
+    구독 중인 작품도 알려 줬지만, 지금은 중복 알림이다). 구독해제/제외됨도 "더 이상 안 챙겨본다"는 뜻이라 뺀다. 목록에 그대로 보이는
+    "목록" 상태와 아직 아무 기록이 없는 작품만 후보로 남는다. 구독하지 않은 작품은 웹툰 뷰어에 없으니 링크는 항상 카카오페이지 것이다."""
     try:
         # 리포트는 화면 캐시(10분)가 아니라 그 시점의 최신 목록으로 만든다
         items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds, use_cache=False)
@@ -521,49 +519,30 @@ async def _collect_kakao_new_episodes(
         log.error("카카오 신규 에피소드 확인 중 목록 조회 실패(무시하고 계속): %s", e)
         return []
 
-    # "제외됨"뿐 아니라 "구독해제"도 후보에서 빼야 한다 — 구독해제는 "더 이상 안
-    # 챙겨보고 싶다"는 뜻이라 목록제외와 사실상 같은 의도인데, 여태 제외됨만 걸러서
-    # 구독해제한 작품도 새 에피소드 리포트에 계속 나오는 문제가 있었다(실제로 확인됨).
-    # active/unregistered는 "웹툰 전체목록"에 그대로 보이는 상태라 그대로 후보로 둔다.
-    hidden_ids = repository.get_kakao_excluded_title_ids() | {
-        wt["title_id"] for wt in repository.list_kakao_webtoons_by_status(repository.STATUS_UNSUBSCRIBED)
-    }
-    candidates = [item for item in items if item["has_update"] and item["title_id"] not in hidden_ids]
+    skipped_ids = (
+        repository.get_kakao_excluded_title_ids()
+        | {wt["title_id"] for wt in repository.list_kakao_webtoons_by_status(repository.STATUS_UNSUBSCRIBED)}
+        | {wt["title_id"] for wt in repository.list_kakao_webtoons_by_status(repository.STATUS_ACTIVE)}
+    )
+    candidates = [item for item in items if item["has_update"] and item["title_id"] not in skipped_ids]
     candidates = candidates[:_KAKAO_NEW_EPISODE_CANDIDATE_LIMIT]
     if not candidates:
         return []
 
-    webtoon_server_url = repository.get_setting(_SETTING_KEY_WEBTOON_SERVER_URL) or ""
     semaphore = asyncio.Semaphore(settings.artist_scan_concurrency)
 
     async def _fetch_one(item):
         async with semaphore:
-            url = None
-            tracked = repository.get_kakao_webtoon(item["title_id"])
-            is_subscribed = tracked is not None and tracked["status"] == repository.STATUS_ACTIVE
-            if is_subscribed and webtoon_server_url:
-                # 구독 중이고 뷰어 서버가 설정돼 있으면 뷰어의 바로가기를 먼저 시도한다
-                # — fetch_reader_url은 실패해도 예외 없이 None을 주므로 그대로 폴백된다.
-                # 카카오웹툰은 이 앱이 안 받고 사용자가 쓰는 별도 도구가 받아서, 그
-                # 도구 나름의 폴더명 규칙(콜론 -> 밑줄)을 따로 써야 한다 —
-                # remove_forbidden_str_kakao 참고(네이버용 remove_forbidden_str과 다름).
-                url = await webtoon_server_client.fetch_reader_url(
-                    session, webtoon_server_url, remove_forbidden_str_kakao(item["title_name"]), settings.request_timeout_seconds
-                )
-            if url is None:
-                try:
-                    url = await kakao_api.fetch_latest_episode_url(session, item["title_id"], settings.request_timeout_seconds)
-                except Exception as e:
-                    log.error("카카오 작품(title_id=%s) 최신 회차 조회 실패(건너뜀): %s", item["title_id"], e)
-                    url = None
+            try:
+                url = await kakao_api.fetch_latest_episode_url(session, item["title_id"], settings.request_timeout_seconds)
+            except Exception as e:
+                log.error("카카오 작품(title_id=%s) 최신 회차 조회 실패(건너뜀): %s", item["title_id"], e)
+                url = None
             await asyncio.sleep(settings.delay_seconds)
-            return item, url, is_subscribed
+            return item, url
 
     results = await asyncio.gather(*[_fetch_one(item) for item in candidates])
-    final = [
-        (item["title_id"], item["title_name"], url, is_subscribed)
-        for item, url, is_subscribed in results if url is not None
-    ]
+    final = [(item["title_id"], item["title_name"], url) for item, url in results if url is not None]
     if len(final) < len(candidates):
         # 후보였는데 최종 리포트엔 안 실린 개수 — 조회 실패(HTTP 403 등)로 조용히
         # 빠진 게 몇 개인지 여기서 한눈에 보이게 남겨둔다. 원인 자체는 위
@@ -580,7 +559,7 @@ def _build_report_message(
     success_rows: list[dict], failed_rows: list[dict], reader_urls: dict[str, str],
     unregistered_new_episodes: list[tuple[str, str, int]] | None = None,
     app_public_base_url: str = "",
-    kakao_new_episodes: list[tuple[int, str, str, bool]] | None = None,
+    kakao_new_episodes: list[tuple[int, str, str]] | None = None,
 ) -> str:
     """예전 hermes webtoon_checker.py의 메시지 구조(다운로드됨/실패)를 그대로 따른다.
     모든 링크는 <...>로 감싸서 디스코드가 미리보기(임베드)를 안 만들게 한다 — 링크가
@@ -636,12 +615,9 @@ def _build_report_message(
             exclude_url = f"{app_public_base_url}/api/webtoons/{title_id}/exclude-confirm?title={quote(title)}"
             line += f" · [목록 제외](<{exclude_url}>)"
         new_lines.append(line)
-    for title_id, title, viewer_url, is_subscribed in kakao_new_episodes or []:
-        line = f"• [카카오] {title} [바로가기](<{viewer_url}>)"
-        # 이미 구독 중인(뷰어 라이브러리에서 챙겨보고 있다고 표시한) 작품은 "제외"
-        # 링크를 붙일 이유가 없다 — 일부러 구독해둔 걸 리포트에서 실수로 눌러
-        # 빼버리는 사고를 막기 위함이기도 하다.
-        if app_public_base_url and not is_subscribed:
+    for title_id, title, url in kakao_new_episodes or []:
+        line = f"• [카카오] {title} [바로가기](<{url}>)"
+        if app_public_base_url:  # 여기 나오는 건 전부 미구독 작품이라 "목록 제외" 링크를 붙인다
             exclude_url = f"{app_public_base_url}/api/kakao-webtoons/{title_id}/exclude-confirm?title={quote(title)}"
             line += f" · [목록 제외](<{exclude_url}>)"
         new_lines.append(line)

@@ -5,10 +5,12 @@ import asyncio
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
-from app import help_page, repository
+from app import backup_restore, help_page, kakao_catalog, repository
+from app import scheduler as scheduler_mod
+from app.config import get_settings
 
 
 log = logging.getLogger(__name__)
@@ -34,9 +36,11 @@ async def download_backup():
 
 
 @router.post("/restore")
-async def restore_backup(data: dict):
+async def restore_backup(data: dict, request: Request):
+    """백업으로 데이터를 복원한다. 복원이 끝나면 ① 저장된 스케줄을 바로 적용하고(재시작을 기다리지 않게) ② 카카오가 켜져 있으면
+    전체목록을 새로 채운 뒤, 복원한 환경을 점검한 결과(warnings: 확인할 것 / reenter: 다시 입력할 것)를 돌려준다."""
     try:
-        await asyncio.to_thread(repository.restore_all, data)
+        report = await asyncio.to_thread(backup_restore.restore_backup, data, get_settings())
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -44,4 +48,10 @@ async def restore_backup(data: dict):
         # 원문 그대로 500으로 흘리는 대신 "복원 실패"로 명확히 감싼다. 트랜잭션은
         # write_transaction이 이미 롤백했으므로 DB는 이전 상태 그대로 안전하다.
         raise HTTPException(status_code=400, detail=f"백업 파일 형식이 올바르지 않아 복원하지 못했습니다: {e}")
-    return {"status": "restored"}
+
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler is not None:
+        await asyncio.to_thread(scheduler_mod.reschedule_all, scheduler)
+    if await asyncio.to_thread(repository.get_setting, "kakao_webtoons_enabled") == "1":
+        kakao_catalog.start_refresh()  # 복원한 환경은 저장돼 있던 목록 캐시가 비어 있거나 예전 것이라 새로 채운다(화면은 기다리지 않는다)
+    return report

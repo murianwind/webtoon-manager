@@ -23,7 +23,7 @@ async def report(force=False):
 async def main():
     repository.set_setting("kakao_webtoons_enabled", "1")
     repository.set_setting(scheduler._SETTING_KEY_REPORT_LAST_SENT_AT, (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat())
-    NAVER[:] = [("10", "네이버신작", 50)]; KAKAO[:] = [(7, "카카오신작", "https://page.kakao.com/content/7/viewer/700", False)]
+    NAVER[:] = [("10", "네이버신작", 50)]; KAKAO[:] = [(7, "카카오신작", "https://page.kakao.com/content/7/viewer/700")]
 
     # ── 1. 처음엔 둘 다 알린다 ──
     msgs, st = await report()
@@ -36,9 +36,9 @@ async def main():
     # ── 3. 더 새로운 회차가 나오면 그 작품만 다시 알린다 ──
     NAVER[:] = [("10", "네이버신작", 51)]
     msgs, _ = await report(); assert len(msgs) == 1 and "네이버신작" in msgs[0] and "카카오신작" not in msgs[0], msgs
-    KAKAO[:] = [(7, "카카오신작", "https://page.kakao.com/content/7/viewer/701", False)]
+    KAKAO[:] = [(7, "카카오신작", "https://page.kakao.com/content/7/viewer/701")]
     msgs, _ = await report(); assert len(msgs) == 1 and "카카오신작" in msgs[0] and "네이버신작" not in msgs[0]
-    KAKAO[:] = [(7, "카카오신작", "https://page.kakao.com/content/7/viewer/701", True)]          # 구독 여부만 바뀌면 같은 회차라 반복 안 함
+    KAKAO[:] = [(7, "카카오신작(제목만 바뀜)", "https://page.kakao.com/content/7/viewer/701")]      # 같은 회차 주소면 제목이 바뀌어도 반복 안 함
     msgs, _ = await report(); assert msgs == []
     print("2) 새 회차가 나오면 다시 알림 OK (작품별)")
 

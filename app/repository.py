@@ -1055,10 +1055,23 @@ def delete_episode_history_older_than(days: int) -> int:
 
 # ── 백업/복원 ───────────────────────────────────────────────────────
 
-# 백업에 넣지 않는 설정: 비밀값(카카오페이지 로그인 쿠키는 복원 후 다시 붙여넣기)과, 크고 언제든 다시 채워지는 목록 캐시
-_SECRET_SETTING_KEYS = {
-    "discord_webhook_url", "discord_bot_token", "discord_notify_channel_id", "kakao_page_cookies", "kakao_catalog_snapshot",
-}
+# 백업 파일 형식 버전. 새 버전의 백업은 구버전 프로그램이 복원하지 못하게 막고(데이터가 조용히 잘못 들어가는 것보다 낫다),
+# 버전이 없는(예전) 백업은 1로 보고 그대로 복원한다.
+BACKUP_FORMAT_VERSION = 2
+
+# 백업에 넣지 않는 설정은 세 종류다. 복원할 때의 취급이 서로 다르다.
+#  ① 비밀값: 암호화 키가 이 환경의 데이터 볼륨에만 있어서 다른 환경에서는 어차피 못 풀고, 백업 파일이 새어도 안전하도록 뺀다.
+#     복원해도 **지금 쓰는 값을 지우지 않고**(같은 컨테이너에서 복원했다고 웹훅/로그인이 날아가면 안 된다), 백업 파일 안에 들어 있어도 무시한다.
+#  ② 캐시: 크고 언제든 다시 채워진다(카카오 전체목록). 복원해도 그대로 둔다.
+#  ③ 알림 기록: "하루에 한 번만 알림"을 위한 시각들. 복원하면 초기화해서, 환경이 바뀐 뒤에 다시 알릴 수 있게 한다.
+_SECRET_SETTING_KEYS = {"discord_webhook_url", "discord_bot_token", "discord_notify_channel_id", "kakao_page_cookies"}
+_CACHE_SETTING_KEYS = {"kakao_catalog_snapshot"}
+_ALERT_STATE_SETTING_KEYS = {"kakao_page_alert_expired_at", "kakao_page_alert_soon_at", "adult_cookie_expired_notified"}
+_NOT_IN_BACKUP_KEYS = _SECRET_SETTING_KEYS | _CACHE_SETTING_KEYS | _ALERT_STATE_SETTING_KEYS
+_BACKUP_TABLES = (
+    "webtoons", "settings", "watched_authors", "watched_tags", "kakao_seen_titles", "kakao_webtoons",
+    "filename_template_presets", "archive_targets", "archive_history", "episode_history", "archive_pending_finish",
+)
 
 
 def export_all() -> dict:
@@ -1069,9 +1082,10 @@ def export_all() -> dict:
         settings_rows = [
             dict(r)
             for r in conn.execute("SELECT * FROM settings").fetchall()
-            if r["key"] not in _SECRET_SETTING_KEYS
+            if r["key"] not in _NOT_IN_BACKUP_KEYS
         ]
         return {
+            "_meta": {"format_version": BACKUP_FORMAT_VERSION, "created_at": datetime.now(timezone.utc).isoformat()},
             "webtoons": [dict(r) for r in conn.execute("SELECT * FROM webtoons").fetchall()],
             "settings": settings_rows,
             "watched_authors": [dict(r) for r in conn.execute("SELECT * FROM watched_authors").fetchall()],
@@ -1134,23 +1148,40 @@ def _insert_validated_rows(conn, table: str, allowed_columns: tuple[str, ...], r
         )
 
 
-def restore_all(data: dict) -> None:
-    """백업 데이터로 11개 테이블을 완전히 교체한다 (기존 내용은 전부 지워짐)."""
+def validate_backup(data) -> None:
+    """복원해도 되는 백업인지 확인한다(지우기 전에). 아니면 ValueError — 데이터는 건드리지 않는다.
+    빈 JSON이나 엉뚱한 JSON을 올려도 "복원"이 돼 버리면 현재 데이터가 전부 지워지는 사고가 나므로, 백업 테이블이 하나라도 있어야 한다."""
     if not isinstance(data, dict):
         raise ValueError("백업 데이터 형식이 올바르지 않습니다 (JSON 객체가 아님).")
+    if not any(isinstance(data.get(table), list) for table in _BACKUP_TABLES):
+        raise ValueError("백업 파일이 아닌 것 같습니다 (백업 데이터가 하나도 들어 있지 않습니다).")
+    meta = data.get("_meta")
+    version = meta.get("format_version", 1) if isinstance(meta, dict) else 1
+    if not isinstance(version, int) or version > BACKUP_FORMAT_VERSION:
+        raise ValueError("이 백업은 더 새로운 버전의 프로그램에서 만들어져서 복원할 수 없습니다. 프로그램을 최신 버전으로 업데이트한 뒤 다시 시도해 주세요.")
+
+
+def restore_all(data: dict) -> None:
+    """백업 데이터로 11개 테이블을 완전히 교체한다 (기존 내용은 전부 지워짐).
+    설정은 비밀값/캐시(_SECRET/_CACHE_SETTING_KEYS)만 지금 값을 남기고 나머지를 교체하며, 알림 기록은 지워서 초기화한다.
+    백업 파일 안의 비밀값/캐시/알림 기록 항목은 무시한다(조작된 백업이 웹훅 주소 같은 걸 바꿔치기하지 못하게)."""
+    validate_backup(data)
+    keep = sorted(_SECRET_SETTING_KEYS | _CACHE_SETTING_KEYS)
 
     with write_transaction() as conn:
-        for table in (
-            "webtoons", "settings", "watched_authors", "watched_tags",
-            "kakao_seen_titles", "kakao_webtoons", "filename_template_presets",
-            "archive_targets", "archive_history", "episode_history", "archive_pending_finish",
-        ):
-            conn.execute(f"DELETE FROM {table}")
+        for table in _BACKUP_TABLES:
+            if table == "settings":
+                conn.execute(f"DELETE FROM settings WHERE key NOT IN ({', '.join('?' for _ in keep)})", keep)
+            else:
+                conn.execute(f"DELETE FROM {table}")
 
         _insert_validated_rows(conn, "webtoons", _WEBTOON_COLUMNS, data.get("webtoons") or [])
         for row in data.get("settings") or []:
-            if isinstance(row, dict) and "key" in row and "value" in row:
-                conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (row["key"], row["value"]))
+            if isinstance(row, dict) and "key" in row and "value" in row and row["key"] not in _NOT_IN_BACKUP_KEYS:
+                conn.execute(
+                    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (row["key"], row["value"]),
+                )
         _insert_validated_rows(conn, "watched_authors", _WATCHED_AUTHOR_COLUMNS, data.get("watched_authors") or [])
         _insert_validated_rows(conn, "watched_tags", _WATCHED_TAG_COLUMNS, data.get("watched_tags") or [])
         _insert_validated_rows(conn, "kakao_seen_titles", _KAKAO_SEEN_TITLE_COLUMNS, data.get("kakao_seen_titles") or [])

@@ -1021,3 +1021,10 @@ select {
 .download-root-picker .drp-list { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; margin-bottom: 8px; }
 .download-root-picker .drp-list button { text-align: left; font-size: 13px; }
 .download-root-picker .drp-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* 백업 복원 결과 — 확인할 것/다시 입력할 것 */
+.backup-report { margin-top: 12px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+.backup-report ul { margin: 6px 0 12px; padding-left: 20px; }
+.backup-report li { margin: 4px 0; }
+.backup-report .backup-warnings li { color: #b45309; }
+.backup-report button { margin-top: 4px; }
