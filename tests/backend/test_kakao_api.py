@@ -16,7 +16,7 @@ class Resp:
 class FakeSession:
     """url+params에 따라 응답을 만드는 가짜 세션. 호출 기록을 남긴다."""
     def __init__(self, handler): self.handler, self.calls = handler, []
-    def get(self, url, params=None, headers=None, timeout=None):
+    def get(self, url, params=None, headers=None, cookies=None, timeout=None):
         self.calls.append((url, dict(params or {})))
         status, data = self.handler(url, params or {})
         return Resp(status, data)

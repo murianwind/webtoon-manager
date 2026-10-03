@@ -463,6 +463,16 @@ _UNREGISTERED_NEW_EPISODE_LIMIT = 20  # 미등록 신규 에피소드는 네이�
 _KAKAO_NEW_EPISODE_CANDIDATE_LIMIT = 150
 
 
+def _log_unchecked_adult(platform_label: str, titles: list[str], how_to_fix: str) -> None:
+    """성인 작품의 새 회차를 쿠키 문제로 확인하지 못했을 때 조용히 넘기지 않고 리포트 실행 로그에 남긴다(리포트 메시지에는 넣지 않는다)."""
+    if not titles:
+        return
+    shown = ", ".join(titles[:5]) + (" 등" if len(titles) > 5 else "")
+    message = f"{platform_label} 성인 작품 {len(titles)}개는 새 에피소드를 확인하지 못했습니다({shown}) — {how_to_fix}"
+    log.warning(message)
+    job_status.log_line("report", message)
+
+
 async def _collect_unregistered_new_episodes(
     session: aiohttp.ClientSession, settings
 ) -> list[tuple[str, str, int]]:
@@ -488,11 +498,15 @@ async def _collect_unregistered_new_episodes(
         return []
 
     semaphore = asyncio.Semaphore(settings.artist_scan_concurrency)
+    # 성인 작품은 성인 인증 쿠키가 없으면 회차 목록이 비어서 와서 최신 회차를 알 수 없다 — 다운로드와 같은 쿠키로 조회한다
+    adult_cookies = get_adult_cookies(settings.cookie_file_path)
 
     async def _fetch_one(item):
         async with semaphore:
             try:
-                episode_no = await naver_api.fetch_latest_episode_no(session, item.title_id, settings.request_timeout_seconds)
+                episode_no = await naver_api.fetch_latest_episode_no(
+                    session, item.title_id, settings.request_timeout_seconds, cookies=adult_cookies if item.is_adult else None,
+                )
             except Exception as e:
                 log.error("미등록 작품(titleId=%s) 최신 회차 조회 실패(건너뜀): %s", item.title_id, e)
                 episode_no = None
@@ -500,6 +514,10 @@ async def _collect_unregistered_new_episodes(
             return item, episode_no
 
     results = await asyncio.gather(*[_fetch_one(item) for item in candidates])
+    _log_unchecked_adult(
+        "네이버", [item.title_name for item, episode_no in results if episode_no is None and item.is_adult],
+        "성인 인증 쿠키 파일(COOKIE_DIR_HOST_PATH)이 없거나 만료됐을 수 있습니다",
+    )
     return [
         (item.title_id, item.title_name, episode_no)
         for item, episode_no in results
@@ -535,11 +553,16 @@ async def _collect_kakao_new_episodes(
         return []
 
     semaphore = asyncio.Semaphore(settings.artist_scan_concurrency)
+    # 19세 작품은 로그인한 계정으로 조회한다(네이버 성인 작품과 같은 규칙) — 저장된 카카오페이지 로그인 쿠키가 없으면 로그인 없이 시도
+    saved = kakao_page_auth.load_cookies()
+    login_cookies = kakao_page_auth.cookie_map(saved) if saved else None
 
     async def _fetch_one(item):
         async with semaphore:
             try:
-                url = await kakao_api.fetch_latest_episode_url(session, item["title_id"], settings.request_timeout_seconds)
+                url = await kakao_api.fetch_latest_episode_url(
+                    session, item["title_id"], settings.request_timeout_seconds, cookies=login_cookies if item["is_adult"] else None,
+                )
             except Exception as e:
                 log.error("카카오 작품(title_id=%s) 최신 회차 조회 실패(건너뜀): %s", item["title_id"], e)
                 url = None
@@ -547,6 +570,10 @@ async def _collect_kakao_new_episodes(
             return item, url
 
     results = await asyncio.gather(*[_fetch_one(item) for item in candidates])
+    _log_unchecked_adult(
+        "카카오", [item["title_name"] for item, url in results if url is None and item["is_adult"]],
+        "카카오페이지 로그인 쿠키가 없거나 만료됐을 수 있습니다(설정 > 카카오웹툰 관리)",
+    )
     final = [(item["title_id"], item["title_name"], url) for item, url in results if url is not None]
     if len(final) < len(candidates):
         # 후보였는데 최종 리포트엔 안 실린 개수 — 조회 실패(HTTP 403 등)로 조용히

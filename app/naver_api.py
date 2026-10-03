@@ -207,11 +207,12 @@ async def fetch_all_episodes(
 
 
 async def fetch_latest_episode_no(
-    session: aiohttp.ClientSession, title_id: str, timeout_seconds: int
+    session: aiohttp.ClientSession, title_id: str, timeout_seconds: int, cookies: Optional[dict[str, str]] = None
 ) -> Optional[int]:
     """이 작품의 가장 최근(가장 큰 번호) 회차 번호만 가볍게 확인한다 — 목록 1페이지에는
-    최신 회차부터 나오므로, 전체 회차를 안 받아도 바로가기 URL을 만들 수 있다."""
-    page_data = await _fetch_episode_list_page(session, title_id, 1, {}, timeout_seconds)
+    최신 회차부터 나오므로, 전체 회차를 안 받아도 바로가기 URL을 만들 수 있다.
+    성인 작품은 성인 인증 쿠키가 없으면 회차 목록이 비어서 오므로 cookies를 넘겨야 한다."""
+    page_data = await _fetch_episode_list_page(session, title_id, 1, cookies or {}, timeout_seconds)
     if not page_data:
         return None
     articles = page_data.get("articleList") or []

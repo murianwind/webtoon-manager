@@ -46,7 +46,7 @@ class FakeSession:
     def __init__(self, *a, **k): pass
     async def __aenter__(self): return self
     async def __aexit__(self, *a): return False
-    def get(self, url, params=None, headers=None, timeout=None):
+    def get(self, url, params=None, headers=None, cookies=None, timeout=None):
         url = str(url); return handler("GET", url, dict(params or {}), None)
     def post(self, url, data=None, headers=None, timeout=None): return handler("POST", url, {}, data)
 aiohttp.ClientSession = FakeSession

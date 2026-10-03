@@ -88,7 +88,7 @@ _catalog_lock = asyncio.Lock()
 
 
 async def _get_json(
-    session: aiohttp.ClientSession, url: str, params: dict, timeout_seconds: int, label: str
+    session: aiohttp.ClientSession, url: str, params: dict, timeout_seconds: int, label: str, cookies: dict | None = None
 ) -> dict | None:
     """GET 후 JSON을 돌려준다. 실패하면 None(호출부가 알아서 계속 진행할 수 있게 예외를
     던지지 않는다). HTTP 403/429/5xx는 잠깐 쉬었다가 최대 3번까지 시도한다 — 일시적인
@@ -96,7 +96,7 @@ async def _get_json(
     for attempt in range(3):
         try:
             async with session.get(
-                url, params=params, headers=HEADERS, timeout=aiohttp.ClientTimeout(total=timeout_seconds)
+                url, params=params, headers=HEADERS, cookies=cookies, timeout=aiohttp.ClientTimeout(total=timeout_seconds)
             ) as response:
                 if response.status in (403, 429) or response.status >= 500:
                     if attempt < 2:
@@ -250,7 +250,7 @@ def thumbnail_kid(product_list_data: dict | None) -> str | None:
 
 
 async def fetch_latest_episode_url(
-    session: aiohttp.ClientSession, series_id: int, timeout_seconds: int
+    session: aiohttp.ClientSession, series_id: int, timeout_seconds: int, cookies: dict | None = None
 ) -> str | None:
     """이 작품의 가장 최근 회차로 바로 가는 뷰어 URL을 만든다 — 회차 목록을 최신순
     (sort_type=desc)으로 받아 맨 앞(숨김 처리 안 된) 회차를 쓴다.
@@ -258,9 +258,11 @@ async def fetch_latest_episode_url(
     카카오페이지의 "기다리면 무료" 작품은 최신 회차가 전부 아직 안 풀린(is_free: false)
     상태라서, 예전 카카오웹툰처럼 "지금 읽을 수 있는 최신 회차"로 거르면 몇 달 전 회차가
     나와버린다 — UP(새 회차) 표시가 가리키는 건 바로 그 최신 회차라서, 잠겨 있어도
-    최신 회차로 보낸다(기다무 이용권/충전이 있으면 그 화면에서 바로 열 수 있다)."""
+    최신 회차로 보낸다(기다무 이용권/충전이 있으면 그 화면에서 바로 열 수 있다).
+    19세 작품은 로그인 쿠키(cookies)로 조회한다 — 네이버 성인 작품과 같은 규칙."""
     data = await _get_json(
-        session, KAKAO_PRODUCT_LIST_URL, product_list_params(series_id), timeout_seconds, f"회차 목록 series_id={series_id}"
+        session, KAKAO_PRODUCT_LIST_URL, product_list_params(series_id), timeout_seconds, f"회차 목록 series_id={series_id}",
+        cookies=cookies,
     )
     if data is None:
         return None

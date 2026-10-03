@@ -4,13 +4,14 @@ import asyncio
 from types import SimpleNamespace as NS
 
 from app import db, naver_api, repository, scheduler
+from app.config import get_settings
 db.get_connection()
 
-S = NS(request_timeout_seconds=5, artist_scan_concurrency=3, delay_seconds=0)
-ITEMS = [NS(title_id=t, title_name=f"작품{t}", has_update=up) for t, up in
+S = NS(request_timeout_seconds=5, artist_scan_concurrency=3, delay_seconds=0, cookie_file_path=get_settings().cookie_file_path)
+ITEMS = [NS(title_id=t, title_name=f"작품{t}", has_update=up, is_adult=False) for t, up in
          (("1", True), ("2", True), ("3", True), ("4", True), ("5", True), ("6", True), ("7", False))]
 async def fake_list(session, timeout): return list(ITEMS)
-async def fake_latest(session, title_id, timeout): return 100 + int(title_id)
+async def fake_latest(session, title_id, timeout, cookies=None): return 100 + int(title_id)
 naver_api.fetch_full_webtoon_list = fake_list; naver_api.fetch_latest_episode_no = fake_latest
 
 def add(title_id, status, ever_subscribed):

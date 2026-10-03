@@ -52,7 +52,7 @@ class Resp:
     async def __aexit__(self, *a): return False
 class Sess:
     def __init__(self): self.calls = []
-    def get(self, url, params=None, headers=None, timeout=None):
+    def get(self, url, params=None, headers=None, cookies=None, timeout=None):
         self.calls.append(dict(params)); return Resp({"result": {"list": RESULTS.get(params["keyword"], []), "is_end": True}})
 async def t2():
     s = Sess()

@@ -27,7 +27,7 @@ class Resp:
     async def __aexit__(self, *a): return False
 class Sess:
     def __init__(self): self.calls = []
-    def get(self, url, params=None, headers=None, timeout=None):
+    def get(self, url, params=None, headers=None, cookies=None, timeout=None):
         self.calls.append((url, dict(params or {})))
         if 'dayofweek' in url:
             page = copy.deepcopy(real_day); page['result']['is_end'] = True   # 한 페이지로 끝

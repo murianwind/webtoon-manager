@@ -16,7 +16,7 @@ class Resp:
     async def __aexit__(self, *a): return False
 class Sess:
     def __init__(self, handler): self.handler, self.calls = handler, []
-    def get(self, url, params=None, headers=None, timeout=None):
+    def get(self, url, params=None, headers=None, cookies=None, timeout=None):
         self.calls.append(dict(params or {})); s, d = self.handler(params or {}); return Resp(s, d)
 
 async def part_a():
