@@ -310,8 +310,19 @@ document.getElementById("kakao-webtoons-enabled-toggle").addEventListener("chang
   }
 });
 
+// 진행 상황 로그(수동 실행/아카이빙/폴더 일괄 이동/수동 다운로드 공통)의 스크롤 규칙:
+// 맨 아래를 보고 있으면 새 줄을 따라 내려가고, 위로 올려 읽는 중이면 그 위치를 그대로 두고, 다시 맨 아래(근처)로 내리면
+// 따라가기를 다시 시작한다. 2초마다 상태를 받아 오지만 새 줄이 없으면 다시 그리지 않는다(텍스트 선택/스크롤이 풀리지 않게).
+const LOG_FOLLOW_THRESHOLD_PX = 24; // 맨 아래에서 이만큼 안쪽이면 "맨 아래를 보고 있다"로 본다
+const renderedJobLogs = new Map(); // jobName → 마지막으로 그린 로그(같으면 다시 그리지 않음)
+
 function renderJobLog(jobName, lines) {
   const container = document.getElementById(`${jobName}-log`);
+  const signature = lines.join("\n");
+  if (renderedJobLogs.get(jobName) === signature) return;
+  const firstRender = !renderedJobLogs.has(jobName);
+  const following = firstRender || container.scrollHeight - container.scrollTop - container.clientHeight <= LOG_FOLLOW_THRESHOLD_PX;
+  const previousTop = container.scrollTop;
   container.innerHTML = lines
     .map((line) => {
       const separatorIndex = line.indexOf(" — ");
@@ -322,7 +333,8 @@ function renderJobLog(jobName, lines) {
       return `<div class="log-line${isError ? " log-error" : ""}"><span class="log-time">${escapeHtml(timeLabel)}</span>${escapeHtml(message)}</div>`;
     })
     .join("");
-  container.scrollTop = container.scrollHeight;
+  renderedJobLogs.set(jobName, signature);
+  container.scrollTop = following ? container.scrollHeight : previousTop;
 }
 
 async function refreshJobStatus() {
