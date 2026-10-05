@@ -51,7 +51,7 @@ from pathlib import Path
 import aiohttp
 from yarl import URL
 
-from app import comicinfo, kakao_api, kakao_cover, kakao_page_auth, repository
+from app import comicinfo, kakao_api, kakao_cover, kakao_page_auth, kakao_records, repository
 from app.kakao_authors import split_authors
 from app.file_utils import remove_forbidden_str_kakao
 
@@ -134,16 +134,17 @@ class MarkerInfo:
 @dataclass
 class EpisodeRow:
     episode: Episode
-    downloaded: bool  # 폴더에 이미 받은 파일이 있음(번호 또는 부제목이 같음)
-    before_start: bool = False  # 폴더의 가장 이른 파일보다 앞 회차 — 자동으로는 받지 않는다(수동으로는 받을 수 있다)
+    downloaded: bool  # 이미 받음 — 폴더에 파일이 있거나(번호 또는 부제목이 같음), 받은 회차 기록에 있음
+    before_start: bool = False  # 폴더/기록의 가장 이른 회차보다 앞 — 자동으로는 받지 않는다(수동으로는 받을 수 있다)
+    archived: bool = False  # 받은 회차 기록에는 있는데 폴더에는 없음 — 아카이빙으로 보관 폴더에 옮겨진 회차
 
 
 @dataclass
 class DownloadPlan:
     mode: str  # new_folder | single_marker | compare
     rows: list[EpisodeRow] = field(default_factory=list)
-    to_download: list[Episode] = field(default_factory=list)  # 지금 받을 수 있는 것(순서대로, 첫 잠긴 회차 앞까지)
-    locked: list[Episode] = field(default_factory=list)  # 대여권이 필요한 것(첫 잠긴 회차부터 뒤 전부)
+    to_download: list[Episode] = field(default_factory=list)  # 지금 받을 수 있는 것(번호순) — 앞에 잠긴 회차가 있어도 무료/대여 중이면 포함
+    locked: list[Episode] = field(default_factory=list)  # 못 받는 것 전부(번호순) — 가장 앞의 잠긴 회차부터 기다무로 하나씩 연다
     marker: MarkerInfo | None = None
     existing_count: int = 0
 
@@ -239,18 +240,31 @@ def _subtitle_key(subtitle: str, series_title: str) -> str:
     return text
 
 
-def plan_by_folder_rules(episodes: list[Episode], existing: list[ExistingFile], series_title: str = "") -> DownloadPlan:
-    """폴더 규칙(모듈 설명 참고)으로 받을 회차를 정한다. 받을 수 있는 회차를 앞에서부터 이어서 받다가 처음
-    잠긴 회차에서 멈춘다 — 순서를 건너뛰지 않아야 "번호 순서대로"가 지켜진다. series_title은 파일 이름 속 부제목에 붙은
-    작품명을 떼고 비교하는 데 쓴다(없으면 있는 그대로 비교)."""
-    # 숨김(hidden) 회차는 "아직 무료/대여로 열리지 않은 예정 회차"다 — 사이트는 "N일 후 무료"로 목록에 보여 주므로 빼지 않고 잠긴 회차로
-    # 센다(번호 순서대로 받다가 여기서 멈추게 되고, 화면에는 무료가 되는 날짜가 보인다). 받을 수는 없다.
+def plan_by_folder_rules(
+    episodes: list[Episode], existing: list[ExistingFile], series_title: str = "", recorded: set[int] | None = None
+) -> DownloadPlan:
+    """폴더 규칙(모듈 설명 참고)과 "받은 회차 기록"으로 받을 회차를 정한다.
+
+    받을 수 있는 회차(무료/대여 중)는 앞에 잠긴 회차가 있어도 그때그때 받고, 잠긴 회차는 번호순으로 모아 두었다가 가장 앞의 것부터
+    기다무로 하나씩 연다(run_download). recorded는 작품의 받은 회차 기록(없으면 None) — 폴더에 파일이 있고 기록도 있으면 아카이빙으로
+    옮겨진 회차도 "받은 것"으로 보고(파일이 하나뿐이라는 이유로 앞 회차가 전부 잘려 나가지 않는다), 가장 앞 기록부터를 대상으로 삼는다.
+    폴더에 파일이 없으면 기록은 무시하고 처음부터 받는다(폴더를 비운 것은 다시 받으려는 것). series_title은 파일 이름 속 부제목에 붙은
+    작품명을 떼고 비교하는 데 쓴다(없으면 있는 그대로 비교).
+
+    숨김(hidden) 회차는 "아직 무료/대여로 열리지 않은 예정 회차"다 — 사이트는 "N일 후 무료"로 목록에 보여 주므로 빼지 않고 잠긴 회차로
+    센다(화면에는 무료가 되는 날짜가 보인다). 받을 수는 없다."""
     visible = sorted((e for e in episodes if e.number > 0), key=lambda e: e.number)
     marker: MarkerInfo | None = None
+    folder_numbers = {f.number for f in existing}
+    archived_numbers: set[int] = set()
 
     lower_bound = 0  # 이 번호보다 앞 회차는 자동으로 받지 않는다
     if not existing:
         mode = "new_folder"
+    elif recorded:
+        mode = "compare"
+        archived_numbers = recorded - folder_numbers
+        lower_bound = min(folder_numbers | recorded)
     elif len(existing) == 1:
         mode = "single_marker"
         only = existing[0]
@@ -268,22 +282,21 @@ def plan_by_folder_rules(episodes: list[Episode], existing: list[ExistingFile], 
         lower_bound = resolved
     else:
         mode = "compare"
-        lower_bound = min(f.number for f in existing)
+        lower_bound = min(folder_numbers)
 
-    have_numbers = {f.number for f in existing}
+    have_numbers = folder_numbers | archived_numbers
     have_subtitles = {_subtitle_key(f.subtitle, series_title) for f in existing}
     plan = DownloadPlan(mode=mode, marker=marker, existing_count=len(existing))
-    blocked = False
     for episode in visible:
-        done = episode.number in have_numbers or normalize_subtitle(episode.subtitle) in have_subtitles
+        in_folder = episode.number in folder_numbers or normalize_subtitle(episode.subtitle) in have_subtitles
+        done = in_folder or episode.number in have_numbers
         skipped = not done and episode.number < lower_bound
-        plan.rows.append(EpisodeRow(episode=episode, downloaded=done, before_start=skipped))
+        plan.rows.append(EpisodeRow(episode=episode, downloaded=done, before_start=skipped, archived=done and not in_folder))
         if done or skipped:
             continue
-        if not blocked and episode.accessible and not episode.hidden:
+        if episode.accessible and not episode.hidden:
             plan.to_download.append(episode)
         else:
-            blocked = True
             plan.locked.append(episode)
     return plan
 
@@ -602,6 +615,7 @@ async def download_episode(client: KakaoPageClient, series_id: int, episode: Epi
         part_path.unlink(missing_ok=True)
         return None
     _remove_superseded(folder, episode.number, keep=final_path)
+    repository.add_kakao_downloaded_numbers(series_id, [episode.number])  # 자동/수동/기다무가 모두 거치는 저장 지점 — 받은 회차 기록에 더한다
     return final_path
 
 
@@ -626,7 +640,11 @@ async def run_download(
     series_item, episodes = listing
     folder_title = title or series_item.get("title") or str(series_id)
     folder = series_folder(download_root, folder_title)
-    plan = plan_by_folder_rules(episodes, scan_existing_files(folder), series_item.get("title") or "")
+    existing = scan_existing_files(folder)
+    plan = plan_by_folder_rules(episodes, existing, series_item.get("title") or "")
+    recorded = kakao_records.sync_before_planning(series_id, existing, plan)  # 기록이 없으면 폴더+아카이빙 이력으로 처음 만들고, 폴더를 비웠으면 버린다
+    if recorded:
+        plan = plan_by_folder_rules(episodes, existing, series_item.get("title") or "", recorded)
     downloaded: list[int] = []
     items: list[tuple[int, str]] = []
     failed: int | None = None
@@ -692,7 +710,9 @@ async def download_selected(
     series_item, episodes = listing
     result.title = title or series_item.get("title") or str(series_id)
     folder = series_folder(download_root, result.title)
-    plan = plan_by_folder_rules(episodes, scan_existing_files(folder), series_item.get("title") or "")
+    plan = plan_by_folder_rules(
+        episodes, scan_existing_files(folder), series_item.get("title") or "", repository.get_kakao_downloaded_numbers(series_id)
+    )
     rows = {row.episode.number: row for row in plan.rows}
     ticket = None  # 잠긴 회차를 고른 경우에만 조회한다
     waitfree_spent = False  # 기다무는 한 장이라 고른 잠긴 회차 중 번호가 가장 앞선 하나만 연다
@@ -727,14 +747,15 @@ async def download_selected(
         if path is None:
             result.failed.append(number)
             if on_progress:
-                on_progress(f"❌ {number}번 회차 받기 실패" + (" (기존 파일은 그대로 둡니다)" if row.downloaded else ""))
+                on_progress(f"❌ {number}번 회차 받기 실패" + (" (기존 파일은 그대로 둡니다)" if row.downloaded and not row.archived else ""))
         else:
             result.downloaded.append(number)
             result.downloaded_items.append((number, row.episode.subtitle))
-            if row.downloaded:
+            replaced = row.downloaded and not row.archived  # 보관 폴더로 옮겨진 회차를 다시 받는 것은 폴더의 파일을 바꾸는 게 아니다
+            if replaced:
                 result.replaced.append(number)
             if on_progress:
-                on_progress(f"✅ {number}번 회차 {'다시 받아 교체' if row.downloaded else '완료'} ({path.name})")
+                on_progress(f"✅ {number}번 회차 {'다시 받아 교체' if replaced else '완료'} ({path.name})")
     if result.downloaded:
         await write_series_metadata(series_item, series_id, folder, on_progress, await client.fetch_about(series_id))
     return result

@@ -1028,3 +1028,6 @@ select {
 .backup-report li { margin: 4px 0; }
 .backup-report .backup-warnings li { color: #b45309; }
 .backup-report button { margin-top: 4px; }
+
+/* 카카오 수동 다운로드 — 아카이빙으로 보관 폴더에 옮겨진 회차 표시 */
+.kp-archived { color: var(--muted, #888); font-size: 0.85em; }

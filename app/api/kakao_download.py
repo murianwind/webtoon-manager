@@ -148,7 +148,9 @@ async def kakao_manual_analyze(series_id: int):
     title = series_item.get("title") or str(series_id)
     folder = kakao_page_download.series_folder(root, title)
     existing = await asyncio.to_thread(kakao_page_download.scan_existing_files, folder)
-    plan = kakao_page_download.plan_by_folder_rules(episodes, existing, series_item.get("title") or "")
+    plan = kakao_page_download.plan_by_folder_rules(
+        episodes, existing, series_item.get("title") or "", repository.get_kakao_downloaded_numbers(series_id)
+    )
     return {
         "series_id": series_id, "title": title, "folder": str(folder), "mode": plan.mode, "existing_count": plan.existing_count,
         "marker": None if plan.marker is None else {
@@ -157,6 +159,7 @@ async def kakao_manual_analyze(series_id: int):
         },
         "to_download_count": len(plan.to_download), "locked_count": len(plan.locked),
         "downloaded_count": sum(1 for row in plan.rows if row.downloaded),
+        "archived_count": sum(1 for row in plan.rows if row.archived),  # 받은 회차 기록에는 있고 폴더에는 없는 것(아카이빙으로 보관 폴더로 옮겨진 회차)
         "before_start_count": sum(1 for row in plan.rows if row.before_start),
         "cookie_saved": cookie_saved, "logged_in": logged_in,
         # 진단: 사이트가 말하는 전체 회차 수와 우리가 가져온 수(동영상으로 뺀 수 포함) — 목록에서 회차가 빠졌을 때 화면이 알려 준다
@@ -177,7 +180,7 @@ async def kakao_manual_analyze(series_id: int):
                 # 잠긴 회차라도 기다무를 쓸 수 있으면 "waitfree" — 골라서 받으면 기다무로 열고 받는다(한 장이라 하나만)
                 "state": _kakao_episode_state(row.episode, waitfree_ready), "expire": row.episode.rent_expire,
                 "free_at": kakao_page_download.free_date_of(row.episode),  # 연재무료: 이 날짜에 무료가 된다
-                "downloaded": row.downloaded, "before_start": row.before_start,
+                "downloaded": row.downloaded, "archived": row.archived, "before_start": row.before_start,
                 "selectable": row.episode.accessible or _can_open_with_waitfree(row.episode, waitfree_ready),  # 이미 받은 회차도 다시 받을 수 있다(수동)
             }
             for row in plan.rows

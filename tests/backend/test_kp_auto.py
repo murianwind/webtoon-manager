@@ -84,24 +84,24 @@ async def main():
     failures = []; await scheduler._download_kakao_subscriptions(settings, failures)
     names = lambda t: sorted(p.name for p in (KROOT / t).glob("*.zip"))
     assert names("작품A") == ["0001_1화.zip", "0002_2화.zip", "0003_3화.zip"]                           # 폴더 없음 → 처음부터 전부(폴더 자동 생성)
-    assert names("작품B") == ["0002_2화#9.zip", "0003_3화.zip"]                                              # 표식(2) 이후 3만 — 4는 잠겨서 멈추므로 5도 안 받음
+    assert names("작품B") == ["0002_2화#9.zip", "0003_3화.zip", "0005_5화.zip"]                              # 표식(2) 이후: 3과 5(무료)는 바로 받고, 잠긴 4는 대기(앞이 잠겨도 뒤의 무료는 받는다)
     # 작품C(25개): 상한(기본 10)에 걸려도 쉬었다가 같은 실행 안에서 끝까지 받는다(10+10+5) — 다음 정기 실행을 기다리지 않는다
     assert len(names("작품C")) == 25 and names("작품C")[0] == "0001_1화.zip" and names("작품C")[-1] == "0025_25화.zip"
     assert names("작품D") == [] and not list((KROOT / "작품D").glob("*.part")) if (KROOT / "작품D").exists() else True
     assert not (KROOT / "제외작").exists() and not (KROOT / "작품E").exists()                                   # 구독 중이 아닌 것/목록 실패는 폴더도 안 만듦
     assert [f["title_name"] for f in failures] == ["작품D"] and failures[0]["episode_no"] == 1                   # 실패는 격리되고 목록에 담김
     rows, total = repository.list_episode_history(status="success"); done = {(r["title_name"], r["episode_no"]) for r in rows}
-    assert ("작품A", 3) in done and ("작품B", 3) in done and ("작품C", 25) in done and ("작품B", 2) not in done and total == 3 + 1 + 25
+    assert ("작품A", 3) in done and ("작품B", 3) in done and ("작품B", 5) in done and ("작품C", 25) in done and ("작품B", 2) not in done and ("작품B", 4) not in done and total == 3 + 2 + 25
     rows, total = repository.list_episode_history(status="failed"); assert total == 1 and rows[0]["title_name"] == "작품D"
     assert "[작품A]" in log_text() and "작품E" in log_text() and "회차 목록을 가져오지 못했습니다" in log_text()
-    print("2) 정상 실행 OK (폴더 없음→전부, 표식 폴더→그 이후, 상한 넘으면 쉬었다 이어받기, 잠긴 회차에서 멈춤, 실패 격리, 이력 기록)")
+    print("2) 정상 실행 OK (폴더 없음→전부, 표식 폴더→그 이후, 상한 넘으면 쉬었다 이어받기, 무료는 바로/잠긴 회차는 대기, 실패 격리, 이력 기록)")
 
     # 5. 다시 실행 — 남은 것만
     S["fail_images_for"] = set(); failures = []
     await scheduler._download_kakao_subscriptions(settings, failures)
     assert len(names("작품C")) == 25 and names("작품D") == ["0001_1화.zip", "0002_2화.zip"] and names("작품A")[-1] == "0003_3화.zip" and failures == []
     await scheduler._download_kakao_subscriptions(settings, failures)
-    assert len(list(KROOT.rglob("*.zip"))) == 3 + 2 + 25 + 2                                                    # 더 받을 게 없으면 그대로
+    assert len(list(KROOT.rglob("*.zip"))) == 3 + 3 + 25 + 2                                                    # 더 받을 게 없으면 그대로(작품B는 표식 + 3 + 5)
     print("3) 재실행 OK (남은 회차만 이어받고, 다 받았으면 새로 안 받음)")
 asyncio.run(main())
 print("\n전부 통과")

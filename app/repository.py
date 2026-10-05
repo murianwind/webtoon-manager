@@ -429,6 +429,45 @@ def set_kakao_authors(title_id: int, writer_names: list[str], origin_names: list
         )
 
 
+def get_kakao_downloaded_numbers(title_id: int) -> set[int] | None:
+    """이 앱이 받았거나 폴더에서 확인한 회차 번호의 "받은 회차 기록". 아카이빙으로 파일이 폴더에서 옮겨져도 남는다. 기록이 아직 없으면
+    None(빈 기록 set()과 구분한다 — 없으면 예전 폴더 규칙을, 있으면 기록을 쓴다). 추적하지 않는 작품도 None."""
+    row = fetchone("SELECT downloaded_numbers FROM kakao_webtoons WHERE title_id = ?", (title_id,))
+    if row is None or row["downloaded_numbers"] is None:
+        return None
+    return {int(n) for n in json.loads(row["downloaded_numbers"])}
+
+
+def set_kakao_downloaded_numbers(title_id: int, numbers) -> None:
+    """받은 회차 기록을 통째로 바꾼다(빈 기록도 "기록 있음"). 추적하지 않는 작품이면 아무것도 하지 않는다."""
+    with write_transaction() as conn:
+        conn.execute(
+            "UPDATE kakao_webtoons SET downloaded_numbers = ? WHERE title_id = ?",
+            (json.dumps(sorted({int(n) for n in numbers})), title_id),
+        )
+
+
+def add_kakao_downloaded_numbers(title_id: int, numbers) -> None:
+    """받은 회차 기록에 번호를 더한다. **기록이 아직 없는 작품(또는 추적하지 않는 작품)에는 아무것도 하지 않는다** — 한 회차짜리 기록이
+    새로 생기면 폴더와 아카이빙 이력으로 처음 기록을 만드는 일이 막히기 때문이다(첫 자동 실행이 만든다)."""
+    with write_transaction() as conn:
+        row = conn.execute("SELECT downloaded_numbers FROM kakao_webtoons WHERE title_id = ?", (title_id,)).fetchone()
+        if row is None or row["downloaded_numbers"] is None:
+            return
+        merged = {int(n) for n in json.loads(row["downloaded_numbers"])} | {int(n) for n in numbers}
+        conn.execute("UPDATE kakao_webtoons SET downloaded_numbers = ? WHERE title_id = ?", (json.dumps(sorted(merged)), title_id))
+
+
+def list_kakao_webtoons_without_record() -> list[dict]:
+    """받은 회차 기록이 아직 없는 카카오 작품(모든 상태) — 시작할 때 폴더와 아카이빙 이력으로 소급해서 만들 대상."""
+    return [{"title_id": r["title_id"], "title": r["title"]} for r in fetchall("SELECT title_id, title FROM kakao_webtoons WHERE downloaded_numbers IS NULL ORDER BY title_id")]
+
+
+def list_archive_file_names(title_id: str) -> list[str]:
+    """이 아카이빙 대상(웹툰은 title_id, 카카오는 "kakao_<번호>")으로 옮긴 파일 이름들 — 이력 한 줄이 파일 하나다."""
+    return [r["file_name"] for r in fetchall("SELECT file_name FROM archive_history WHERE title_id = ?", (title_id,))]
+
+
 def list_kakao_origin_names() -> set[str]:
     """추적 중인 카카오 작품 어딘가에서 원작 작가로 나온 이름들."""
     names: set[str] = set()
@@ -1111,7 +1150,7 @@ _WATCHED_TAG_COLUMNS = ("tag_id", "tag_name", "enabled", "created_at", "updated_
 _KAKAO_SEEN_TITLE_COLUMNS = ("author_name", "title_id", "title_name", "seen_at")
 _KAKAO_WEBTOON_COLUMNS = (
     "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "author_summary", "writer_names", "origin_names",
-    "is_finished", "finish_notified", "finish_ack", "created_at", "updated_at",
+    "is_finished", "finish_notified", "finish_ack", "downloaded_numbers", "created_at", "updated_at",
 )
 _FILENAME_TEMPLATE_PRESET_COLUMNS = ("id", "name", "template", "created_at", "updated_at")
 _ARCHIVE_TARGET_COLUMNS = (

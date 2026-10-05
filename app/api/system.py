@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
-from app import backup_restore, help_page, kakao_catalog, repository
+from app import backup_restore, help_page, kakao_catalog, kakao_records, repository
 from app import scheduler as scheduler_mod
 from app.config import get_settings
 
@@ -49,6 +49,8 @@ async def restore_backup(data: dict, request: Request):
         # write_transaction이 이미 롤백했으므로 DB는 이전 상태 그대로 안전하다.
         raise HTTPException(status_code=400, detail=f"백업 파일 형식이 올바르지 않아 복원하지 못했습니다: {e}")
 
+    # 예전 백업에는 받은 회차 기록이 없다 — 복원한 폴더가 있으면 그 폴더와 아카이빙 이력으로 만든다(없으면 첫 자동 다운로드 때)
+    await asyncio.to_thread(kakao_records.backfill_and_log, get_settings())
     scheduler = getattr(request.app.state, "scheduler", None)
     if scheduler is not None:
         await asyncio.to_thread(scheduler_mod.reschedule_all, scheduler)

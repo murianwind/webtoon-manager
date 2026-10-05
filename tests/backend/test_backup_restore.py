@@ -15,7 +15,8 @@ import app.main as m
 ST = get_settings()
 TABLES = ("webtoons", "settings", "watched_authors", "watched_tags", "kakao_seen_titles", "kakao_webtoons", "filename_template_presets",
           "archive_targets", "archive_history", "episode_history", "archive_pending_finish")
-SECRET = {"discord_webhook_url": "https://discord.com/api/webhooks/1/SECRET-HOOK", "discord_bot_token": "BOT-TOKEN-ABC", "discord_notify_channel_id": "999"}
+# 비밀값은 백업 글자 어디에도 없어야 하므로, 시각/숫자와 우연히 겹칠 수 없는 고유한 값을 쓴다(짧은 숫자는 가끔 겹쳐서 실패했다)
+SECRET = {"discord_webhook_url": "https://discord.com/api/webhooks/1/SECRET-HOOK", "discord_bot_token": "BOT-TOKEN-ABC", "discord_notify_channel_id": "CHANNEL-ID-SECRET-7731"}
 
 def wipe_everything():                                   # 완전히 새 컨테이너(빈 데이터 볼륨)처럼
     with db.write_transaction() as cx:

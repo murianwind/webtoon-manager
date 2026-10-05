@@ -7,6 +7,7 @@ RedactingFilter를 전역 로깅에 건다 (요구사항: 민감 정보 마스�
 매 로그 라인마다 discord_config에서 현재 값을 다시 조회해서 마스킹한다.
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -18,7 +19,8 @@ from starlette.types import Scope
 from app.api.routes import router as api_router
 from app.discord_bot import start_bot, stop_bot
 from app.log_redaction import RedactingFilter
-from app import kakao_catalog, repository
+from app import kakao_catalog, kakao_records, repository
+from app.config import get_settings
 from app.scheduler import create_scheduler
 from app.tracker import ensure_default_tags_seeded
 
@@ -39,6 +41,12 @@ async def lifespan(app: FastAPI):
     # rclone 최신화는 이제 컨테이너 시작 시점이 아니라, 아카이빙 잡이 실행될 때마다
     # 확인한다(app/rclone_updater.py) — "컨테이너를 자주 재시작 안 하니 시작 시점
     # 확인은 사실상 이미지 빌드 시점 고정과 다를 게 없다"는 지적을 반영해 변경.
+    # 받은 회차 기록이 없는 카카오 작품은 폴더와 아카이빙 이력으로 한 번 만들어 둔다 — 스케줄이 돌기 전에(아카이빙이 먼저 폴더를 비우기 전에) 끝낸다.
+    # 실패해도 시작을 막지 않는다(첫 자동 다운로드 때 같은 방식으로 만든다).
+    try:
+        await asyncio.to_thread(kakao_records.backfill_and_log, get_settings())
+    except Exception:
+        logging.getLogger(__name__).exception("받은 회차 기록 만들기 실패(건너뜀)")
     scheduler = create_scheduler()
     scheduler.start()
     app.state.scheduler = scheduler

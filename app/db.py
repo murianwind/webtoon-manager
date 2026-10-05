@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS kakao_webtoons (
     is_finished INTEGER NOT NULL DEFAULT 0,      -- 완결이고 받을 회차를 다 받음(완결 확인 알림 대상)
     finish_notified INTEGER NOT NULL DEFAULT 0,  -- 완결 확인 디스코드 메시지를 보냄
     finish_ack INTEGER NOT NULL DEFAULT 0,       -- "알람 제외"를 누름(구독은 유지)
+    downloaded_numbers TEXT,                     -- JSON 배열: 이 앱이 받았거나 폴더에서 확인한 회차 번호(아카이빙으로 파일이 옮겨져도 남는다). NULL = 기록 없음
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -185,6 +186,7 @@ _MIGRATIONS = [
     ("kakao_webtoons", "is_finished", "ALTER TABLE kakao_webtoons ADD COLUMN is_finished INTEGER NOT NULL DEFAULT 0"),
     ("kakao_webtoons", "finish_notified", "ALTER TABLE kakao_webtoons ADD COLUMN finish_notified INTEGER NOT NULL DEFAULT 0"),
     ("kakao_webtoons", "finish_ack", "ALTER TABLE kakao_webtoons ADD COLUMN finish_ack INTEGER NOT NULL DEFAULT 0"),
+    ("kakao_webtoons", "downloaded_numbers", "ALTER TABLE kakao_webtoons ADD COLUMN downloaded_numbers TEXT"),
     ("episode_history", "platform", "ALTER TABLE episode_history ADD COLUMN platform TEXT NOT NULL DEFAULT 'naver'"),
     ("archive_targets", "display_name", "ALTER TABLE archive_targets ADD COLUMN display_name TEXT NOT NULL DEFAULT ''"),
     ("archive_targets", "filename_template_preset_id", "ALTER TABLE archive_targets ADD COLUMN filename_template_preset_id INTEGER"),

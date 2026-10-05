@@ -174,7 +174,8 @@ function kakaoManualSummaryHtml(a) {
   else if (a.marker && a.marker.resolved_number !== a.marker.number) {
     lines.push(`파일의 번호(${a.marker.number})가 사이트와 달라서 제목으로 찾은 ${a.marker.resolved_number}번 이후부터 받습니다.`);
   }
-  const counts = [`이미 받음 ${a.downloaded_count}개`, `받을 회차 ${a.to_download_count}개`, `잠겨서 대기 ${a.locked_count}개`];
+  const archivedNote = a.archived_count > 0 ? `(그중 보관 폴더로 옮긴 ${a.archived_count}개)` : "";
+  const counts = [`이미 받음 ${a.downloaded_count}개${archivedNote}`, `받을 회차 ${a.to_download_count}개`, `잠겨서 대기 ${a.locked_count}개`];
   if (a.before_start_count > 0) counts.push(`시작 지점 이전 ${a.before_start_count}개`);
   lines.push(counts.join(" · "));
   // 사이트가 말하는 전체 회차 수(동영상으로 뺀 것 포함)보다 가져온 회차가 적으면, 목록에서 회차가 빠졌을 수 있다고 알려 준다
@@ -202,8 +203,9 @@ function renderKakaoManualTable() {
   document.getElementById("btn-kakao-manual-select-missing").classList.toggle("hidden", !missingDiffers);
   for (const e of a.episodes) {
     const [badgeClass, badgeLabel] = KAKAO_STATE_BADGE[e.state] || ["kp-locked", e.state];
+    // 이미 받음: 폴더에 파일이 있거나, 받은 회차 기록에는 있는데 아카이빙으로 보관 폴더에 옮겨진 회차(구분해서 표시)
     const progress = e.downloaded
-      ? '<span class="kp-badge kp-done">이미받음</span>'
+      ? '<span class="kp-badge kp-done">이미받음</span>' + (e.archived ? ' <span class="kp-archived">보관 폴더로 옮김</span>' : "")
       : e.before_start
         ? '<span class="kp-before">이전 회차</span>'
         : '<span class="kp-wait">대기</span>';
