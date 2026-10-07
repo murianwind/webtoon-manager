@@ -61,6 +61,7 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - 기다무 지원 여부는 이용권 응답이 아니라 작품 정보의 `is_waitfree`로 판단합니다(이용권 응답은 기다무가 없는 작품에서도 "사용 중"으로 나옵니다). 충전 주기는 `charged_period_by_minute`(분)입니다.
 - 자동 다운로드는 받을 수 있는 회차를 다 받은 뒤 첫 잠긴 회차 하나를 기다무로 엽니다. 최신 회차처럼 `waitfree_blocked`인 회차는 건드리지 않습니다.
 - **대여권 필요 알림**: `RunResult.ticket_needed`가 "받을 회차를 다 받았는데 남은 첫 잠긴 회차(기다무로 막 연 회차는 건너뜀)가 기다무로 열 수 없는 회차"인지 판정합니다(기다무 없는 작품이거나 `waitfree_blocked`). 숨김/"N일 후 무료" 회차, 오류/실패, 받을 회차가 남은 경우는 대상이 아닙니다. `scheduler._notify_kakao_ticket_needed`가 웹훅으로 보내고, 알린 회차 번호를 `kakao_webtoons.ticket_notified_no`에 기록해 같은 회차는 다시 알리지 않습니다. `send_webhook_notification`은 전송 성공 여부를 돌려주며, 웹훅이 없거나 실패하면 기록하지 않아 다음 실행에서 다시 시도합니다.
+- **"더 이상 받을 회차 없음" 알림**: `RunResult.caught_up_episode`가 "연재작(`finished`가 아님)이고 `nothing_left`일 때 마지막 회차"를 돌려줍니다(완결작은 기존 완결 확인 알림이 맡음). `scheduler._notify_kakao_caught_up`이 보내고 마지막 회차 번호를 `kakao_webtoons.caught_up_notified_no`에 기록해 같은 회차는 다시 알리지 않습니다. 기록이 NULL인데 이번에 받은 회차가 없으면(이미 따라잡은 작품을 처음 확인) 알리지 않고 기준만 기록합니다 — 이 기능을 켠 첫 실행에 연재작 전부에 알림이 가는 것을 막습니다. 대여권 필요 알림과는 조건이 겹치지 않습니다(이쪽은 잠긴 회차가 없을 때만).
 
 **로그인 쿠키**
 - 필수 쿠키: `_kau`, `_kpwtkn`, `_T_ANO`, `_kahai`, `_kawlt`, `_kpdid`(`_karmt`는 있으면 같이 씀). 암호화해서 저장하고 백업에는 포함하지 않습니다. 로그인이 풀리거나 만료가 5일 안으로 다가오면 하루 한 번 디스코드로 알립니다.

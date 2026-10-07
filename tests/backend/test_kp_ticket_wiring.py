@@ -1,4 +1,4 @@
-"""자동 다운로드 한 번(_download_kakao_subscriptions)에서 실제로 "대여권 충전이 필요합니다" 알림이 가고, 다음 실행에서는 다시 안 가는지."""
+"""자동 다운로드 한 번(_download_kakao_subscriptions)에서 실제로 "대여권 충전이 필요합니다" / "더 이상 받을 회차가 없습니다" 알림이 가고, 다음 실행에서는 다시 안 가는지."""
 import asyncio, json, tempfile, time
 from http.cookies import SimpleCookie
 from pathlib import Path
@@ -55,24 +55,28 @@ async def main():
     auth.save_cookies(auth.parse_cookie_export(json.dumps([{"domain": ".kakao.com", "name": n, "value": "v", "path": "/", "expirationDate": time.time() + 25 * 86400} for n in auth.REQUIRED_COOKIES])))
     discord_config.set_webhook_url("https://discord.com/api/webhooks/1/x")
     job_status.start("download")
-    for sid in (1, 2, 3):
+    for sid in (1, 2, 3, 4):
         repository.upsert_new_kakao_webtoon(sid, "작품", status=repository.STATUS_ACTIVE)
     ITEMS.update({
         1: (True, [(1, "1화", True, False), (2, "2화", False, True)]),    # 기다무 작품인데 다음(최신) 회차는 기다무로 못 엶 → 알림
         2: (False, [(1, "1화", True, False), (2, "2화", False, False)]),  # 기다무 없는 작품, 다음 회차 잠김 → 알림
         3: (True, [(1, "1화", True, False), (2, "2화", False, False)]),   # 기다무로 열 수 있는 회차(충전 대기) → 알림 없음
+        4: (True, [(1, "1화", True, False), (2, "2화", True, False)]),    # 연재작을 이번에 최신 회차까지 다 받음 → "더 이상 받을 회차 없음" 알림
     })
 
     # Scenario 1: 한 번 돌리면 해당하는 작품만 알림이 간다
     await scheduler._download_kakao_subscriptions(settings, [])
-    assert len(sent) == 2 and all(m == "[작품] 다음 회차 (2번 '2화')부터는 대여권 충전이 필요합니다." for m in sent), sent
+    ticket_msgs = [m for m in sent if "대여권" in m]; caught_msgs = [m for m in sent if "더 이상" in m]
+    assert len(sent) == 3 and len(ticket_msgs) == 2 and all(m == "[작품] 다음 회차 (2번 '2화')부터는 대여권 충전이 필요합니다." for m in ticket_msgs), sent
+    assert caught_msgs == ["[작품] 더 이상 받을 회차가 없습니다. (마지막 2번 '2화')"], caught_msgs
+    assert repository.get_kakao_webtoon(4)["caught_up_notified_no"] == 2
     assert repository.get_kakao_webtoon(1)["ticket_notified_no"] == 2 and repository.get_kakao_webtoon(2)["ticket_notified_no"] == 2
     assert repository.get_kakao_webtoon(3)["ticket_notified_no"] is None
-    print("1) 자동 다운로드에서 알림 OK")
+    print("1) 자동 다운로드에서 알림 OK (대여권 필요 2건 + 다 받음 1건)")
 
     # Scenario 2: 다음 실행에서는 같은 회차를 다시 알리지 않는다
     await scheduler._download_kakao_subscriptions(settings, [])
-    assert len(sent) == 2, sent
+    assert len(sent) == 3, sent
     print("2) 중복 알림 없음 OK")
 
 asyncio.run(main())

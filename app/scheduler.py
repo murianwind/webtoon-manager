@@ -278,6 +278,23 @@ async def _notify_kakao_ticket_needed(session, settings, webtoon: dict, result) 
         job_status.log_line("download", f"[{webtoon['title']}] 대여권 필요 알림 전송 ({needed.number}번 회차)")
 
 
+async def _notify_kakao_caught_up(session, settings, webtoon: dict, result) -> None:
+    """연재작을 최신 회차까지 다 받아서 더 받을 회차가 없으면 디스코드로 알린다. 같은 마지막 회차는 한 번만 알린다.
+    이미 따라잡은 채로 처음 확인되는 작품(이번에 받은 회차가 없고 기록도 없음)은 알리지 않고 기준만 기록한다 — 안 그러면 이 기능을 켠 첫 실행에
+    구독 중인 연재작 전부에 알림이 간다. 웹훅이 없거나 전송이 실패하면 기록하지 않아 다음 실행 때 다시 시도한다."""
+    last = result.caught_up_episode
+    notified = webtoon.get("caught_up_notified_no")
+    if last is None or notified == last.number:
+        return
+    if notified is None and not result.downloaded:
+        repository.set_kakao_caught_up_notified(webtoon["title_id"], last.number)
+        return
+    message = f"[{result.title or webtoon['title']}] 더 이상 받을 회차가 없습니다. (마지막 {last.number}번 '{last.subtitle}')"
+    if await discord_notify.send_webhook_notification(session, settings, message):
+        repository.set_kakao_caught_up_notified(webtoon["title_id"], last.number)
+        job_status.log_line("download", f"[{webtoon['title']}] 더 이상 받을 회차 없음 알림 전송 (마지막 {last.number}번)")
+
+
 async def _download_kakao_subscriptions(settings, failures: list[dict]) -> None:
     """구독 중인 카카오페이지 작품을 폴더 규칙(폴더 없음 → 처음부터 / 파일 여러 개 → 누락 회차 / 파일 1개 → 그 이후)
     으로 받는다(이미 받은 회차는 다시 받지 않는다). 다운로드 스케줄의 대상에 카카오페이지가 들어 있을 때만 불리고,
@@ -312,6 +329,7 @@ async def _download_kakao_subscriptions(settings, failures: list[dict]) -> None:
                 if result.error is None:
                     repository.set_kakao_finished(webtoon["title_id"], result.finished and result.nothing_left)
                 await _notify_kakao_ticket_needed(session, settings, webtoon, result)
+                await _notify_kakao_caught_up(session, settings, webtoon, result)
                 await asyncio.sleep(settings.delay_seconds)
         await _notify_kakao_newly_finished()
 

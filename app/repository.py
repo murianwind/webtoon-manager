@@ -413,7 +413,7 @@ def _row_to_kakao_webtoon(row) -> dict:
         "author_summary": row["author_summary"], "writer_names": json.loads(row["writer_names"] or "[]"), "origin_names": json.loads(row["origin_names"] or "[]"),
         "is_finished": bool(row["is_finished"]),
         "finish_notified": bool(row["finish_notified"]), "finish_ack": bool(row["finish_ack"]),
-        "ticket_notified_no": row["ticket_notified_no"],
+        "ticket_notified_no": row["ticket_notified_no"], "caught_up_notified_no": row["caught_up_notified_no"],
     }
 
 
@@ -504,6 +504,12 @@ def set_kakao_ticket_notified(title_id: int, number: int) -> None:
     """"대여권 충전이 필요합니다" 알림을 보낸 회차 번호를 기록한다(같은 회차는 다시 알리지 않으려고)."""
     with write_transaction() as conn:
         conn.execute("UPDATE kakao_webtoons SET ticket_notified_no = ?, updated_at = ? WHERE title_id = ?", (number, _now(), title_id))
+
+
+def set_kakao_caught_up_notified(title_id: int, number: int) -> None:
+    """"더 이상 받을 회차가 없습니다" 알림의 기준이 되는 마지막 회차 번호를 기록한다(알림을 보낸 때와, 이미 따라잡은 작품을 처음 확인했을 때)."""
+    with write_transaction() as conn:
+        conn.execute("UPDATE kakao_webtoons SET caught_up_notified_no = ?, updated_at = ? WHERE title_id = ?", (number, _now(), title_id))
 
 
 def acknowledge_kakao_finish(title_id: int) -> None:
@@ -1157,7 +1163,7 @@ _WATCHED_TAG_COLUMNS = ("tag_id", "tag_name", "enabled", "created_at", "updated_
 _KAKAO_SEEN_TITLE_COLUMNS = ("author_name", "title_id", "title_name", "seen_at")
 _KAKAO_WEBTOON_COLUMNS = (
     "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "author_summary", "writer_names", "origin_names",
-    "is_finished", "finish_notified", "finish_ack", "downloaded_numbers", "ticket_notified_no", "created_at", "updated_at",
+    "is_finished", "finish_notified", "finish_ack", "downloaded_numbers", "ticket_notified_no", "caught_up_notified_no", "created_at", "updated_at",
 )
 _FILENAME_TEMPLATE_PRESET_COLUMNS = ("id", "name", "template", "created_at", "updated_at")
 _ARCHIVE_TARGET_COLUMNS = (

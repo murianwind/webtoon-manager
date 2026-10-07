@@ -163,6 +163,14 @@ class RunResult:
     waitfree_supported: bool = True  # 이 작품에 기다무가 있음(작품 정보의 is_waitfree)
 
     @property
+    def caught_up_episode(self) -> "Episode | None":
+        """연재 중인 작품을 최신 회차까지 다 받아서 더 받을 회차가 없을 때, 그 마지막 회차(아니면 None). 완결작은 해당하지 않는다 —
+        완결 확인 알림이 따로 있다."""
+        if self.finished or not self.nothing_left or not self.plan.rows:
+            return None
+        return max((row.episode for row in self.plan.rows), key=lambda episode: episode.number)
+
+    @property
     def ticket_needed(self) -> "Episode | None":
         """받을 회차를 다 받았는데 다음 회차가 대여권이 필요해서 더 못 받는 경우, 그 다음 회차(없으면 None). 기다무로 열 수 있는 회차(충전 대기)와
         "N일 후 무료"로 열릴 회차는 기다리면 자동으로 이어지므로 해당하지 않는다. 오류/실패가 있거나 받을 회차가 남았으면 아직 판단하지 않는다."""
