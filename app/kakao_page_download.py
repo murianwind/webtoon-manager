@@ -160,6 +160,24 @@ class RunResult:
     title: str = ""  # 실제로 쓴 폴더 제목(카카오페이지에 등록된 작품 제목)
     ticket_used: int | None = None  # 기다무로 열어서 받은 회차 번호
     finished: bool = False  # 작품이 완결로 표시돼 있음(작품 정보의 on_issue == "N")
+    waitfree_supported: bool = True  # 이 작품에 기다무가 있음(작품 정보의 is_waitfree)
+
+    @property
+    def ticket_needed(self) -> "Episode | None":
+        """받을 회차를 다 받았는데 다음 회차가 대여권이 필요해서 더 못 받는 경우, 그 다음 회차(없으면 None). 기다무로 열 수 있는 회차(충전 대기)와
+        "N일 후 무료"로 열릴 회차는 기다리면 자동으로 이어지므로 해당하지 않는다. 오류/실패가 있거나 받을 회차가 남았으면 아직 판단하지 않는다."""
+        if self.error is not None or self.failed is not None:
+            return None
+        opened = 1 if self.ticket_used is not None else 0  # 기다무로 막 열어 받은 회차는 잠긴 회차 중 가장 앞의 것이다
+        if len(self.downloaded) - opened < len(self.plan.to_download):
+            return None
+        remaining = self.plan.locked[opened:]
+        if not remaining:
+            return None
+        first = remaining[0]
+        if first.hidden or free_date_of(first):
+            return None
+        return first if (not self.waitfree_supported or first.waitfree_blocked) else None
 
     @property
     def nothing_left(self) -> bool:
@@ -678,7 +696,10 @@ async def run_download(
         )
     if downloaded:
         await write_series_metadata(series_item, series_id, folder, on_progress, await client.fetch_about(series_id))
-    return RunResult(downloaded, items, failed, plan, title=folder_title, ticket_used=ticket_used, finished=series_item.get("on_issue") == "N")
+    return RunResult(
+        downloaded, items, failed, plan, title=folder_title, ticket_used=ticket_used, finished=series_item.get("on_issue") == "N",
+        waitfree_supported=waitfree_supported(series_item),
+    )
 
 
 async def _download_first_locked_with_waitfree(client, series_id, episode, folder, downloaded, items, on_progress) -> tuple[int | None, int | None]:
