@@ -11,6 +11,7 @@ from pydantic import BaseModel, field_validator
 from app import (
     manual_download,
     naver_api,
+    repository,
 )
 from app.config import get_settings
 
@@ -31,6 +32,8 @@ class ManualAnalyzeEpisodeOut(BaseModel):
 class ManualAnalyzeOut(BaseModel):
     title_id: str
     title: str
+    thumbnail_url: str = ""  # 화면에서 구독할 때 같이 보낸다
+    subscription: str | None = None  # 이 프로그램의 구독 상태(active 등, 등록 안 했으면 None)
     episodes: list[ManualAnalyzeEpisodeOut]
 
 
@@ -54,8 +57,13 @@ async def manual_download_search_title(query: str):
     settings = get_settings()
     async with aiohttp.ClientSession() as session:
         results = await naver_api.search_webtoons(session, query.strip(), settings.request_timeout_seconds)
+    # 한 번에 읽어서 카드마다 DB를 따로 부르지 않는다 — 카드가 이미 구독한 작품을 "구독"으로 보여주지 않게
+    status_by_id = {wt.title_id: wt.status for wt in await asyncio.to_thread(repository.list_all)}
     return [
-        {"title_id": item.title_id, "title": item.title_name, "thumbnail_url": item.thumbnail_url}
+        {
+            "title_id": item.title_id, "title": item.title_name, "thumbnail_url": item.thumbnail_url,
+            "subscription": status_by_id.get(item.title_id),
+        }
         for item in results[:10]
     ]
 
@@ -68,9 +76,12 @@ async def manual_download_analyze(title_id: str):
     info, rows = await manual_download.analyze(title_id, settings)
     if info is None:
         raise HTTPException(status_code=400, detail="해당 titleId 정보를 네이버에서 찾지 못했습니다.")
+    tracked = await asyncio.to_thread(repository.get, title_id)
     return ManualAnalyzeOut(
         title_id=title_id,
         title=info.title_name,
+        thumbnail_url=info.thumbnail_url,
+        subscription=tracked.status if tracked else None,
         episodes=[
             ManualAnalyzeEpisodeOut(
                 episode_no=r.episode_no, subtitle=r.subtitle, owned=r.owned, is_locked=r.is_locked

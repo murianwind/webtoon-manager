@@ -17,6 +17,26 @@ function manualCardTitleHtml(url, title) {
   return `<div class="webtoon-card-title"><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(title)}</a></div>`;
 }
 
+// 구독 버튼 모양 — 구독 중이면 "구독 중"(누를 수 없음), 아니면 "구독". 구독만 있고 해제는 전체목록에서 한다
+function applySubscribeButton(btn, subscribed) {
+  btn.textContent = subscribed ? "구독 중" : "구독";
+  btn.disabled = subscribed;
+}
+
+// 검색 결과 카드의 구독 버튼 — 누르면 url로 구독 요청을 보내고 성공하면 "구독 중"이 된다(네이버/카카오 공통)
+function makeManualCardSubscribeButton(subscribed, url, payload) {
+  const btn = makeButton("", async () => {
+    try {
+      await apiCall(url, { method: "POST", body: JSON.stringify(payload) });
+      applySubscribeButton(btn, true);
+    } catch (e) {
+      alert(e.message);
+    }
+  });
+  applySubscribeButton(btn, subscribed);
+  return btn;
+}
+
 // 분석 결과 제목 옆 "작품 페이지" 버튼의 주소를 맞추고 보이게 한다
 function showManualPageLink(linkId, url) {
   const link = document.getElementById(linkId);
@@ -86,21 +106,11 @@ async function kakaoManualStart(query) {
     `;
     const cardActions = card.querySelector(".webtoon-card-actions");
     cardActions.appendChild(makeButton("이 작품 분석", () => runKakaoManualAnalyze(m.title_id)));
-    const alreadySubscribed = m.subscription === "active";
-    const subscribeBtn = makeButton(alreadySubscribed ? "구독 중" : "구독", async () => {
-      try {
-        await apiCall(`/api/kakao-webtoons/${m.title_id}/subscribe`, {
-          method: "POST",
-          body: JSON.stringify({ title: m.title, thumbnail_url: m.thumbnail_url || "", author_summary: m.authors || "" }),
-        });
-        subscribeBtn.textContent = "구독 중";
-        subscribeBtn.disabled = true;
-      } catch (e) {
-        alert(e.message);
-      }
-    });
-    subscribeBtn.disabled = alreadySubscribed; // 이미 구독 중이면 누를 수 없다(해제는 전체목록에서)
-    cardActions.appendChild(subscribeBtn);
+    cardActions.appendChild(makeManualCardSubscribeButton(
+      m.subscription === "active",
+      `/api/kakao-webtoons/${m.title_id}/subscribe`,
+      { title: m.title, thumbnail_url: m.thumbnail_url || "", author_summary: m.authors || "" }
+    ));
     resultsEl.appendChild(card);
   }
   resultsEl.classList.remove("hidden");
@@ -149,9 +159,7 @@ function refreshKakaoManualSubscribeButton() {
   const btn = document.getElementById("btn-kakao-manual-subscribe");
   btn.classList.toggle("hidden", !a);
   if (!a) return;
-  const subscribed = a.subscription === "active";
-  btn.textContent = subscribed ? "구독 중" : "구독";
-  btn.disabled = subscribed;
+  applySubscribeButton(btn, a.subscription === "active");
 }
 
 document.getElementById("btn-kakao-manual-subscribe").addEventListener("click", async () => {
@@ -323,9 +331,13 @@ document.getElementById("btn-manual-analyze").addEventListener("click", async ()
         <div class="webtoon-card-body">${manualCardTitleHtml(naverUrl(m.title_id), m.title)}</div>
         <div class="webtoon-card-actions"></div>
       `;
-      card.querySelector(".webtoon-card-actions").appendChild(
-        makeButton("이 작품 분석", () => runManualAnalyze(m.title_id))
-      );
+      const cardActions = card.querySelector(".webtoon-card-actions");
+      cardActions.appendChild(makeButton("이 작품 분석", () => runManualAnalyze(m.title_id)));
+      cardActions.appendChild(makeManualCardSubscribeButton(
+        m.subscription === "active",
+        `/api/naver-list/${m.title_id}/subscribe`,
+        { title: m.title, thumbnail_url: m.thumbnail_url || "" }
+      ));
       resultsEl.appendChild(card);
     }
     resultsEl.classList.remove("hidden");
@@ -344,10 +356,32 @@ async function runManualAnalyze(titleId) {
   }
 }
 
+function refreshManualSubscribeButton() {
+  const btn = document.getElementById("btn-manual-subscribe");
+  btn.classList.remove("hidden");
+  applySubscribeButton(btn, manualAnalyzeResult.subscription === "active");
+}
+
+document.getElementById("btn-manual-subscribe").addEventListener("click", async () => {
+  const a = manualAnalyzeResult;
+  if (!a || a.subscription === "active") return;
+  try {
+    await apiCall(`/api/naver-list/${a.title_id}/subscribe`, {
+      method: "POST",
+      body: JSON.stringify({ title: a.title, thumbnail_url: a.thumbnail_url || "" }),
+    });
+    a.subscription = "active";
+    refreshManualSubscribeButton();
+  } catch (e) {
+    alert(e.message);
+  }
+});
+
 function renderManualTable() {
   document.getElementById("manual-result").classList.remove("hidden");
   document.getElementById("manual-title-name").textContent = manualAnalyzeResult.title;
   showManualPageLink("link-manual-page", naverUrl(manualAnalyzeResult.title_id));
+  refreshManualSubscribeButton();
 
   const tbody = document.getElementById("manual-tbody");
   tbody.innerHTML = "";
