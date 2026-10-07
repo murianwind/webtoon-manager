@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
 from app import (
+    daily_plus,
     manual_download,
     naver_api,
     repository,
@@ -57,6 +58,8 @@ async def manual_download_search_title(query: str):
     settings = get_settings()
     async with aiohttp.ClientSession() as session:
         results = await naver_api.search_webtoons(session, query.strip(), settings.request_timeout_seconds)
+        hidden = await daily_plus.current_ids(settings.request_timeout_seconds, session)
+    results = [item for item in results if item.title_id not in hidden]  # 매일+ 작품은 검색되지 않는다
     # 한 번에 읽어서 카드마다 DB를 따로 부르지 않는다 — 카드가 이미 구독한 작품을 "구독"으로 보여주지 않게
     status_by_id = {wt.title_id: wt.status for wt in await asyncio.to_thread(repository.list_all)}
     return [

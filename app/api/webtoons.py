@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, field_validator
 
 from app import (
+    daily_plus,
     naver_api,
     repository,
     tracker,
@@ -109,6 +110,8 @@ async def list_webtoons(status: str | None = None):
         if status
         else await asyncio.to_thread(repository.list_all)
     )
+    hidden = await daily_plus.current_ids(get_settings().request_timeout_seconds)
+    rows = [r for r in rows if r.title_id not in hidden]  # 매일+ 작품은 목록에 보이지 않는다
     if status == repository.STATUS_UNSUBSCRIBED:
         # "구독해제" 탭엔 실제로 구독했다가 해제한 것만 있어야 한다 — 구독한 적 없는
         # 작품은 이 상태를 거칠 방법이 이제 없지만(목록으로가 대신 전용 상태로 보냄),
@@ -231,8 +234,10 @@ async def browse_naver_list():
     try:
         async with aiohttp.ClientSession() as session:
             items = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
+            hidden = await daily_plus.current_ids(settings.request_timeout_seconds, session)
     except naver_api.NaverApiError as e:
         raise HTTPException(status_code=502, detail=f"네이버 웹툰 목록을 불러오지 못했습니다: {e}")
+    items = [item for item in items if item.title_id not in hidden]  # 매일+ 작품은 목록에 보이지 않는다(구독 중이어도)
 
     existing = await asyncio.to_thread(repository.list_all)
     existing_by_id = {w.title_id: w for w in existing}
@@ -270,7 +275,7 @@ async def browse_naver_list():
     # 돌면 이미 추적 중인(구독중/구독해제) 웹툰이 화면에서 통째로 사라질 수 있다 —
     # DB에만 남아있는 건 우리가 갖고 있는 정보로 채워서라도 계속 보이게 한다.
     for wt in existing:
-        if wt.title_id in seen_ids or wt.status == repository.STATUS_EXCLUDED:
+        if wt.title_id in seen_ids or wt.status == repository.STATUS_EXCLUDED or wt.title_id in hidden:
             continue
         result.append(
             {

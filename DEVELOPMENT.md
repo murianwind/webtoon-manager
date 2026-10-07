@@ -116,3 +116,10 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - 신작 스캔(discovery job)의 한 단계로 `new_episode_watch.run`이 돕니다. 네이버는 구독해제(`status=unsubscribed`) 작품마다 `naver_api.fetch_latest_episode`(목록 1페이지)로 최신 회차 번호를, 카카오는 `KakaoPageClient.fetch_series_item`(회차 1개 요청)의 `on_sale_count`(회차 수)를 봅니다. 제외됨과 구독 중 작품은 보지 않습니다.
 - 판정은 `decide(seen, latest)` 한 곳: 기준이 없으면(NULL) 알리지 않고 기준만 기록, 값이 커졌을 때만 알림, 못 가져왔거나 그대로/줄었으면 아무것도 안 합니다. 기준은 `webtoons.new_episode_seen_no`와 `kakao_webtoons.new_episode_seen_no`에 둡니다.
 - 알림은 한 메시지로 묶어 `discord_notify.send_webhook_notification`으로 보내고, **전송에 성공했을 때만** 기준을 갱신합니다(웹훅이 없거나 실패하면 다음 스캔에서 다시). 카카오 쿠키가 없으면 카카오 쪽만 건너뜁니다.
+
+## 네이버 매일+ 웹툰 숨기기 (`app/daily_plus.py`)
+
+- 요일별 전체 목록 API와 통합검색 응답에는 매일+를 가리키는 값이 확인되지 않아서, **모바일 매일+ 페이지(`m.comic.naver.com/webtoon/weekday?week=dailyPlus`)의 본문 목록 링크**(`/webtoon/list?titleId=N&week=dailyPlus`)로 구분합니다(HAR 캡처로 확인). 같은 페이지의 "이달의 신작" 캐러셀 링크에는 `week`가 없어서 매일+가 아닙니다. 파싱 샘플은 `tests/fixtures/naver_daily_plus_sample.html`(캡처 발췌)입니다.
+- 모바일 UA로 하루에 한 번만 받아 `settings`(`naver_daily_plus_ids`)에 담습니다. 받기에 실패하거나 페이지 구조가 바뀌어 하나도 못 찾으면 예전 기록을 그대로 쓰고, 기록이 없으면 아무것도 숨기지 않습니다(일반 작품이 사라지는 사고 방지). 페이지가 바뀌어 매일+가 다시 보이면 이 정규식(`_LINK_RE`)부터 확인하세요.
+- 거르는 곳은 `GET /api/naver-list`(전체목록: 구독 중인 것과 DB에만 있는 장기휴재 작품 포함), `GET /api/webtoons`(구독해제/제외됨 탭), `GET /api/manual-download/search`(수동 다운로드 검색) 세 곳입니다. 화면과 검색만 숨기고 자동 다운로드, 구독 상태, 직접 titleId로 하는 분석은 건드리지 않습니다. 작가/태그 신작 스캔도 건드리지 않아서 거기서 추가된 매일+ 작품은 목록에만 안 보입니다.
+
