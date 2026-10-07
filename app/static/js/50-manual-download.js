@@ -12,6 +12,18 @@ document.getElementById("manual-query").addEventListener("keydown", (e) => {
   }
 });
 
+// 검색 결과 카드의 제목(누르면 작품 페이지가 새 탭으로 열린다)
+function manualCardTitleHtml(url, title) {
+  return `<div class="webtoon-card-title"><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(title)}</a></div>`;
+}
+
+// 분석 결과 제목 옆 "작품 페이지" 버튼의 주소를 맞추고 보이게 한다
+function showManualPageLink(linkId, url) {
+  const link = document.getElementById(linkId);
+  link.href = url;
+  link.classList.remove("hidden");
+}
+
 // ── 수동 다운로드: 카카오페이지 ───────────────────────────
 // 작품을 폴더 규칙으로 분석해서 회차 표(번호/제목/상태/대여 만료/진행)를 보여주고, 고른 회차를 받는다. 이미
 // 받은 회차는 표시만 되고, 직접 고르면 다시 받아 교체할 수 있다(자동 다운로드는 안 받은 회차만 받는다).
@@ -67,7 +79,7 @@ async function kakaoManualStart(query) {
     card.innerHTML = `
       ${m.thumbnail_url ? `<img src="${escapeHtml(m.thumbnail_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : '<div class="thumb-placeholder"></div>'}
       <div class="webtoon-card-body">
-        <div class="webtoon-card-title">${escapeHtml(m.title)}</div>
+        ${manualCardTitleHtml(kakaoContentUrl(m.title_id), m.title)}
         <div class="webtoon-card-meta">${escapeHtml([m.authors, m.status].filter(Boolean).join(" · "))}</div>
       </div>
       <div class="webtoon-card-actions"></div>
@@ -194,6 +206,7 @@ function renderKakaoManualTable() {
   document.getElementById("manual-result").classList.add("hidden");
   document.getElementById("kakao-manual-result").classList.remove("hidden");
   document.getElementById("kakao-manual-title").textContent = a.title;
+  showManualPageLink("link-kakao-manual-page", kakaoContentUrl(a.series_id));
   document.getElementById("kakao-manual-summary").innerHTML = kakaoManualSummaryHtml(a) + kakaoTicketsHtml(a.tickets);
   refreshKakaoManualSubscribeButton();
   const tbody = document.getElementById("kakao-manual-tbody");
@@ -307,7 +320,7 @@ document.getElementById("btn-manual-analyze").addEventListener("click", async ()
       card.className = "webtoon-card";
       card.innerHTML = `
         ${m.thumbnail_url ? `<img src="${escapeHtml(m.thumbnail_url)}" alt="" loading="lazy" />` : '<div class="thumb-placeholder"></div>'}
-        <div class="webtoon-card-body"><div class="webtoon-card-title">${escapeHtml(m.title)}</div></div>
+        <div class="webtoon-card-body">${manualCardTitleHtml(naverUrl(m.title_id), m.title)}</div>
         <div class="webtoon-card-actions"></div>
       `;
       card.querySelector(".webtoon-card-actions").appendChild(
@@ -334,6 +347,7 @@ async function runManualAnalyze(titleId) {
 function renderManualTable() {
   document.getElementById("manual-result").classList.remove("hidden");
   document.getElementById("manual-title-name").textContent = manualAnalyzeResult.title;
+  showManualPageLink("link-manual-page", naverUrl(manualAnalyzeResult.title_id));
 
   const tbody = document.getElementById("manual-tbody");
   tbody.innerHTML = "";

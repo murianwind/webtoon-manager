@@ -981,6 +981,9 @@ select {
 /* 카카오페이지 수동 다운로드 분석 표 */
 .manual-title-row { display: flex; align-items: center; gap: 12px; margin: 12px 0 6px; }
 .manual-title-row h3 { margin: 0; }
+/* 버튼처럼 보이는 링크(새 탭으로 작품 페이지를 연다) — 구독 버튼 옆에서 같은 높이로 보이게 한다 */
+.link-button { display: inline-block; background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 8px 14px; font-size: 13px; color: var(--text); text-decoration: none; }
+.link-button:hover { border-color: var(--accent); }
 .kakao-manual-summary { margin: 6px 0 12px; padding: 10px 12px; font-size: 13px; line-height: 1.7; background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
 .kakao-manual-tickets { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); }
 .kakao-manual-tickets b { font-weight: 700; }

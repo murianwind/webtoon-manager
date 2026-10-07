@@ -12,8 +12,8 @@
 - 로그인 확인: user/get_profile → result_code 0 이고 profile.uid가 있으면 로그인 상태.
 - **파일 앞의 번호는 "N화"가 아니라 회차 순서 번호다** — 프롤로그/예고편/후기도 번호를 하나씩 차지해서(예:
   `0003_프롤로그`, `0002_1화`) 번호와 화수의 차이가 작품마다 다르다. 번호는 사이트의 order_value를 따르고, 프롤로그
-  같은 이미지 회차도 받는다(숨김 처리된 회차 — "N일 후 무료"로 열릴 예정인 회차 — 는 목록에 잠금으로 남기고 받지는 않는다). **동영상(예: "동영상 트레일러")은 받을 수 없어서 목록에서 빼고,
-  그만큼 뒤 회차의 번호를 당긴다** — 예전 도구는 동영상에 번호를 주지 않았기 때문에, 그러지 않으면 같은 회차의
+  같은 이미지 회차도 받는다(숨김 처리된 회차 — "N일 후 무료"로 열릴 예정인 회차 — 는 목록에 잠금으로 남기고 받지는 않는다). **동영상(예: "동영상 트레일러")은 받을 수 없고 제목에 "체험판"이 있는 회차는 받지 않기로 해서 목록에서 빼고,
+  그만큼 뒤 회차의 번호를 당긴다** — 예전 도구는 이 회차들에 번호를 주지 않았기 때문에, 그러지 않으면 같은 회차의
   번호가 하나씩 어긋난다.
 - **기다무(RT05) 대여권**: ticket/my로 기다무를 쓸 수 있는지 보고(waitfree.charged_complete), ticket/ready_to_use가
   가리키는 대여권 종류가 RT05일 때만 ticket/use(product_id, ticket_type=RT05)로 열고, 이어서 viewer/data로 이미지를
@@ -67,6 +67,7 @@ TICKET_USE_URL = f"{_API}/v1/ticket/use"
 ABOUT_URL = f"{_API}/v1/content/about"
 WAITFREE_TICKET_TYPE = "RT05"  # 기다무 대여권 — 이 프로그램이 자동으로 쓰는 유일한 이용권 종류
 _IMAGE_SLIDE_TYPE = "SD03"  # 이미지 회차(그 밖의 종류는 동영상 등이라 받지 않는다)
+_TRIAL_TITLE_WORD = "체험판"  # 제목에 이 단어가 있는 회차는 받지 않는다
 
 _LIST_WINDOW_SIZE = 25
 _MAX_LIST_PAGES = 80  # 25 x 80 = 2000회차 — 이상 응답으로 끝없이 넘기는 걸 막는 안전 상한
@@ -333,6 +334,16 @@ def is_video_item(item: dict) -> bool:
     return "동영상" in (item.get("title") or "")
 
 
+def is_trial_item(item: dict) -> bool:
+    """제목에 "체험판"이 들어간 회차(맛보기용 회차)."""
+    return _TRIAL_TITLE_WORD in (item.get("title") or "")
+
+
+def is_excluded_item(item: dict) -> bool:
+    """받지 않고 목록에서 빼는 회차 — 동영상과 체험판. 둘 다 예전 도구가 번호를 주지 않았으므로 뒤 회차 번호를 당긴다."""
+    return is_video_item(item) or is_trial_item(item)
+
+
 def _parse_episode(item: dict, series_title: str, now_kst: datetime) -> Episode:
     title = item.get("title") or ""
     purchase = ((item.get("service_property") or {}).get("purchase_info")) or {}
@@ -420,7 +431,7 @@ class KakaoPageClient:
         now_kst = datetime.now(_KST).replace(tzinfo=None)
         series_item: dict = {}
         episodes: dict[int, Episode] = {}
-        video_orders: list[int] = []  # 동영상 회차의 순서 번호(뒤 회차의 번호를 그만큼 당기는 데 쓴다)
+        excluded_orders: list[int] = []  # 동영상/체험판 회차의 순서 번호(뒤 회차의 번호를 그만큼 당기는 데 쓴다)
         cursor, direction = 0, "NEXT"
         for _ in range(_MAX_LIST_PAGES):
             params = {
@@ -440,8 +451,8 @@ class KakaoPageClient:
                 product_id = item.get("product_id")
                 if product_id is None or product_id in episodes:
                     continue
-                if is_video_item(item):
-                    video_orders.append(int(item.get("order_value") or 0))
+                if is_excluded_item(item):
+                    excluded_orders.append(int(item.get("order_value") or 0))
                     episodes[product_id] = None  # 다시 세지 않게 표시만 해 둔다
                 else:
                     episodes[product_id] = _parse_episode(item, series_item.get("title", ""), now_kst)
@@ -450,10 +461,10 @@ class KakaoPageClient:
             if not result.get("has_next") or new_count == 0 or cursor is None:
                 break
             await asyncio.sleep(_PAGE_INTERVAL_SECONDS)
-        series_item["_excluded_video_count"] = len(video_orders)  # 동영상이라 목록에서 뺀 회차 수(분석 화면의 "사이트 회차 수" 비교용)
+        series_item["_excluded_video_count"] = len(excluded_orders)  # 동영상/체험판이라 목록에서 뺀 회차 수(분석 화면의 "사이트 회차 수" 비교용)
         images = [e for e in episodes.values() if e is not None and e.number > 0]
         for episode in images:
-            episode.number -= sum(1 for order in video_orders if order < episode.number)
+            episode.number -= sum(1 for order in excluded_orders if order < episode.number)
         return series_item, sorted(images, key=lambda e: e.number)
 
     async def ticket_info(self, series_id: int) -> TicketInfo | None:
