@@ -206,11 +206,11 @@ async def fetch_all_episodes(
     return episodes
 
 
-async def fetch_latest_episode_no(
+async def fetch_latest_episode(
     session: aiohttp.ClientSession, title_id: str, timeout_seconds: int, cookies: Optional[dict[str, str]] = None
-) -> Optional[int]:
-    """이 작품의 가장 최근(가장 큰 번호) 회차 번호만 가볍게 확인한다 — 목록 1페이지에는
-    최신 회차부터 나오므로, 전체 회차를 안 받아도 바로가기 URL을 만들 수 있다.
+) -> Optional[EpisodeInfo]:
+    """이 작품의 가장 최근(가장 큰 번호) 회차만 가볍게 확인한다 — 목록 1페이지에는
+    최신 회차부터 나오므로, 전체 회차를 안 받아도 바로가기 URL을 만들거나 새 회차를 알아챌 수 있다.
     성인 작품은 성인 인증 쿠키가 없으면 회차 목록이 비어서 오므로 cookies를 넘겨야 한다."""
     page_data = await _fetch_episode_list_page(session, title_id, 1, cookies or {}, timeout_seconds)
     if not page_data:
@@ -218,7 +218,16 @@ async def fetch_latest_episode_no(
     articles = page_data.get("articleList") or []
     if not articles:
         return None
-    return max(a.get("no", 0) for a in articles)
+    latest = max(articles, key=lambda a: a.get("no", 0))
+    return EpisodeInfo(episode_no=latest.get("no", 0), subtitle=latest.get("subtitle", ""), is_locked=bool(latest.get("thumbnailLock")))
+
+
+async def fetch_latest_episode_no(
+    session: aiohttp.ClientSession, title_id: str, timeout_seconds: int, cookies: Optional[dict[str, str]] = None
+) -> Optional[int]:
+    """가장 최근 회차의 번호만(없으면 None)."""
+    latest = await fetch_latest_episode(session, title_id, timeout_seconds, cookies)
+    return latest.episode_no if latest else None
 
 
 def free_episodes_only(episodes: list[EpisodeInfo]) -> list[EpisodeInfo]:

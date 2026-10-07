@@ -27,7 +27,7 @@
   <!-- 웹툰 전체목록 (네이버+카카오) -->
   <section id="page-naver-list" class="page">
     <div class="toolbar toolbar-sticky">
-      <input id="naver-list-search" type="text" placeholder="제목/저자로 검색" />
+      <input id="naver-list-search" type="text" class="clearable" placeholder="제목/저자로 검색" />
       <select id="naver-list-filter-status">
         <option value="all">전체</option>
         <option value="active">구독중만</option>
@@ -58,7 +58,7 @@
   <!-- 구독해제 -->
   <section id="page-unsubscribed" class="page hidden">
     <div class="toolbar toolbar-sticky">
-      <input id="unsubscribed-search" type="text" placeholder="제목/저자로 검색" />
+      <input id="unsubscribed-search" type="text" class="clearable" placeholder="제목/저자로 검색" />
       <select id="unsubscribed-tag-filter"><option value="">태그 전체</option></select>
       <select id="unsubscribed-badge-filter">
         <option value="">전체</option>
@@ -74,7 +74,7 @@
   <!-- 제외됨 -->
   <section id="page-excluded" class="page hidden">
     <div class="toolbar toolbar-sticky">
-      <input id="excluded-search" type="text" placeholder="제목/저자로 검색" />
+      <input id="excluded-search" type="text" class="clearable" placeholder="제목/저자로 검색" />
       <select id="excluded-tag-filter"><option value="">태그 전체</option></select>
       <select id="excluded-badge-filter">
         <option value="">전체</option>
@@ -94,7 +94,7 @@
         <option value="naver">네이버</option>
         <option value="kakao">카카오페이지</option>
       </select>
-      <input id="manual-query" type="text" placeholder="titleId 또는 웹툰 제목" />
+      <input id="manual-query" type="text" class="clearable" placeholder="titleId 또는 웹툰 제목" />
       <button id="btn-manual-analyze">분석</button>
     </div>
     <div id="manual-search-results" class="hidden webtoon-grid small"></div>
@@ -170,7 +170,7 @@
         </div>
         <div class="chip-column">
           <h4>사용 가능</h4>
-          <input id="author-candidate-filter" type="text" class="chip-filter" placeholder="이름으로 좁혀보기" />
+          <input id="author-candidate-filter" type="text" class="chip-filter clearable" placeholder="이름으로 좁혀보기" />
           <div id="author-all-chips" class="chip-container"></div>
         </div>
       </div>
@@ -194,7 +194,7 @@
         </div>
         <div class="chip-column">
           <h4>사용 가능</h4>
-          <input id="tag-catalog-search" type="text" class="chip-filter" placeholder="이름으로 좁혀보기" />
+          <input id="tag-catalog-search" type="text" class="chip-filter clearable" placeholder="이름으로 좁혀보기" />
           <div id="tag-all-chips" class="chip-container"></div>
         </div>
       </div>
@@ -212,7 +212,7 @@
         </div>
         <div class="chip-column">
           <h4>사용 가능</h4>
-          <input id="kakao-author-candidate-filter" type="text" class="chip-filter" placeholder="이름으로 좁혀보기" />
+          <input id="kakao-author-candidate-filter" type="text" class="chip-filter clearable" placeholder="이름으로 좁혀보기" />
           <div id="kakao-author-all-chips" class="chip-container"><p class="chip-empty-message">불러오는 중...</p></div>
         </div>
       </div>
@@ -224,7 +224,7 @@
     <div class="settings-card">
       <h2>다운로드 이력</h2>
       <div class="toolbar">
-        <input id="episode-history-search" type="text" placeholder="작품/회차 제목으로 검색" />
+        <input id="episode-history-search" type="text" class="clearable" placeholder="작품/회차 제목으로 검색" />
         <select id="episode-history-status">
           <option value="">전체</option>
           <option value="success">성공</option>

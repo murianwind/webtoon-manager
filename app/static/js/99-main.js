@@ -14,6 +14,7 @@ const pageLoaders = {
   help: loadHelpPage,
 };
 
+initClearableInputs();
 restoreNaverListPrefs();
 
 const savedTab = sessionStorage.getItem(ACTIVE_TAB_KEY);

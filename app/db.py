@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS webtoons (
     is_new INTEGER NOT NULL DEFAULT 0,            -- 신작 여부 (네이버 API의 'new' 필드)
     has_update INTEGER NOT NULL DEFAULT 0,        -- UP 여부 (네이버 API의 'up' 필드, 탭과 무관하게 그대로 표시)
     ever_subscribed INTEGER NOT NULL DEFAULT 0,   -- 실제로 "구독"을 거친 적이 있는지 (화면 표시용, 상태 전환 로직에는 안 쓰임)
+    new_episode_seen_no INTEGER,                  -- 구독해제 웹툰의 새 에피소드 알림용: 마지막으로 확인한 최신 회차 번호. NULL = 아직 기준 없음
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -88,6 +89,7 @@ CREATE TABLE IF NOT EXISTS kakao_webtoons (
     downloaded_numbers TEXT,                     -- JSON 배열: 이 앱이 받았거나 폴더에서 확인한 회차 번호(아카이빙으로 파일이 옮겨져도 남는다). NULL = 기록 없음
     ticket_notified_no INTEGER,                  -- "대여권 충전이 필요합니다" 디스코드 알림을 보낸 회차 번호(같은 회차는 다시 알리지 않는다). NULL = 알린 적 없음
     caught_up_notified_no INTEGER,               -- "더 이상 받을 회차가 없습니다" 알림을 보낸 마지막 회차 번호(같은 마지막 회차는 다시 알리지 않는다). NULL = 아직 기준 없음
+    new_episode_seen_no INTEGER,                 -- 구독해제 웹툰의 새 에피소드 알림용: 마지막으로 확인한 작품의 회차 수(on_sale_count). NULL = 아직 기준 없음
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -191,6 +193,8 @@ _MIGRATIONS = [
     ("kakao_webtoons", "downloaded_numbers", "ALTER TABLE kakao_webtoons ADD COLUMN downloaded_numbers TEXT"),
     ("kakao_webtoons", "ticket_notified_no", "ALTER TABLE kakao_webtoons ADD COLUMN ticket_notified_no INTEGER"),
     ("kakao_webtoons", "caught_up_notified_no", "ALTER TABLE kakao_webtoons ADD COLUMN caught_up_notified_no INTEGER"),
+    ("webtoons", "new_episode_seen_no", "ALTER TABLE webtoons ADD COLUMN new_episode_seen_no INTEGER"),
+    ("kakao_webtoons", "new_episode_seen_no", "ALTER TABLE kakao_webtoons ADD COLUMN new_episode_seen_no INTEGER"),
     ("episode_history", "platform", "ALTER TABLE episode_history ADD COLUMN platform TEXT NOT NULL DEFAULT 'naver'"),
     ("archive_targets", "display_name", "ALTER TABLE archive_targets ADD COLUMN display_name TEXT NOT NULL DEFAULT ''"),
     ("archive_targets", "filename_template_preset_id", "ALTER TABLE archive_targets ADD COLUMN filename_template_preset_id INTEGER"),

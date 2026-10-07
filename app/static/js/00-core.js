@@ -71,6 +71,29 @@ window.addEventListener("resize", () => {
   }
 });
 
+// 검색창 지우기(×) 버튼 — class="clearable"인 입력 칸마다 래퍼와 버튼을 붙인다(여러 번 불러도 한 번만). 보이고 숨기는 건 CSS(:placeholder-shown)가 하므로,
+// 앱 시작 때 저장된 검색어를 코드로 채워도 버튼이 알아서 맞게 보인다. 누르면 비우고 input 이벤트를 보내서, 검색어 입력 때와 같이 목록이 다시 그려진다.
+function initClearableInputs() {
+  document.querySelectorAll("input.clearable").forEach((input) => {
+    if (input.parentElement.classList.contains("clearable-wrap")) return;
+    const wrap = document.createElement("span");
+    wrap.className = "clearable-wrap";
+    input.parentElement.insertBefore(wrap, input);
+    wrap.appendChild(input);
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "input-clear";
+    clear.setAttribute("aria-label", "검색어 지우기");
+    clear.textContent = "×";
+    clear.addEventListener("click", () => {
+      input.value = "";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.focus();
+    });
+    wrap.appendChild(clear);
+  });
+}
+
 function makeButton(label, onClick) {
   const btn = document.createElement("button");
   btn.textContent = label;

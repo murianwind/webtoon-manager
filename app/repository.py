@@ -55,6 +55,7 @@ def _row_to_record(row) -> WebtoonRecord:
         is_new=bool(row["is_new"]),
         has_update=bool(row["has_update"]),
         ever_subscribed=bool(row["ever_subscribed"]),
+        new_episode_seen_no=row["new_episode_seen_no"],
     )
 
 
@@ -168,6 +169,12 @@ def update_last_downloaded_no(title_id: str, episode_no: int) -> None:
             "UPDATE webtoons SET last_downloaded_no = ?, updated_at = ? WHERE title_id = ?",
             (episode_no, _now(), title_id),
         )
+
+
+def set_naver_new_episode_seen(title_id: str, episode_no: int) -> None:
+    """구독해제 웹툰의 새 에피소드 알림 기준(마지막으로 확인한 최신 회차 번호)을 기록한다."""
+    with write_transaction() as conn:
+        conn.execute("UPDATE webtoons SET new_episode_seen_no = ?, updated_at = ? WHERE title_id = ?", (episode_no, _now(), title_id))
 
 
 def update_latest_episode_no(title_id: str, episode_no: int) -> None:
@@ -414,6 +421,7 @@ def _row_to_kakao_webtoon(row) -> dict:
         "is_finished": bool(row["is_finished"]),
         "finish_notified": bool(row["finish_notified"]), "finish_ack": bool(row["finish_ack"]),
         "ticket_notified_no": row["ticket_notified_no"], "caught_up_notified_no": row["caught_up_notified_no"],
+        "new_episode_seen_no": row["new_episode_seen_no"],
     }
 
 
@@ -510,6 +518,12 @@ def set_kakao_caught_up_notified(title_id: int, number: int) -> None:
     """"더 이상 받을 회차가 없습니다" 알림의 기준이 되는 마지막 회차 번호를 기록한다(알림을 보낸 때와, 이미 따라잡은 작품을 처음 확인했을 때)."""
     with write_transaction() as conn:
         conn.execute("UPDATE kakao_webtoons SET caught_up_notified_no = ?, updated_at = ? WHERE title_id = ?", (number, _now(), title_id))
+
+
+def set_kakao_new_episode_seen(title_id: int, count: int) -> None:
+    """구독해제 웹툰의 새 에피소드 알림 기준(마지막으로 확인한 회차 수)을 기록한다."""
+    with write_transaction() as conn:
+        conn.execute("UPDATE kakao_webtoons SET new_episode_seen_no = ?, updated_at = ? WHERE title_id = ?", (count, _now(), title_id))
 
 
 def acknowledge_kakao_finish(title_id: int) -> None:
@@ -1156,14 +1170,14 @@ _WEBTOON_COLUMNS = (
     "title_id", "title", "status", "is_adult", "writer_ids", "added_source",
     "last_downloaded_no", "is_finished", "finish_ack", "thumbnail_url",
     "finish_notified", "genres", "tags", "latest_episode_no", "is_paused",
-    "writer_names", "ever_subscribed", "is_new", "has_update", "origin_ids", "origin_names", "created_at", "updated_at",
+    "writer_names", "ever_subscribed", "is_new", "has_update", "origin_ids", "origin_names", "new_episode_seen_no", "created_at", "updated_at",
 )
 _WATCHED_AUTHOR_COLUMNS = ("author_id", "author_name", "enabled", "platform", "created_at", "updated_at")
 _WATCHED_TAG_COLUMNS = ("tag_id", "tag_name", "enabled", "created_at", "updated_at")
 _KAKAO_SEEN_TITLE_COLUMNS = ("author_name", "title_id", "title_name", "seen_at")
 _KAKAO_WEBTOON_COLUMNS = (
     "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "author_summary", "writer_names", "origin_names",
-    "is_finished", "finish_notified", "finish_ack", "downloaded_numbers", "ticket_notified_no", "caught_up_notified_no", "created_at", "updated_at",
+    "is_finished", "finish_notified", "finish_ack", "downloaded_numbers", "ticket_notified_no", "caught_up_notified_no", "new_episode_seen_no", "created_at", "updated_at",
 )
 _FILENAME_TEMPLATE_PRESET_COLUMNS = ("id", "name", "template", "created_at", "updated_at")
 _ARCHIVE_TARGET_COLUMNS = (

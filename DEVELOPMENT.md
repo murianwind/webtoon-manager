@@ -105,3 +105,14 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 
 - **일반 대여권 자동 사용은 미구현**: 종류 코드와 사용 응답을 확인할 캡처가 필요합니다. 만들게 되면 수동 다운로드에서 확인을 받은 뒤에만 쓰고, 자동 다운로드에서는 쓰지 않는 것을 권장합니다.
 - 받은 회차 기록의 소급 한계는 위 "받은 회차 기록" 항목을 보세요(이력/보관 폴더의 파일을 읽지 못하는 경우).
+
+## 수동 다운로드 표 머리글 고정과 검색창 지우기 버튼
+
+- **표 머리글 고정(sticky)**: `#manual-table`, `#kakao-manual-table`에 `overflow`를 걸면(둥근 모서리를 자르려고 `hidden`을 넣었던 적이 있음) 그 표가 스크롤 영역이 되어 바깥 `.scroll-table-wrapper` 안의 `position: sticky` 머리글이 먹지 않습니다. 모서리는 wrapper가 자르므로 표에는 `overflow`를 두지 않습니다. 진행(6번째) 칸은 "이미받음" 배지 + "보관 폴더로 옮김"이 한 줄에 들어가도록 190px입니다(`table-layout: fixed`라 좁으면 잘림). 레이아웃은 jsdom이 계산하지 못해서 `tests/js/test_manual_table_layout.js`가 스타일 규칙(overflow 없음, sticky, 진행 칸 폭)을 확인합니다.
+- **검색창 지우기(×)**: `input.clearable`마다 `initClearableInputs()`(`00-core.js`, 시작 때 한 번)가 래퍼와 버튼을 붙입니다. 버튼은 CSS `input:placeholder-shown + .input-clear`로 숨겨서, 앱 시작 때 저장된 검색어를 코드로 채워도 버튼이 맞게 보입니다(그래서 이 입력 칸들은 placeholder가 있어야 합니다). 누르면 값을 비우고 `input` 이벤트를 보내 기존 검색 처리를 그대로 탑니다.
+
+## 구독해제 웹툰의 새 에피소드 알림 (`app/new_episode_watch.py`)
+
+- 신작 스캔(discovery job)의 한 단계로 `new_episode_watch.run`이 돕니다. 네이버는 구독해제(`status=unsubscribed`) 작품마다 `naver_api.fetch_latest_episode`(목록 1페이지)로 최신 회차 번호를, 카카오는 `KakaoPageClient.fetch_series_item`(회차 1개 요청)의 `on_sale_count`(회차 수)를 봅니다. 제외됨과 구독 중 작품은 보지 않습니다.
+- 판정은 `decide(seen, latest)` 한 곳: 기준이 없으면(NULL) 알리지 않고 기준만 기록, 값이 커졌을 때만 알림, 못 가져왔거나 그대로/줄었으면 아무것도 안 합니다. 기준은 `webtoons.new_episode_seen_no`와 `kakao_webtoons.new_episode_seen_no`에 둡니다.
+- 알림은 한 메시지로 묶어 `discord_notify.send_webhook_notification`으로 보내고, **전송에 성공했을 때만** 기준을 갱신합니다(웹훅이 없거나 실패하면 다음 스캔에서 다시). 카카오 쿠키가 없으면 카카오 쪽만 건너뜁니다.

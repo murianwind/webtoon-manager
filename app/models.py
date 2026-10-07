@@ -89,6 +89,7 @@ class WebtoonRecord:
     has_update: bool = False  # 네이버 API의 'up' 필드 그대로 저장 (탭과 무관하게 동일하게 표시하기 위함)
     writer_names: list[str] = field(default_factory=list)  # writer_ids와 같은 순서로 대응
     ever_subscribed: bool = False  # 실제로 "구독"을 거친 적이 있는지 (화면 표시용)
+    new_episode_seen_no: int | None = None  # 구독해제 웹툰의 새 에피소드 알림용 — 마지막으로 확인한 최신 회차 번호(없으면 아직 기준 없음)
 
 
 @dataclass

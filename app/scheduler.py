@@ -28,7 +28,7 @@ from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app import download_roots, archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, kakao_api, kakao_catalog, kakao_page_auth, kakao_page_download, naver_api, report_seen, repository, schedule_config, tracker, webtoon_server_client
+from app import download_roots, archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, kakao_api, kakao_catalog, kakao_page_auth, kakao_page_download, naver_api, new_episode_watch, report_seen, repository, schedule_config, tracker, webtoon_server_client
 from app import rclone_updater
 from app.config import Settings, get_settings
 from app.constants import NAVER_DETAIL_URL_TEMPLATES
@@ -950,6 +950,15 @@ async def _run_discovery_job_impl() -> None:
             had_error = True
             log.error("구독해제/제외됨 정보 갱신 중 예외: %s", e)
             job_status.log_line("discovery", f"구독해제/제외됨 정보 갱신 오류: {e}")
+
+        try:
+            job_status.log_line("discovery", "구독해제 웹툰 새 에피소드 확인 시작")
+            notified = await new_episode_watch.run(session, settings)
+            job_status.log_line("discovery", f"구독해제 웹툰 새 에피소드 {notified}건 알림")
+        except Exception as e:
+            had_error = True
+            log.error("구독해제 웹툰 새 에피소드 확인 중 예외: %s", e)
+            job_status.log_line("discovery", f"구독해제 웹툰 새 에피소드 확인 오류: {e}")
 
         try:
             job_status.log_line("discovery", "카카오웹툰 작가 신작 스캔 시작")

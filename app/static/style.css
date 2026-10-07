@@ -557,10 +557,11 @@ select {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: hidden;
   margin-bottom: 20px;
   font-size: 13px;
 }
+/* 표 자체에 overflow를 걸지 않는다 — 걸면 그 표가 스크롤 영역이 되어서, 바깥 .scroll-table-wrapper 안에서 머리글을 위에 고정(sticky)해도 소용이 없다.
+   둥근 모서리는 바깥 wrapper가 잘라 준다. */
 #manual-table th, #manual-table td, #kakao-manual-table th, #kakao-manual-table td {
   text-align: left;
   padding: 8px 10px;
@@ -1004,13 +1005,13 @@ select {
 .schedule-entry-head .schedule-entry-remove { margin-left: auto; }
 
 /* 카카오 수동 다운로드 표: 열 너비를 고정해서 분석할 때마다 번호/제목/상태 위치가 흔들리지 않게 한다 */
-#kakao-manual-table { table-layout: fixed; min-width: 640px; }
+#kakao-manual-table { table-layout: fixed; min-width: 740px; }
 #kakao-manual-table th:nth-child(1), #kakao-manual-table td:nth-child(1) { width: 40px; text-align: center; }
 #kakao-manual-table th:nth-child(2), #kakao-manual-table td:nth-child(2) { width: 64px; text-align: right; }
 #kakao-manual-table th:nth-child(3), #kakao-manual-table td:nth-child(3) { width: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #kakao-manual-table th:nth-child(4), #kakao-manual-table td:nth-child(4) { width: 84px; text-align: center; }
 #kakao-manual-table th:nth-child(5), #kakao-manual-table td:nth-child(5) { width: 150px; white-space: nowrap; }
-#kakao-manual-table th:nth-child(6), #kakao-manual-table td:nth-child(6) { width: 96px; text-align: center; white-space: nowrap; }
+#kakao-manual-table th:nth-child(6), #kakao-manual-table td:nth-child(6) { width: 190px; text-align: center; white-space: nowrap; }  /* "이미받음" 배지 + "보관 폴더로 옮김"이 잘리지 않을 폭 */
 #kakao-manual-table td:nth-child(2), #kakao-manual-table td:nth-child(3) { padding-left: 12px; }
 .scroll-table-wrapper { overflow-x: auto; }
 
@@ -1034,3 +1035,11 @@ select {
 
 /* 카카오 수동 다운로드 — 아카이빙으로 보관 폴더에 옮겨진 회차 표시 */
 .kp-archived { color: var(--muted, #888); font-size: 0.85em; }
+
+/* 검색창 지우기(×) 버튼 — 입력 칸을 감싸는 래퍼 안에서 오른쪽에 붙는다. 비어 있을 땐(placeholder가 보일 때) CSS만으로 숨긴다 */
+.clearable-wrap { position: relative; display: inline-flex; align-items: center; }
+.toolbar > .clearable-wrap { display: flex; flex: 1; min-width: 0; }
+.clearable-wrap > input { flex: 1; width: 100%; min-width: 0; box-sizing: border-box; padding-right: 28px; }
+.clearable-wrap .input-clear { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); padding: 2px 8px; border: none; background: transparent; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
+.clearable-wrap .input-clear:hover { color: var(--text); border: none; }
+.clearable-wrap > input:placeholder-shown + .input-clear { display: none; }
