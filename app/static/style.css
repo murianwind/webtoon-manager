@@ -542,6 +542,12 @@ select {
   margin-top: 4px;
   font-size: 12px;
 }
+/* 설정의 백업/복원 카드 — 버튼과 복원 파일 선택 칸을 한 줄에 같은 높이로 놓는다(예전엔 파일 선택 칸이 더 커서 높이가 어긋났다) */
+.backup-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+.backup-actions .file-input-label { display: flex; align-items: center; gap: 8px; margin-left: 0; }
+.backup-actions .file-input-label input[type="file"] { margin-top: 0; }
+/* .hint는 입력칸에 바짝 붙이려고 위쪽 여백이 음수라서, 버튼 아래에 오면 버튼을 덮는다 */
+.hint-after-controls { margin-top: 0; }
 
 /* 수동 다운로드 테이블 */
 .manual-actions {

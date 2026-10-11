@@ -109,6 +109,7 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 ## 수동 다운로드 표 머리글 고정과 검색창 지우기 버튼
 
 - **표 머리글 고정(sticky)**: `#manual-table`, `#kakao-manual-table`에 `overflow`를 걸면(둥근 모서리를 자르려고 `hidden`을 넣었던 적이 있음) 그 표가 스크롤 영역이 되어 바깥 `.scroll-table-wrapper` 안의 `position: sticky` 머리글이 먹지 않습니다. 모서리는 wrapper가 자르므로 표에는 `overflow`를 두지 않습니다. 진행(6번째) 칸은 "이미받음" 배지 + "보관 폴더로 옮김"이 한 줄에 들어가도록 190px입니다(`table-layout: fixed`라 좁으면 잘림). 레이아웃은 jsdom이 계산하지 못해서 `tests/js/test_manual_table_layout.js`가 스타일 규칙(overflow 없음, sticky, 진행 칸 폭)을 확인합니다.
+- **`.hint`의 음수 위쪽 여백**: `.hint`는 입력칸에 바짝 붙이려고 `margin: -8px 0 16px`입니다. 버튼처럼 키가 있는 요소 바로 아래에 두면 문구가 8px 끌려 올라가 버튼을 덮으므로, 그런 곳에는 `hint-after-controls`(위쪽 여백 0)를 같이 씁니다(설정의 백업/복원 카드). 그 카드의 버튼과 복원 파일 선택 칸은 `.backup-actions`(flex, 세로 가운데 맞춤)로 한 줄에 묶습니다. `tests/js/test_backup_card_layout.js`가 구조와 스타일 규칙을 확인합니다.
 - **검색창 지우기(×)**: `input.clearable`마다 `initClearableInputs()`(`00-core.js`, 시작 때 한 번)가 래퍼와 버튼을 붙입니다. 버튼은 CSS `input:placeholder-shown + .input-clear`로 숨겨서, 앱 시작 때 저장된 검색어를 코드로 채워도 버튼이 맞게 보입니다(그래서 이 입력 칸들은 placeholder가 있어야 합니다). 누르면 값을 비우고 `input` 이벤트를 보내 기존 검색 처리를 그대로 탑니다.
 
 ## 구독해제 웹툰의 새 에피소드 알림 (`app/new_episode_watch.py`)
