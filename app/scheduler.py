@@ -1046,12 +1046,18 @@ async def run_kakao_catalog_refresh_job() -> None:
         log.error("카카오 목록 정기 새로고침 중 예외: %s", e)
 
 
+MISFIRE_GRACE_SECONDS = 600  # 스케줄 시각보다 이만큼(초) 안으로 늦은 실행은 그대로 실행한다
+
+
 def create_scheduler() -> AsyncIOScheduler:
     # 컨테이너의 시스템 시간대(보통 UTC)와 무관하게 항상 한국시간으로 해석하도록
     # 명시한다 — 명시 안 하면 APScheduler가 컨테이너의 시스템 기본값(UTC)을 쓰는데,
     # 설정 화면에서 "07:00"이라고 넣으면 사용자는 한국시간 07:00을 기대하지만
     # 실제로는 UTC 07:00(한국시간 오후 4시)에 실행되고 있었다 — 실제로 확인된 버그.
-    scheduler = AsyncIOScheduler(timezone="Asia/Seoul")
+    # 지연 허용 시간: 기본값(1초)이면 앱이 다른 일로 1초만 바빠도 그 회차를 실행하지 않고 버린다 — 실제로 06:50 다운로드가
+    # "was missed by 0:00:01.17"로 건너뛰어졌다. 10분 안으로 늦은 건 그대로 실행하고(앱이 잠깐 내려갔다 올라온 경우 포함),
+    # 여러 번 밀린 실행은 한 번으로 합친다(coalesce).
+    scheduler = AsyncIOScheduler(timezone="Asia/Seoul", job_defaults={"misfire_grace_time": MISFIRE_GRACE_SECONDS, "coalesce": True})
     for job_id in DEFAULT_SCHEDULES:
         _apply_job_schedule(scheduler, job_id)
     # 사용자가 설정하는 스케줄이 아니라 고정된 내부 작업 — 설정 화면의 스케줄 저장/재등록과 무관하게 항상 돈다
