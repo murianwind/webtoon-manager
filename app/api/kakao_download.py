@@ -17,7 +17,9 @@ from app import (
 from app import kakao_api
 from app import kakao_page_auth
 from app import kakao_page_download
+from app.api.common import metadata_zip_response
 from app.config import get_settings
+from app.file_utils import remove_forbidden_str_kakao
 
 
 
@@ -272,3 +274,17 @@ async def kakao_manual_run(payload: KakaoManualRunIn):
     job_status.start(manual_download.JOB_NAME)
     _kakao_manual_task = asyncio.create_task(_run_kakao_manual_download(payload.series_id, payload.numbers, payload.use_rental_tickets))
     return {"status": "started"}
+
+
+@router.get("/kakao-manual/metadata-zip")
+async def kakao_manual_metadata_zip(series_id: int):
+    """분석한 카카오페이지 웹툰의 표지(cover.jpg)와 info.xml만 zip 하나로 브라우저에 내려준다. 로그인 쿠키 없이도 되고, 서버 폴더와 DB에는 아무것도 쓰지 않는다."""
+    settings = get_settings()
+    async with kakao_page_download.new_session() as session:
+        client = kakao_page_download.client_or_anonymous(session, settings.request_timeout_seconds)
+        bundle = await kakao_page_download.build_series_metadata_bundle(client, series_id)
+        kakao_page_download.persist_refreshed_cookies(client)
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="작품 정보를 가져오지 못했습니다 (작품 번호 확인 필요)")
+    return metadata_zip_response(bundle, remove_forbidden_str_kakao(bundle.title))
+

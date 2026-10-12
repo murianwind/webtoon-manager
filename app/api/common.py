@@ -5,9 +5,11 @@ import html
 import json
 import logging
 
+from fastapi import Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, field_validator
 
+from app import metadata_zip
 from app import (
     repository,
 )
@@ -106,3 +108,13 @@ class RetentionDaysIn(BaseModel):
         if v < 0:
             raise ValueError("보관 기간은 0 이상이어야 합니다 (0 = 자동삭제 끔).")
         return v
+
+
+def metadata_zip_response(bundle: "metadata_zip.MetadataBundle", safe_title: str) -> Response:
+    """"표지·정보 받기" 응답 — cover/info.xml이 담긴 zip을 브라우저 다운로드로 내려준다(파일 이름은 '<작품 이름>_표지정보.zip')."""
+    return Response(
+        content=metadata_zip.build_zip(bundle.files),
+        media_type="application/zip",
+        headers=metadata_zip.attachment_headers(f"{safe_title}_표지정보.zip", bundle.warnings),
+    )
+

@@ -63,6 +63,55 @@ function bindReanalyzeButton(buttonId, currentId, runAnalyze) {
   });
 }
 
+// Content-Disposition의 파일 이름 — 한글 이름은 filename*=UTF-8''...로 온다. 못 읽으면 fallback.
+function filenameFromDisposition(header, fallback) {
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header || "");
+  if (encoded) {
+    try { return decodeURIComponent(encoded[1]); } catch (e) { /* 아래 fallback */ }
+  }
+  const plain = /filename="([^"]+)"/i.exec(header || "");
+  return plain ? plain[1] : fallback;
+}
+
+// 분석 결과 제목 옆 "표지·정보 받기" 버튼 — 표지(cover)와 info.xml이 담긴 zip을 서버에서 받아 브라우저 다운로드로 저장한다(서버 폴더에는 아무것도 쓰지 않는다).
+// 받는 동안은 눌리지 않게 해서 연타해도 요청이 겹치지 않는다. 표지만 못 받았으면 info.xml만 담겨 오므로 받은 뒤에 안내한다. 실패하면 이유를 안내 창으로 알린다.
+function bindMetadataZipButton(buttonId, buildUrl) {
+  const btn = document.getElementById(buttonId);
+  btn.addEventListener("click", async () => {
+    const url = buildUrl();
+    if (!url || btn.disabled) return;
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "받는 중…";
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        let detail = `표지·정보를 받지 못했습니다 (HTTP ${res.status})`;
+        try { detail = (await res.json()).detail || detail; } catch (e) { /* 본문이 JSON이 아니면 기본 문구 */ }
+        alert(detail);
+        return;
+      }
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filenameFromDisposition(res.headers.get("Content-Disposition"), "표지정보.zip");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 100);  // 바로 지우면 일부 브라우저에서 다운로드가 끊긴다
+      if ((res.headers.get("X-Metadata-Warning") || "").includes("cover-missing")) {
+        alert("표지 이미지를 받지 못해 info.xml만 담았습니다. 잠시 뒤 다시 시도해 보세요.");
+      }
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  });
+}
+
 // ── 수동 다운로드: 카카오페이지 ───────────────────────────
 // 작품을 폴더 규칙으로 분석해서 회차 표(번호/제목/상태/대여 만료/진행)를 보여주고, 고른 회차를 받는다. 이미
 // 받은 회차는 표시만 되고, 직접 고르면 다시 받아 교체할 수 있다(자동 다운로드는 안 받은 회차만 받는다).
@@ -175,6 +224,7 @@ function kakaoTicketsHtml(t) {
 }
 
 bindReanalyzeButton("btn-kakao-manual-reanalyze", () => kakaoManualAnalysis && kakaoManualAnalysis.series_id, runKakaoManualAnalyze);
+bindMetadataZipButton("btn-kakao-manual-metadata", () => kakaoManualAnalysis && `/api/kakao-manual/metadata-zip?series_id=${encodeURIComponent(kakaoManualAnalysis.series_id)}`);
 
 function refreshKakaoManualSubscribeButton() {
   // 구독만 있고 구독해제는 없다 — 구독 중이면 버튼 대신 "구독 중"만 보여준다(해제는 전체목록에서)
@@ -402,6 +452,7 @@ async function runManualAnalyze(titleId) {
 }
 
 bindReanalyzeButton("btn-manual-reanalyze", () => manualAnalyzeResult && manualAnalyzeResult.title_id, runManualAnalyze);
+bindMetadataZipButton("btn-manual-metadata", () => manualAnalyzeResult && `/api/manual-download/metadata-zip?title_id=${encodeURIComponent(manualAnalyzeResult.title_id)}`);
 
 function refreshManualSubscribeButton() {
   const btn = document.getElementById("btn-manual-subscribe");

@@ -139,11 +139,10 @@ def write_comicinfo_file(webtoon_dir: Path, info: TitleInfo) -> None:
     (webtoon_dir / "info.xml").write_text(xml_content, encoding="utf-8")
 
 
-async def download_cover_image(
-    session: aiohttp.ClientSession, webtoon_dir: Path, info: TitleInfo, timeout_seconds: int
-) -> None:
+async def fetch_cover_image(session: aiohttp.ClientSession, info: TitleInfo, timeout_seconds: int) -> tuple[str, bytes] | None:
+    """네이버 썸네일을 (확장자, 이미지 바이트)로 받는다. 못 받으면 None. 폴더에 저장하는 쪽(download_cover_image)과 브라우저로 내려주는 쪽(표지·정보 받기)이 같이 쓴다."""
     if not info.thumbnail_url:
-        return
+        return None
     try:
         async with session.get(
             info.thumbnail_url,
@@ -152,13 +151,26 @@ async def download_cover_image(
         ) as response:
             if response.status != 200:
                 log.warning("커버 이미지 다운로드 실패 (titleId=%s): HTTP %s", info.title_id, response.status)
-                return
-            ext = guess_image_extension(info.thumbnail_url)
-            webtoon_dir.mkdir(parents=True, exist_ok=True)
-            new_cover = webtoon_dir / f"cover{ext}"
-            new_cover.write_bytes(await response.read())
-            for old in webtoon_dir.glob("cover.*"):  # 확장자가 다른 옛 커버가 남아 cover.*가 둘 이상 되지 않게(새 커버를 저장한 뒤에만 지운다)
-                if old != new_cover:
-                    old.unlink(missing_ok=True)
+                return None
+            return guess_image_extension(info.thumbnail_url), await response.read()
     except Exception as e:
         log.warning("커버 이미지 다운로드 중 오류 (titleId=%s): %s", info.title_id, e)
+        return None
+
+
+async def download_cover_image(
+    session: aiohttp.ClientSession, webtoon_dir: Path, info: TitleInfo, timeout_seconds: int
+) -> None:
+    cover = await fetch_cover_image(session, info, timeout_seconds)
+    if cover is None:
+        return
+    ext, image = cover
+    try:
+        webtoon_dir.mkdir(parents=True, exist_ok=True)
+        new_cover = webtoon_dir / f"cover{ext}"
+        new_cover.write_bytes(image)
+        for old in webtoon_dir.glob("cover.*"):  # 확장자가 다른 옛 커버가 남아 cover.*가 둘 이상 되지 않게(새 커버를 저장한 뒤에만 지운다)
+            if old != new_cover:
+                old.unlink(missing_ok=True)
+    except Exception as e:
+        log.warning("커버 이미지 저장 중 오류 (titleId=%s): %s", info.title_id, e)

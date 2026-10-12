@@ -56,6 +56,7 @@ from yarl import URL
 from app import comicinfo, kakao_api, kakao_cover, kakao_page_auth, kakao_records, repository
 from app.kakao_authors import split_authors
 from app.file_utils import remove_forbidden_str_kakao
+from app.metadata_zip import COVER_MISSING, MetadataBundle
 
 log = logging.getLogger(__name__)
 
@@ -961,6 +962,23 @@ def write_info_xml(series_item: dict, series_id: int, folder: Path, about: dict 
     repository.set_kakao_authors(series_id, writers, originals)
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "info.xml").write_text(comicinfo.build_kakao_comicinfo_xml(series_item, series_id, about), encoding="utf-8")
+
+
+async def build_series_metadata_bundle(client: "KakaoPageClient", series_id: int) -> MetadataBundle | None:
+    """분석한 카카오페이지 웹툰의 info.xml과 공식 표지(cover.jpg)를 서버 폴더나 DB에 쓰지 않고 메모리로 만든다(브라우저 다운로드용 "표지·정보 받기").
+    작품 정보를 못 받으면 None, 표지만 못 받으면 info.xml만 담고 warnings에 표시를 남긴다. write_info_xml과 달리 작가 정보 저장 같은 DB 쓰기는 하지 않는다."""
+    series_item = await client.fetch_series_item(series_id)
+    if series_item is None:
+        return None
+    about = await client.fetch_about(series_id)
+    files = {"info.xml": comicinfo.build_kakao_comicinfo_xml(series_item, series_id, about).encode("utf-8")}
+    warnings: list[str] = []
+    cover = await asyncio.to_thread(kakao_cover.fetch_official_cover_bytes, str(series_id))
+    if cover:
+        files["cover.jpg"] = cover
+    else:
+        warnings.append(COVER_MISSING)
+    return MetadataBundle(title=series_item.get("title") or str(series_id), files=files, warnings=warnings)
 
 
 async def write_series_metadata(series_item: dict, series_id: int, folder: Path, on_progress=None, about: dict | None = None) -> None:

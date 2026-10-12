@@ -15,12 +15,13 @@ from pathlib import Path
 import aiohttp
 
 from app import download_roots, job_status, naver_api, repository
-from app.comicinfo import download_cover_image, needs_comicinfo, write_comicinfo_file
+from app.comicinfo import build_comicinfo_xml, download_cover_image, fetch_cover_image, needs_comicinfo, write_comicinfo_file
 from app.config import Settings
 from app.cookie_loader import get_adult_cookies
 from app.downloader import download_single_episode
 from app.file_utils import remove_forbidden_str
 from app.folder_scanner import find_last_downloaded_episode_no
+from app.metadata_zip import COVER_MISSING, MetadataBundle
 from app.models import TitleInfo
 from app.zipper import zip_episode_folders
 
@@ -63,6 +64,24 @@ async def analyze(title_id: str, settings: Settings) -> tuple[TitleInfo | None, 
         for ep in all_episodes
     ]
     return info, rows
+
+
+async def build_metadata_bundle(title_id: str, settings: Settings) -> MetadataBundle | None:
+    """분석한 웹툰의 info.xml과 표지를 서버 폴더에 쓰지 않고 메모리로 만든다(브라우저 다운로드용 "표지·정보 받기"). 작품 정보를 못 받으면 None이고,
+    표지만 못 받으면 info.xml만 담고 warnings에 표시를 남긴다."""
+    async with aiohttp.ClientSession() as session:
+        info = await naver_api.fetch_title_info(session, title_id, settings.request_timeout_seconds)
+        if info is None:
+            return None
+        cover = await fetch_cover_image(session, info, settings.request_timeout_seconds)
+    files = {"info.xml": build_comicinfo_xml(info).encode("utf-8")}
+    warnings: list[str] = []
+    if cover is None:
+        warnings.append(COVER_MISSING)
+    else:
+        extension, image = cover
+        files[f"cover{extension}"] = image
+    return MetadataBundle(title=info.title_name, files=files, warnings=warnings)
 
 
 def _fail(message: str) -> None:

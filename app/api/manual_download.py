@@ -14,7 +14,9 @@ from app import (
     naver_api,
     repository,
 )
+from app.api.common import metadata_zip_response
 from app.config import get_settings
+from app.file_utils import remove_forbidden_str
 
 
 log = logging.getLogger(__name__)
@@ -99,3 +101,13 @@ async def manual_download_run(payload: ManualDownloadIn):
     settings = get_settings()
     asyncio.create_task(manual_download.download_selected(payload.title_id, payload.episode_nos, settings))
     return {"status": "started"}
+
+
+@router.get("/manual-download/metadata-zip")
+async def manual_download_metadata_zip(title_id: str):
+    """분석한 네이버 웹툰의 표지(cover)와 info.xml만 zip 하나로 브라우저에 내려준다. 서버 폴더에는 아무것도 쓰지 않는다."""
+    bundle = await manual_download.build_metadata_bundle(title_id, get_settings())
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="작품 정보를 가져오지 못했습니다 (titleId 확인 필요)")
+    return metadata_zip_response(bundle, remove_forbidden_str(bundle.title))
+
