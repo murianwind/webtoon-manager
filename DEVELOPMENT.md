@@ -138,3 +138,7 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - **다시 분석**: 분석 결과 제목 옆(구독 버튼, 작품 페이지 버튼 오른쪽)의 `btn-kakao-manual-reanalyze`/`btn-manual-reanalyze`가 `bindReanalyzeButton`(`50-manual-download.js`) 한 곳에서 같은 방식으로 동작합니다. 지금 보고 있는 작품(`kakaoManualAnalysis.series_id`/`manualAnalyzeResult.title_id`)으로 기존 분석 함수(`runKakaoManualAnalyze`/`runManualAnalyze`)를 다시 부르고, 분석하는 동안은 `분석 중…`으로 비활성화해서 연타해도 요청이 겹치지 않습니다. 분석 함수가 실패해도 스스로 알림 창을 띄우고 끝나므로 버튼은 항상 원래대로 돌아옵니다. 테스트: `tests/js/test_manual_reanalyze.js`.
 - **새로고침 시 플랫폼 선택이 안 나오던 문제**: 새로고침하면 `99-main.js`가 마지막에 보던 탭(`sessionStorage`)을 즉시 복원하는데, `kakaoWebtoonsEnabled`는 서버에서 비동기로 가져오므로 복원 시점에는 아직 `false`라서 수동 다운로드의 플랫폼(네이버/카카오페이지) 선택이 숨겨진 채로 그려졌고, 값이 도착한 뒤에는 다시 맞춰 주는 곳이 없었습니다(탭을 다시 눌러야 나왔음). 그래서 이 값은 항상 `setKakaoWebtoonsEnabled(enabled)`(`00-core.js`)로 바꾸고, 값이 정해지거나 바뀔 때 `kakao-webtoons-enabled-changed` 이벤트가 나갑니다. 이 값에 기대는 화면은 이 이벤트를 들어서 다시 맞추면 됩니다(수동 다운로드의 `syncManualPlatformSelect`가 그렇게 합니다). 테스트: `tests/js/test_manual_platform_select_startup.js`. 같은 방식의 경쟁이 있을 수 있는 다른 화면(전체목록의 카카오 표시, 설정의 스케줄 대상 선택 등)은 아직 이 이벤트를 듣지 않습니다.
 
+## GitHub Actions 러너 고정
+
+- 워크플로의 `runs-on`은 `ubuntu-24.04`로 고정합니다. `ubuntu-latest`는 2026-10-19부터 몇 주에 걸쳐 Ubuntu 26.04로 바뀌어서, 테스트 → 이미지 빌드 → 자동 갱신으로 이어지는 배포 파이프라인이 예고 없이 깨질 수 있기 때문입니다(`actionlint` 같은 러너에 미리 설치된 도구나 `setup-python`/`setup-node`의 새 OS 지원 여부에 기대고 있습니다). 26.04로 옮길 때는 `ubuntu-26.04`로 먼저 한 번 돌려 본 뒤 값을 바꾸세요. `tests/backend/test_workflows_pinned.py`가 모든 `runs-on`이 같은 고정 버전인지 검사합니다.
+
