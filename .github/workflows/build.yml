@@ -22,7 +22,8 @@ jobs:
   build-and-push:
     needs: tests            # 테스트가 하나라도 실패하면 이미지를 만들지 않는다
     if: github.ref == 'refs/heads/main'   # 수동 실행(workflow_dispatch)을 다른 브랜치에서 눌러도 latest 이미지는 main에서만 만든다
-    runs-on: ubuntu-latest
+    # ubuntu-latest는 2026-10-19부터 Ubuntu 26.04로 바뀌기 시작해서 고정한다(옮길 때는 ubuntu-26.04로 먼저 시험)
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
