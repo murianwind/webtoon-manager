@@ -123,11 +123,18 @@ def _can_open_with_rental(episode, series_item: dict, rental_ready: bool) -> boo
     return rental_ready and kakao_page_download.rental_eligible(episode, series_item)
 
 
-def _kakao_episode_state(episode, waitfree_ready: bool, series_item: dict, rental_ready: bool = False) -> str:
+def _kakao_episode_state(
+    episode, waitfree_ready: bool, series_item: dict, rental_ready: bool = False, *, tickets_known: bool = False, downloaded: bool = False
+) -> str:
+    """분석 표의 상태. 지금 열 수 있으면 waitfree(기다무)/rental(대여권), 아직 못 열면 이유를 나눠서 보여 준다:
+    waitfree_wait = 기다무로 열 수 있는데 충전 중, rental_needed = 기다무로 못 여는데 보유 대여권이 없음. 숨김/"N일 후 무료" 회차는 날짜를 기다리는 것이라
+    그냥 locked이고, 이용권 조회가 안 됐으면(로그아웃 등) 사정을 모르니 이유를 단정하지 않으며, 이미 받은 회차는 기다릴 게 없어서 이유를 붙이지 않는다."""
     if _can_open_with_waitfree(episode, waitfree_ready):
         return "waitfree"
     if _can_open_with_rental(episode, series_item, rental_ready):
         return "rental"
+    if tickets_known and not downloaded and not episode.accessible and not episode.hidden and not kakao_page_download.free_date_of(episode):
+        return "rental_needed" if kakao_page_download.rental_eligible(episode, series_item) else "waitfree_wait"
     return kakao_page_download.episode_state(episode)
 
 
@@ -189,7 +196,8 @@ async def kakao_manual_analyze(series_id: int):
             {
                 "number": row.episode.number, "subtitle": row.episode.subtitle,
                 # 잠긴 회차라도 기다무를 쓸 수 있으면 "waitfree" — 골라서 받으면 기다무로 열고 받는다(한 장이라 하나만)
-                "state": _kakao_episode_state(row.episode, waitfree_ready, series_item, rental_ready), "expire": row.episode.rent_expire,
+                "state": _kakao_episode_state(row.episode, waitfree_ready, series_item, rental_ready, tickets_known=tickets is not None, downloaded=row.downloaded),
+                "expire": row.episode.rent_expire,
                 "free_at": kakao_page_download.free_date_of(row.episode),  # 연재무료: 이 날짜에 무료가 된다
                 "downloaded": row.downloaded, "archived": row.archived, "before_start": row.before_start,
                 "selectable": (  # 이미 받은 회차도 다시 받을 수 있다(수동)

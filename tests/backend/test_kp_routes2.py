@@ -178,7 +178,7 @@ async def main():
         S["waitfree"] = False
         r = (await c.get("/api/kakao-manual/analyze", params={"series_id": 111})).json()
         by = {e["number"]: e for e in r["episodes"]}
-        assert r["tickets"]["waitfree_ready"] is False and r["tickets"]["waitfree_available_at"] and by[5]["state"] == "locked" and by[5]["selectable"] is False
+        assert r["tickets"]["waitfree_ready"] is False and r["tickets"]["waitfree_available_at"] and by[5]["state"] == "waitfree_wait" and by[5]["selectable"] is False
         repository.upsert_new_kakao_webtoon(111, "닥터 최태수", status=repository.STATUS_ACTIVE)
         assert (await c.get("/api/kakao-manual/analyze", params={"series_id": 111})).json()["subscription"] == "active"                    # 구독 상태 표시
         S["waitfree"] = True; S["used"] = []

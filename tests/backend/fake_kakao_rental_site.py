@@ -23,9 +23,10 @@ def item(order, title=None, **k):
 class Site:
     """가짜 카카오페이지. rental=보유 대여권 수, waitfree=기다무 충전 여부, series_waitfree=작품에 기다무가 있는지,
     ticket_type=서버가 알려 주는 사용 가능 이용권, lose_response=응답이 유실되는 회차(서버는 처리함), fail_use=사용이 거절되는 회차, no_image=이미지가 안 오는 회차."""
-    def __init__(self, items, rental=3, waitfree=False, series_waitfree=True, ticket_type="RT01", lose_response=(), fail_use=(), lose_without_effect=(), no_image=()):
+    def __init__(self, items, rental=3, waitfree=False, series_waitfree=True, ticket_type="RT01", lose_response=(), fail_use=(), lose_without_effect=(), no_image=(), ticket_my_fail=False):
         self.items, self.rental, self.waitfree, self.series_waitfree, self.ticket_type = items, rental, waitfree, series_waitfree, ticket_type
         self.lose_response, self.fail_use, self.lose_without_effect, self.no_image = set(lose_response), set(fail_use), set(lose_without_effect), set(no_image)
+        self.ticket_my_fail = ticket_my_fail   # 이용권 조회가 실패하는 경우(로그아웃/서버 오류)
         self.posts, self.gets, self.opened = [], [], set()
     def _item(self, pid): return next(e["item"] for e in self.items if e["item"]["product_id"] == pid)
     def get(self, url, params=None, headers=None, timeout=None):
@@ -39,6 +40,7 @@ class Site:
             return R(data={"result": {"series_item": {"id": 1, "is_waitfree": self.series_waitfree, "title": "작품", "authors": "가", "on_issue": "Y", "sub_category": "액션", "age_grade": 0, "description": "d"},
                                       "list": L, "has_next": False}})
         if url.endswith("/ticket/my"):
+            if self.ticket_my_fail: return R(status=500)
             return R(data={"result_code": 0, "result": {"waitfree": {"charged_complete": self.waitfree, "charged_at": "2099-01-01T00:00:00+09:00", "charged_period_by_minute": 1440},
                                                        "my": {"ticket_own_count": 0, "cash_amount": 0, "ticket_rental_count": self.rental}}})
         if "ready_to_use" in url:

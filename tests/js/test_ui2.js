@@ -134,7 +134,7 @@ const kakao = (id, title, extra = {}) => ({ title_id: id, title, thumbnail_url: 
   console.log("4) 표 서식: 네이버 표와 같은 규칙 적용");
   const css = require("fs").readFileSync(require("path").join(__dirname, "..", "..", "app", "static", "style.css"), "utf8");
   ok(/#manual-table,\s*#kakao-manual-table\s*\{/.test(css) && /#kakao-manual-table td/.test(css) && /#kakao-manual-table th\b/.test(css), "카카오 표가 네이버 표와 같은 표 스타일을 받음");
-  ok(/#kakao-manual-table\s*\{[^}]*table-layout:\s*fixed/.test(css) && /#kakao-manual-table th:nth-child\(2\)[^{]*\{[^}]*width:\s*64px/.test(css) && /nth-child\(4\)[^{]*\{[^}]*width:\s*84px/.test(css), "열 너비가 고정되어(번호 64px, 상태 84px 등) 분석할 때마다 위치가 흔들리지 않음");
+  ok(/#kakao-manual-table\s*\{[^}]*table-layout:\s*fixed/.test(css) && /#kakao-manual-table th:nth-child\(2\)[^{]*\{[^}]*width:\s*64px/.test(css) && /nth-child\(4\)[^{]*\{[^}]*width:\s*108px/.test(css), "열 너비가 고정되어(번호 64px, 상태 108px 등) 분석할 때마다 위치가 흔들리지 않음");
   console.log("5) 아카이빙 폴더 선택에 카카오 폴더 추가");
   const js = require("./harness").readAppJs();
   ok(js.includes("kakao_download: \"카카오페이지 다운로드 폴더\"") && (js.match(/\["archive", "download", "kakao_download"\]/g) || []).length === 2, "폴더 선택기에 '카카오페이지 다운로드 폴더'가 추가됨(카카오 관리를 켰을 때)");

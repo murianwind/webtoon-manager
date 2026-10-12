@@ -1,12 +1,12 @@
 // 카카오 대여권 UI — 수동 다운로드 표(대여권 상태, 선택, 확인 창, 요청)와 설정(자동 사용 체크박스, 기본 꺼짐)
 const { makeApp, sleep, ok, done } = require("./harness");
 (async () => {
-  const ep = (number, state, extra = {}) => ({ number, subtitle: `${number}화`, state, expire: null, free_at: null, downloaded: false, before_start: false, selectable: state !== "locked", ...extra });
+  const ep = (number, state, extra = {}) => ({ number, subtitle: `${number}화`, state, expire: null, free_at: null, downloaded: false, before_start: false, selectable: !["locked", "waitfree_wait", "rental_needed"].includes(state), ...extra });   // 서버는 못 여는 상태를 선택 불가로 내려 준다
   const analysis = {
     series_id: 68546405, title: "블루엔젤", folder: "/dl/블루엔젤", mode: "compare", existing_count: 1, marker: null, to_download_count: 0, locked_count: 4, downloaded_count: 1, before_start_count: 0,
     cookie_saved: true, logged_in: true, thumbnail_url: "t", authors: "a", subscription: "active", site_total: 5, listed_count: 5, hidden_count: 0, excluded_video_count: 0,
     tickets: { rental_count: 2, own_count: 0, waitfree_supported: true, waitfree_ready: false, waitfree_available_at: null, waitfree_period_minutes: 1440 },
-    episodes: [ep(1, "free", { downloaded: true }), ep(2, "rental"), ep(3, "rental"), ep(4, "rental"), ep(5, "locked")],
+    episodes: [ep(1, "free", { downloaded: true }), ep(2, "rental"), ep(3, "rental"), ep(4, "rental"), ep(5, "locked"), ep(6, "waitfree_wait"), ep(7, "rental_needed")],
   };
   const runs = []; let autoSetting = true; const settingPosts = [];
   const routes = {
@@ -28,6 +28,12 @@ const { makeApp, sleep, ok, done } = require("./harness");
   ok(rows[1].children[3].textContent.trim() === "대여권" && rows[1].querySelector(".kp-rental") !== null, "2번 회차에 '대여권' 배지");
   ok(!box(2).disabled && box(5).disabled, "대여권 회차는 선택 가능, 잠긴 회차는 선택 불가");
   ok(box(2).dataset.rental === "1" && box(1).dataset.rental !== "1", "대여권 회차에만 dataset.rental");
+
+  // Scenario 1-2: 잠금 이유별 표시 — 기다무 충전 대기와 대여권 필요는 이름이 보이고, 둘 다 선택할 수 없고, 선택 버튼도 건드리지 않는다
+  ok(rows[5].children[3].textContent.trim() === "기다무 대기" && rows[5].querySelector(".kp-waitfree-wait") !== null, "6번: '기다무 대기' 배지");
+  ok(rows[6].children[3].textContent.trim() === "대여권 필요" && rows[6].querySelector(".kp-rental-needed") !== null, "7번: '대여권 필요' 배지");
+  ok(rows[4].children[3].textContent.trim() === "잠금", "5번: 이유가 없는 잠금은 그대로 '잠금'");
+  ok(box(6).disabled && box(7).disabled, "기다무 대기/대여권 필요 회차는 선택할 수 없다");
 
   // Scenario 2: 선택 버튼은 보유 대여권 수(2장)만큼만 번호 앞선 대여권 회차를 고른다 — 나머지는 열 수 없어 골라 봐야 건너뜀이 되기 때문
   $("btn-kakao-manual-select-all").click();

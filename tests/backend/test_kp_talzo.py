@@ -102,7 +102,7 @@ async def main():
         assert r["marker"]["warning"] is False and r["marker"]["resolved_number"] == 31                                # 경고 없음(이전에는 오탐)
         assert r["tickets"]["waitfree_supported"] is False and r["tickets"]["rental_count"] == 0                        # 이 작품은 기다무가 없다
         by = {e["number"]: e for e in r["episodes"]}
-        assert by[32]["state"] == "locked" and by[32]["selectable"] is False and by[31]["downloaded"] is True          # 이용권이 "사용 가능"으로 와도 잠금 그대로
+        assert by[32]["state"] == "rental_needed" and by[32]["selectable"] is False and by[31]["downloaded"] is True   # 이용권이 "사용 가능"으로 와도 못 연다 — 기다무가 없는 작품이라 대여권이 필요(보유 0장)
     kp_calls.clear()
     client = kp.KakaoPageClient(Sess(), {}, 10)
     res = await kp.run_download(client, series_id=68757181, title=None, download_root=str(kroot), max_episodes=20)

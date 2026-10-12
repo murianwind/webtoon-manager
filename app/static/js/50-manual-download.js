@@ -147,7 +147,7 @@ async function runKakaoManualAnalyze(seriesId) {
   }
 }
 
-const KAKAO_STATE_BADGE = { free: ["kp-free", "무료"], owned: ["kp-owned", "보유"], waitfree: ["kp-waitfree", "기다무"], rental: ["kp-rental", "대여권"], locked: ["kp-locked", "잠금"] };
+const KAKAO_STATE_BADGE = { free: ["kp-free", "무료"], owned: ["kp-owned", "보유"], waitfree: ["kp-waitfree", "기다무"], rental: ["kp-rental", "대여권"], waitfree_wait: ["kp-waitfree-wait", "기다무 대기"], rental_needed: ["kp-rental-needed", "대여권 필요"], locked: ["kp-locked", "잠금"] };
 
 // 기다무를 다시 쓸 수 있기까지 남은 시간(카카오페이지 작품 화면의 "23시간 59분 남음"과 같은 표시)
 function formatRemaining(isoString) {

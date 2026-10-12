@@ -6,6 +6,7 @@ import asyncio
 import json
 import tempfile
 import time
+from pathlib import Path
 
 import aiohttp
 import httpx
@@ -39,20 +40,41 @@ async def main():
     auth.save_cookies(auth.parse_cookie_export(json.dumps([{"domain": ".kakao.com", "name": n, "value": "v", "path": "/", "expirationDate": time.time() + 25 * 86400} for n in auth.REQUIRED_COOKIES])))
     states = lambda a: {e["number"]: (e["state"], e["selectable"]) for e in a["episodes"]}
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=m.app), base_url="http://test") as c:
-        # Scenario 1: 보유 대여권이 있으면 기다무로 못 여는 잠긴 회차가 "rental"(선택 가능)이고, 기다무로 열 수 있는 회차(충전 대기)는 그대로 잠김
+        # Scenario 1: 상태가 이유별로 나뉜다 — 기다무로 열 수 있는데 충전 중이면 "waitfree_wait", 기다무로 못 열고 대여권이 있으면 "rental",
+        #   숨김은 그냥 "locked"(선택 불가는 모두 같다)
         SITE["site"] = Site([item(1, free=True), item(2), item(3, blocked=True), item(4, blocked=True), item(5, blocked=True, hidden=True)], rental=2, waitfree=False)
         a = (await c.get("/api/kakao-manual/analyze", params={"series_id": 1})).json()
-        assert states(a) == {1: ("free", True), 2: ("locked", False), 3: ("rental", True), 4: ("rental", True), 5: ("locked", False)}, states(a)
+        assert states(a) == {1: ("free", True), 2: ("waitfree_wait", False), 3: ("rental", True), 4: ("rental", True), 5: ("locked", False)}, states(a)
         assert a["tickets"]["rental_count"] == 2
-        # Scenario 2: 보유 대여권이 없으면 "잠김"(선택 불가)
+        # Scenario 2: 기다무로 못 여는데 보유 대여권이 없으면 "rental_needed"(선택 불가)
         SITE["site"] = Site([item(1, free=True), item(2, blocked=True)], rental=0, ticket_type=None)
         a = (await c.get("/api/kakao-manual/analyze", params={"series_id": 1})).json()
-        assert states(a)[2] == ("locked", False)
-        # Scenario 3: 기다무가 없는 작품은 잠긴 회차가 곧 대여권 대상
+        assert states(a)[2] == ("rental_needed", False)
+        # Scenario 3: 기다무가 없는 작품은 잠긴 회차가 곧 대여권 대상 — 대여권이 있으면 "rental", 없으면 "rental_needed"
         SITE["site"] = Site([item(1, free=True), item(2)], rental=1, series_waitfree=False)
+        assert states((await c.get("/api/kakao-manual/analyze", params={"series_id": 1})).json())[2] == ("rental", True)
+        SITE["site"] = Site([item(1, free=True), item(2)], rental=0, ticket_type=None, series_waitfree=False)
+        assert states((await c.get("/api/kakao-manual/analyze", params={"series_id": 1})).json())[2] == ("rental_needed", False)
+        # Scenario 3-2: 기다무가 충전돼 있으면 기다무로 열 수 있는 회차는 "waitfree"(선택 가능)
+        SITE["site"] = Site([item(1, free=True), item(2), item(3, blocked=True)], rental=0, ticket_type=None, waitfree=True)
+        assert states((await c.get("/api/kakao-manual/analyze", params={"series_id": 1})).json()) == {1: ("free", True), 2: ("waitfree", True), 3: ("rental_needed", False)}
+        # Scenario 3-3: "N일 후 무료"로 열릴 회차는 기다무/대여권을 기다리는 게 아니라 날짜를 기다리므로 그냥 "locked"
+        SITE["site"] = Site([item(1, free=True), item(2, free_dt="2099-01-01T00:00:00+09:00"), item(3, blocked=True, free_dt="2099-01-01T00:00:00+09:00")], rental=0, ticket_type=None)
         a = (await c.get("/api/kakao-manual/analyze", params={"series_id": 1})).json()
-        assert states(a)[2] == ("rental", True)
-        print("1~3) 분석 표의 대여권 상태 OK")
+        assert states(a)[2] == ("locked", False) and states(a)[3] == ("locked", False) and a["episodes"][1]["free_at"] == "2099-01-01"
+        # Scenario 3-4: 이용권 조회가 안 되면(로그아웃/서버 오류) 기다무/대여권 사정을 모르므로 이유를 단정하지 않고 "locked"
+        SITE["site"] = Site([item(1, free=True), item(2), item(3, blocked=True)], ticket_my_fail=True)
+        a = (await c.get("/api/kakao-manual/analyze", params={"series_id": 1})).json()
+        assert a["tickets"] is None and states(a) == {1: ("free", True), 2: ("locked", False), 3: ("locked", False)}, states(a)
+        # Scenario 3-5: 이미 받은 회차는 지금 잠겨 있어도(대여가 끝남) 기다릴 게 없으므로 이유 표시 없이 "locked"
+        folder = Path(kp.series_folder(repository.get_setting(kp.DOWNLOAD_ROOT_SETTING_KEY), "작품"))
+        folder.mkdir(parents=True, exist_ok=True)
+        for n in (1, 2): (folder / f"{n:04d}_{n}화.zip").write_bytes(b"x")
+        SITE["site"] = Site([item(1, free=True), item(2), item(3), item(4, blocked=True)], rental=0, ticket_type=None, waitfree=False)
+        a = (await c.get("/api/kakao-manual/analyze", params={"series_id": 1})).json()
+        assert states(a) == {1: ("free", True), 2: ("locked", False), 3: ("waitfree_wait", False), 4: ("rental_needed", False)}, states(a)
+        for f in folder.glob("*.zip"): f.unlink()
+        print("1~3) 분석 표의 상태 구분 OK (기다무/대여권/기다무 대기/대여권 필요/잠금)")
 
         # Scenario 4: 확인 값이 없으면(기본) 고른 대여권 회차도 쓰지 않고 건너뛴다
         SITE["site"] = site = Site([item(1, free=True), item(2, blocked=True), item(3, blocked=True)], rental=2)

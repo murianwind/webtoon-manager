@@ -1002,6 +1002,9 @@ select {
 .kp-locked { background: #6c757d; }
 .kp-waitfree { background: #e08a00; }
 .kp-rental { background: #7b4bd1; }
+/* 아직 못 여는 이유: 기다무 충전 대기(기다무 색을 옅게) / 대여권 필요(대여권 색을 옅게) — 지금 쓸 수 있는 "기다무"/"대여권"과 한눈에 구분되게 */
+.kp-waitfree-wait { background: #c9a35c; }
+.kp-rental-needed { background: #a592d6; }
 .kp-done { background: #0d6efd; }
 .kp-wait { color: #333; font-weight: 600; }
 .kp-before { color: #999; }
@@ -1016,7 +1019,7 @@ select {
 #kakao-manual-table th:nth-child(1), #kakao-manual-table td:nth-child(1) { width: 40px; text-align: center; }
 #kakao-manual-table th:nth-child(2), #kakao-manual-table td:nth-child(2) { width: 64px; text-align: right; }
 #kakao-manual-table th:nth-child(3), #kakao-manual-table td:nth-child(3) { width: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#kakao-manual-table th:nth-child(4), #kakao-manual-table td:nth-child(4) { width: 84px; text-align: center; }
+#kakao-manual-table th:nth-child(4), #kakao-manual-table td:nth-child(4) { width: 108px; text-align: center; }  /* "대여권 필요"/"기다무 대기" 배지가 잘리지 않을 폭 */
 #kakao-manual-table th:nth-child(5), #kakao-manual-table td:nth-child(5) { width: 150px; white-space: nowrap; }
 #kakao-manual-table th:nth-child(6), #kakao-manual-table td:nth-child(6) { width: 190px; text-align: center; white-space: nowrap; }  /* "이미받음" 배지 + "보관 폴더로 옮김"이 잘리지 않을 폭 */
 #kakao-manual-table td:nth-child(2), #kakao-manual-table td:nth-child(3) { padding-left: 12px; }

@@ -26,4 +26,8 @@ ok(stickyHasBackground, "머리글 칸에 배경색이 있어 아래 줄이 비�
 const progress = rulesFor("#kakao-manual-table th:nth-child(6)").concat(rulesFor("#kakao-manual-table td:nth-child(6)")).map((r) => r.body).join(" ");
 const width = /width\s*:\s*(\d+)px/.exec(progress);
 ok(width && Number(width[1]) >= 180, `진행 칸 폭이 180px 이상: ${width ? width[1] : "없음"}px`);
+// Scenario 4: 상태(4번째) 칸이 "대여권 필요"/"기다무 대기" 배지가 잘리지 않을 만큼 넓다(table-layout: fixed라 좁으면 잘린다)
+const status = rulesFor("#kakao-manual-table th:nth-child(4)").concat(rulesFor("#kakao-manual-table td:nth-child(4)")).map((r) => r.body).join(" ");
+const statusWidth = /width\s*:\s*(\d+)px/.exec(status);
+ok(statusWidth && Number(statusWidth[1]) >= 104, `상태 칸 폭이 104px 이상: ${statusWidth ? statusWidth[1] : "없음"}px`);
 done();
