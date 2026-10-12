@@ -32,6 +32,7 @@ async def fake_send(session, settings, message):
 discord_notify.send_webhook_notification = fake_send
 
 use_posts = lambda site: [p for p in site.posts if p[0].endswith("ticket/use")]
+summary = lambda: [line for line in (job_status.snapshot().get("download") or {}).get("log", []) if "다운로드 요약" in line][-1].split(" — ", 1)[1]   # 앞의 시각 제거
 
 
 async def setting_api():
@@ -62,6 +63,17 @@ async def notice_message():
     print("2) 사용 알림 문구 OK")
 
 
+def remaining_free_counts_only_free_downloads():
+    # Scenario 2-2: 이어받기 판단(_kakao_remaining_free)은 기다무/대여권으로 연 회차를 "받을 수 있던 회차"로 세지 않는다
+    ep = lambda n: kp.Episode(product_id=n, title=f"{n}화", number=n, subtitle=f"{n}화", is_free=True, accessible=True, page_count=2, hidden=False)
+    plan = kp.DownloadPlan(mode="compare", to_download=[ep(1), ep(2), ep(3)], locked=[ep(7), ep(8)])
+    r = kp.RunResult([1, 2, 7, 8], [(1, "1화"), (2, "2화"), (7, "7화"), (8, "8화")], None, plan, rental_used=[7, 8])
+    assert scheduler._kakao_remaining_free(r) == 1, scheduler._kakao_remaining_free(r)       # 무료로 받은 건 2개뿐 → 3번이 남았다
+    r = kp.RunResult([1, 2, 3, 7], [], None, plan, ticket_used=7)
+    assert scheduler._kakao_remaining_free(r) == 0
+    print("2-2) 이어받기 판단 OK")
+
+
 async def auto_flow():
     settings = get_settings(); root = tempfile.mkdtemp()
     repository.set_setting(kp.DOWNLOAD_ROOT_SETTING_KEY, root)
@@ -76,6 +88,7 @@ async def auto_flow():
     await scheduler._download_kakao_subscriptions(settings, [])
     assert use_posts(site) == [] and site.rental == 2
     assert sent == ["[작품] 다음 회차 (2번 '2화')부터는 대여권 충전이 필요합니다."], sent
+    assert summary() == "카카오페이지 다운로드 요약 — 작품 1개 / 받음 1회차 / 대여권이 필요해 멈춘 작품 1개 / 기다무 충전을 기다리는 작품 0개 / 오류 0개", summary()
     print("3) 설정 꺼짐: 대여권을 쓰지 않음 OK")
 
     # Scenario 4: 설정을 켜면 보유 2장까지 번호순으로 쓰고, 쓴 내용을 알리고, 못 연 다음 회차는 충전 필요로 알린다
@@ -85,7 +98,8 @@ async def auto_flow():
     await scheduler._download_kakao_subscriptions(settings, [])
     assert [p[1] for p in use_posts(site)] == [{"product_id": 5002, "ticket_type": "RT01"}, {"product_id": 5003, "ticket_type": "RT01"}], site.posts
     assert sent == ["[작품] 대여권 2장을 사용했습니다 (2번, 3번). 남은 대여권 0장", "[작품] 다음 회차 (4번 '4화')부터는 대여권 충전이 필요합니다."], sent
-    print("4) 설정 켜짐: 보유 수까지 사용 + 사용 알림 + 충전 필요 알림 OK")
+    assert summary() == "카카오페이지 다운로드 요약 — 작품 1개 / 받음 2회차 / 대여권 2장 사용 / 대여권이 필요해 멈춘 작품 1개 / 기다무 충전을 기다리는 작품 0개 / 오류 0개", summary()
+    print("4) 설정 켜짐: 보유 수까지 사용 + 사용 알림 + 충전 필요 알림 + 요약 OK")
 
     # Scenario 5: 다시 실행해도 같은 회차에 또 쓰지 않는다(이미 받았거나 보유 0장) — 알림도 중복되지 않는다
     sent.clear(); before = len(use_posts(site))
@@ -96,5 +110,6 @@ async def auto_flow():
 
 asyncio.run(setting_api())
 asyncio.run(notice_message())
+remaining_free_counts_only_free_downloads()
 asyncio.run(auto_flow())
 print("ALL OK")

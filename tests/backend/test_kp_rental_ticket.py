@@ -66,7 +66,9 @@ def names(d): return sorted(p.name for p in Path(d).iterdir() if p.suffix == ".z
 
 
 async def auto_download():
-    run = lambda site, **k: kp.run_download(client(site), series_id=1, title=None, download_root=str(root), max_episodes=20, **k)
+    def run(site, **k):
+        k.setdefault("max_episodes", 20)
+        return kp.run_download(client(site), series_id=1, title=None, download_root=str(root), **k)
     # Scenario 9: 설정이 꺼져 있으면(기본) 대여권은 쓰지 않는다 — 기존 동작 그대로
     root = Path(tempfile.mkdtemp()); site = Site([item(1, free=True), item(2, blocked=True), item(3, blocked=True)])
     r = await run(site)
@@ -83,15 +85,20 @@ async def auto_download():
     r = await run(site, use_rental_tickets=True)
     assert r.downloaded == [1, 2, 3, 4] and r.ticket_used == 2 and r.rental_used == [3, 4] and r.rental_remaining == 3, (r.downloaded, r.ticket_used, r.rental_used)
     assert [p[1]["ticket_type"] for p in use_posts(site)] == ["RT05", "RT01", "RT01"] and r.ticket_needed is None
-    # Scenario 12: 앞의 잠긴 회차가 기다무 충전 대기라면(기다무로 열 수 있는 회차) 거기서 멈춘다 — 뒤의 기다무 불가 회차에 건너뛰어 쓰지 않는다(번호 순서 유지)
+    # Scenario 12: 앞의 잠긴 회차가 기다무 충전 대기(기다무로 열 수 있는 회차)라도 건너뛰고, 그 뒤의 기다무로 못 여는 회차에 대여권을 쓴다
+    #   기다무 대기 회차는 기다무가 알아서 열 차례가 오므로 대여권을 쓰지 않는다 — 번호는 비지만 받는 회차는 늘 누락 회차 비교로 채워진다
     root = Path(tempfile.mkdtemp()); site = Site([item(1, free=True), item(2), item(3, blocked=True)], rental=5, waitfree=False)
     r = await run(site, use_rental_tickets=True)
-    assert r.downloaded == [1] and use_posts(site) == [] and r.ticket_needed is None
-    # Scenario 13: "N일 후 무료"(숨김/무료 전환 예정) 회차에는 쓰지 않는다 — 기다리면 열린다
+    assert r.downloaded == [1, 3] and r.rental_used == [3] and [p[1]["product_id"] for p in use_posts(site)] == [5003], (r.downloaded, r.rental_used)
+    assert r.ticket_needed is None                       # 남은 잠긴 회차(2번)는 기다무가 열 회차라 대여권이 필요한 게 아니다
+    # Scenario 13: "N일 후 무료"(숨김/무료 전환 예정) 회차에는 쓰지 않는다 — 기다리면 열린다. 건너뛰고 뒤의 대여권 회차에는 쓴다
     for extra in ({"hidden": True}, {"free_dt": "2099-01-01T00:00:00+09:00"}):
         root = Path(tempfile.mkdtemp()); site = Site([item(1, free=True), item(2, blocked=True, **extra)], rental=5)
         r = await run(site, use_rental_tickets=True)
         assert r.downloaded == [1] and use_posts(site) == [], extra
+        root = Path(tempfile.mkdtemp()); site = Site([item(1, free=True), item(2, blocked=True, **extra), item(3, blocked=True)], rental=5)
+        r = await run(site, use_rental_tickets=True)
+        assert r.downloaded == [1, 3] and [p[1]["product_id"] for p in use_posts(site)] == [5003], extra
     # Scenario 14: 보유 0장이면 아무것도 쓰지 않고, 기존 "대여권 충전 필요" 판정이 그대로 나온다
     root = Path(tempfile.mkdtemp()); site = Site([item(1, free=True), item(2, blocked=True)], rental=0, ticket_type=None)
     r = await run(site, use_rental_tickets=True)
@@ -104,7 +111,39 @@ async def auto_download():
     root = Path(tempfile.mkdtemp()); site = Site([item(1, free=True), item(2, blocked=True), item(3, blocked=True)], rental=3, fail_use=[5002])
     r = await run(site, use_rental_tickets=True)
     assert r.downloaded == [1] and r.rental_used == [] and len(use_posts(site)) == 1
-    print("2) 자동 다운로드 OK — 설정 꺼짐/보유 수까지/기다무와 함께/대기 회차에서 멈춤/실패 처리")
+
+    # Scenario 17: 실제 사례(블루엔젤) — 앞쪽에 기다무 대기 회차(2,3번)가 있고, 예전에 대여권으로 받아 둔 회차(4,5번: 지금은 대여가 끝나 잠겨 보임)와
+    #   방금 받은 회차(6,7번)가 있고, 아직 안 받은 기다무 불가 회차(8,9번)가 남은 작품. 보유 대여권 2장은 이미 받은 4,5번이 아니라 8,9번에 쓰인다
+    root = Path(tempfile.mkdtemp()); folder = root / "작품"; folder.mkdir()
+    for n in (1, 4, 5, 6, 7): (folder / f"{n:04d}_{n}화.zip").write_bytes(b"x")          # 이미 받아 둔 파일(번호와 제목 규칙만 맞으면 된다)
+    site = Site([item(1, free=True), item(2), item(3), item(4, blocked=True), item(5, blocked=True), item(6, free=True), item(7, free=True),
+                 item(8, blocked=True), item(9, blocked=True), item(10, blocked=True)], rental=2, waitfree=False)
+    r = await run(site, use_rental_tickets=True)
+    assert r.rental_used == [8, 9] and r.rental_remaining == 0 and [p[1]["product_id"] for p in use_posts(site)] == [5008, 5009], (r.rental_used, site.posts)
+    assert sorted(p.name for p in folder.glob("*.zip")) == [f"{n:04d}_{n}화.zip" for n in (1, 4, 5, 6, 7, 8, 9)]
+    assert r.ticket_needed is not None and r.ticket_needed.number == 10          # 대여권이 떨어져서 다음 대여권 회차(10번)가 "충전 필요"
+    # Scenario 18: 대여권 회차가 남았는데 보유 수는 충분하지만 작품당 상한(max_episodes)에 걸려 못 연 경우는 "충전 필요"가 아니다 — 다음 실행에서 이어진다
+    root = Path(tempfile.mkdtemp()); site = Site([item(1, free=True), item(2, blocked=True), item(3, blocked=True), item(4, blocked=True)], rental=5)
+    r = await run(site, use_rental_tickets=True, max_episodes=3)
+    assert r.downloaded == [1, 2, 3] and r.rental_used == [2, 3] and r.rental_remaining == 3 and r.ticket_needed is None
+    # Scenario 19: 대여권을 쓰려고 확인한 적이 없으면(상한이 이미 차서 반복문이 안 돎) 보유 수를 모르므로 "충전 필요"라고 단정하지 않는다
+    root = Path(tempfile.mkdtemp()); site = Site([item(1, free=True), item(2, blocked=True)], rental=0, ticket_type=None)
+    r = await run(site, use_rental_tickets=True, max_episodes=1)
+    assert r.downloaded == [1] and r.rental_remaining is None and r.ticket_needed is None and use_posts(site) == []
+    # Scenario 20: 설정이 꺼져 있을 때의 "다음 회차가 대여권 필요" 판정은 예전과 같다(첫 잠긴 회차만 본다 — 앞에 기다무 대기 회차가 있으면 알리지 않음)
+    root = Path(tempfile.mkdtemp()); site = Site([item(1, free=True), item(2), item(3, blocked=True)], rental=0, waitfree=False)
+    r = await run(site)
+    assert r.downloaded == [1] and r.ticket_needed is None
+    # Scenario 21: 로그 — 건너뛴 앞 회차 수, 대여권 0장으로 멈춘 이유(작품 단위로 멈춘다는 말), 사용 기록이 남는다
+    lines = []
+    root = Path(tempfile.mkdtemp()); site = Site([item(1, free=True), item(2), item(3), item(4, blocked=True)], rental=0, ticket_type=None, waitfree=False)
+    await run(site, use_rental_tickets=True, on_progress=lines.append)
+    assert any("4번 회차" in l and "대여권이 없습니다" in l and "이 작품의 대여권 사용은 여기서 멈춥니다" in l for l in lines), lines
+    assert any("기다무로 열 수 있거나" in l and "2개" in l for l in lines), lines
+    lines.clear(); root = Path(tempfile.mkdtemp()); site = Site([item(1, free=True), item(2), item(3, blocked=True)], rental=1, waitfree=False)
+    await run(site, use_rental_tickets=True, on_progress=lines.append)
+    assert any("3번 회차를 대여권으로 열었습니다" in l and "남은 대여권 0장" in l for l in lines), lines
+    print("2) 자동 다운로드 OK — 설정 꺼짐/보유 수까지/기다무와 함께/대기 회차 건너뛰기/이미 받은 회차 제외/실패 처리/로그")
 
 
 async def manual_download():
