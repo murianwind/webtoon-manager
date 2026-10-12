@@ -126,7 +126,9 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 
 - 요일별 전체 목록 API와 통합검색 응답에는 매일+를 가리키는 값이 확인되지 않아서, **모바일 매일+ 페이지(`m.comic.naver.com/webtoon/weekday?week=dailyPlus`)의 본문 목록 링크**(`/webtoon/list?titleId=N&week=dailyPlus`)로 구분합니다(HAR 캡처로 확인). 같은 페이지의 "이달의 신작" 캐러셀 링크에는 `week`가 없어서 매일+가 아닙니다. 파싱 샘플은 `tests/fixtures/naver_daily_plus_sample.html`(캡처 발췌)입니다.
 - 모바일 UA로 하루에 한 번만 받아 `settings`(`naver_daily_plus_ids`)에 담습니다. 받기에 실패하거나 페이지 구조가 바뀌어 하나도 못 찾으면 예전 기록을 그대로 쓰고, 기록이 없으면 아무것도 숨기지 않습니다(일반 작품이 사라지는 사고 방지). 페이지가 바뀌어 매일+가 다시 보이면 이 정규식(`_LINK_RE`)부터 확인하세요.
-- 거르는 곳은 `GET /api/naver-list`(전체목록: 구독 중인 것과 DB에만 있는 장기휴재 작품 포함), `GET /api/webtoons`(구독해제/제외됨 탭), `GET /api/manual-download/search`(수동 다운로드 검색) 세 곳입니다. 화면과 검색만 숨기고 자동 다운로드, 구독 상태, 직접 titleId로 하는 분석은 건드리지 않습니다. 작가/태그 신작 스캔도 건드리지 않아서 거기서 추가된 매일+ 작품은 목록에만 안 보입니다.
+- 거르는 곳은 `GET /api/naver-list`(전체목록: 구독 중인 것과 DB에만 있는 장기휴재 작품 포함), `GET /api/webtoons`(구독해제/제외됨 탭), `GET /api/manual-download/search`(수동 다운로드 검색) 세 곳입니다. 화면과 검색만 숨기고, 직접 구독한 작품의 자동 다운로드, 구독 상태, 직접 titleId로 하는 분석은 건드리지 않습니다.
+- **신작 스캔은 매일+를 추가하지 않습니다**: 숨기기만 하고 추가를 막지 않았더니 신작 스캔이 새로 찾은 매일+ 작품을 구독 중으로 추가해서, 보이지 않는 채로 자동 다운로드 대상이 되는 문제가 있었습니다. `tracker._add_discovered_titles`(구독 작가/미구독 관심 작가 두 경로가 공유)와 `scan_curation_tags`(태그)가 `daily_plus.current_ids`에 있는 작품은 건너뜁니다. 매일+ 목록을 모르면(빈 목록) 아무것도 거르지 않습니다.
+- **이미 자동 추가된 매일+ 정리**: `repository.exclude_auto_added_titles`가 "구독 중이고 `added_source`가 `artist`/`tag`인" 매일+ 작품을 `제외됨`으로 바꿉니다(직접 구독 `manual`, 구독해제, 제외됨은 그대로). 신작 스캔 시작 때 `tracker.exclude_auto_added_daily_plus`(목록을 새로 받아 정리)가, 네이버 다운로드 시작 때는 저장된 목록만으로(네트워크 없이) 돕니다. 테스트: `tests/backend/test_daily_plus_discovery.py`.
 
 ## 스케줄러 지연 허용 시간 (`misfire_grace_time`)
 

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import aiohttp
 
-from app import download_roots, comicinfo, discord_notify, job_status, kakao_api, kakao_cover, kakao_page_download, naver_api, repository
+from app import daily_plus, download_roots, comicinfo, discord_notify, job_status, kakao_api, kakao_cover, kakao_page_download, naver_api, repository
 from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
 from app.config import Settings
 from app.discord_notify import send_webhook_notification
@@ -499,9 +499,10 @@ async def _add_discovered_titles(
     """'작가의 다른 작품' 목록에서, 아직 안 지워지고 완결도 아니고 등록된 작가 역할이
     맞는 것만 새로 구독 추가한다. 새로 추가된 (title_id, title_name) 리스트(로그용)를 반환한다."""
     added = []
+    hidden = await daily_plus.current_ids(settings.request_timeout_seconds, session)  # 매일+ 작품은 이 앱에서 다루지 않으므로 새로 구독하지 않는다
     for other in others:
         other_title_id = str(other.get("titleId", ""))
-        if not other_title_id or repository.exists(other_title_id):
+        if not other_title_id or repository.exists(other_title_id) or other_title_id in hidden:
             continue
         if not _matches_enabled_writer(other, enabled_author_ids):
             continue  # 등록 해제된 작가이거나 그림작가만 겹치는 작품은 제외
@@ -513,6 +514,16 @@ async def _add_discovered_titles(
         await enrich_one(session, other_title_id, settings)  # writer_ids/tags 없이 들어가는 것 방지
         added.append((other_title_id, other_title_name))
     return added
+
+
+async def exclude_auto_added_daily_plus(session: aiohttp.ClientSession, settings: Settings) -> list[tuple[str, str]]:
+    """신작 스캔이 이미 자동으로 구독 추가해 둔 네이버 매일+ 작품을 "제외됨"으로 정리한다(직접 구독한 작품은 그대로). (title_id, 제목) 목록을 돌려준다.
+    매일+ 목록을 모르면(빈 목록) 아무것도 하지 않는다."""
+    hidden = await daily_plus.current_ids(settings.request_timeout_seconds, session)
+    excluded = repository.exclude_auto_added_titles(hidden)
+    for title_id, title in excluded:
+        log.info("자동 추가된 매일+ 작품을 제외됨으로 정리: %s (%s)", title, title_id)
+    return excluded
 
 
 async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, settings: Settings) -> None:
@@ -613,6 +624,7 @@ async def scan_curation_tags(session: aiohttp.ClientSession, settings: Settings)
     """등록된(watched_tags, enabled=1) 태그(큐레이션)에 새로 편입된 완결되지 않은 작품을 자동 구독에 추가한다."""
     tag_ids = repository.get_enabled_tag_ids()
     new_entry_lines: list[str] = []
+    hidden = await daily_plus.current_ids(settings.request_timeout_seconds, session) if tag_ids else set()  # 매일+ 작품은 새로 구독하지 않는다
 
     for tag_id in tag_ids:
         try:
@@ -630,7 +642,7 @@ async def scan_curation_tags(session: aiohttp.ClientSession, settings: Settings)
 
         for item in items:
             other_title_id = str(item.get("titleId", ""))
-            if not other_title_id or repository.exists(other_title_id):
+            if not other_title_id or repository.exists(other_title_id) or other_title_id in hidden:
                 continue
             if item.get("finished"):
                 continue

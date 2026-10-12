@@ -28,7 +28,7 @@ from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app import download_roots, archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, kakao_api, kakao_catalog, kakao_page_auth, kakao_page_download, naver_api, new_episode_watch, report_seen, repository, schedule_config, tracker, webtoon_server_client
+from app import daily_plus, download_roots, archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, kakao_api, kakao_catalog, kakao_page_auth, kakao_page_download, naver_api, new_episode_watch, report_seen, repository, schedule_config, tracker, webtoon_server_client
 from app import rclone_updater
 from app.config import Settings, get_settings
 from app.constants import NAVER_DETAIL_URL_TEMPLATES
@@ -372,9 +372,13 @@ async def _download_kakao_subscriptions(settings, failures: list[dict]) -> None:
 
 async def _run_download_job_impl(platforms: set[str]) -> None:
     settings = get_settings()
+    # 신작 스캔이 자동으로 구독 추가해 둔 매일+ 작품은 받지 않는다 — 저장해 둔 매일+ 목록으로(네트워크 없이) 먼저 제외됨으로 정리한다
+    auto_excluded = repository.exclude_auto_added_titles(daily_plus.cached_ids()) if "naver" in platforms else []
     active_webtoons = repository.list_by_status(repository.STATUS_ACTIVE) if "naver" in platforms else []
 
     job_status.start("download")
+    if auto_excluded:
+        job_status.log_line("download", f"자동 추가된 매일+ 작품 {len(auto_excluded)}개를 제외됨으로 정리했습니다: " + ", ".join(title for _, title in auto_excluded))
     if "naver" in platforms:
         job_status.log_line("download", f"다운로드 스캔 시작 — 구독 중인 네이버 웹툰 {len(active_webtoons)}개")
     else:
@@ -942,6 +946,15 @@ async def _run_discovery_job_impl() -> None:
     had_error = False
 
     async with aiohttp.ClientSession() as session:
+        try:
+            excluded = await tracker.exclude_auto_added_daily_plus(session, settings)
+            if excluded:
+                job_status.log_line("discovery", f"자동 추가된 매일+ 작품 {len(excluded)}개를 제외됨으로 정리했습니다: " + ", ".join(title for _, title in excluded))
+        except Exception as e:
+            had_error = True
+            log.error("매일+ 작품 정리 중 예외: %s", e)
+            job_status.log_line("discovery", f"매일+ 작품 정리 오류: {e}")
+
         try:
             job_status.log_line("discovery", "썸네일 없는 웹툰 채우는 중")
             filled = await tracker.backfill_missing_thumbnails(session, settings)

@@ -149,6 +149,21 @@ def update_thumbnail_url(title_id: str, thumbnail_url: str) -> None:
         )
 
 
+def exclude_auto_added_titles(title_ids: set[str]) -> list[tuple[str, str]]:
+    """title_ids(예: 네이버 매일+ 작품) 중 신작 스캔(작가/태그)이 자동으로 추가했고 아직 구독 중인 작품을 "제외됨"으로 바꿔서 (title_id, 제목) 목록을 돌려준다.
+    다운로드 대상에서 빠지고, 제외됨은 이미 있는 것으로 취급돼서 신작 스캔이 다시 추가하지 않는다. 사용자가 직접 구독한 작품과 구독해제/제외됨은 건드리지 않는다."""
+    if not title_ids:
+        return []
+    with write_transaction() as conn:
+        rows = conn.execute(
+            "SELECT title_id, title FROM webtoons WHERE status = ? AND added_source IN (?, ?)", (STATUS_ACTIVE, SOURCE_ARTIST, SOURCE_TAG)
+        ).fetchall()
+        targets = [(row["title_id"], row["title"]) for row in rows if row["title_id"] in title_ids]
+        for title_id, _ in targets:
+            conn.execute("UPDATE webtoons SET status = ?, updated_at = ? WHERE title_id = ?", (STATUS_EXCLUDED, _now(), title_id))
+    return targets
+
+
 def set_status(title_id: str, status: str) -> None:
     """상태를 바꾼다. active로 바뀌는 순간(구독을 시작하는 순간) ever_subscribed도
     같이 1로 세워두고 이후로는 절대 되돌리지 않는다 — "구독한 적 없이 제외됨→
