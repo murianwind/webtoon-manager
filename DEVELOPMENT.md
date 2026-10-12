@@ -129,6 +129,7 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - 거르는 곳은 `GET /api/naver-list`(전체목록: 구독 중인 것과 DB에만 있는 장기휴재 작품 포함), `GET /api/webtoons`(구독해제/제외됨 탭), `GET /api/manual-download/search`(수동 다운로드 검색) 세 곳입니다. 화면과 검색만 숨기고, 직접 구독한 작품의 자동 다운로드, 구독 상태, 직접 titleId로 하는 분석은 건드리지 않습니다.
 - **신작 스캔은 매일+를 추가하지 않습니다**: 숨기기만 하고 추가를 막지 않았더니 신작 스캔이 새로 찾은 매일+ 작품을 구독 중으로 추가해서, 보이지 않는 채로 자동 다운로드 대상이 되는 문제가 있었습니다. `tracker._add_discovered_titles`(구독 작가/미구독 관심 작가 두 경로가 공유)와 `scan_curation_tags`(태그)가 `daily_plus.current_ids`에 있는 작품은 건너뜁니다. 매일+ 목록을 모르면(빈 목록) 아무것도 거르지 않습니다.
 - **이미 자동 추가된 매일+ 정리**: `repository.exclude_auto_added_titles`가 "구독 중이고 `added_source`가 `artist`/`tag`인" 매일+ 작품을 `제외됨`으로 바꿉니다(직접 구독 `manual`, 구독해제, 제외됨은 그대로). 신작 스캔 시작 때 `tracker.exclude_auto_added_daily_plus`(목록을 새로 받아 정리)가, 네이버 다운로드 시작 때는 저장된 목록만으로(네트워크 없이) 돕니다. 테스트: `tests/backend/test_daily_plus_discovery.py`.
+- **알림에서도 뺍니다**: 리포트의 미등록 새 에피소드 후보(`scheduler._collect_unregistered_new_episodes`)와 구독해제 새 에피소드 확인(`new_episode_watch.scan_naver`)도 `daily_plus.current_ids`에 있는 작품을 건너뜁니다(목록을 모르면 거르지 않음). 구독해제/제외됨의 정보 갱신(`refresh_inactive_metadata`)은 눈에 보이는 영향이 없어 그대로 둡니다. 테스트: `tests/backend/test_daily_plus_alerts.py`.
 
 ## 스케줄러 지연 허용 시간 (`misfire_grace_time`)
 

@@ -563,7 +563,8 @@ async def _collect_unregistered_new_episodes(
         record = repository.get(title_id)
         return record is None or record.status == repository.STATUS_UNREGISTERED
 
-    candidates = [item for item in items if item.has_update and _not_subscribed_in_list(item.title_id)]
+    hidden = await daily_plus.current_ids(settings.request_timeout_seconds, session)  # 매일+ 작품은 화면에서 숨기므로 알리지도 않는다(목록을 모르면 거르지 않음)
+    candidates = [item for item in items if item.has_update and item.title_id not in hidden and _not_subscribed_in_list(item.title_id)]
     candidates = candidates[:_UNREGISTERED_NEW_EPISODE_LIMIT]
     if not candidates:
         return []

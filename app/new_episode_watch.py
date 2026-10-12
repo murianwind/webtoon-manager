@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import aiohttp
 
-from app import discord_notify, job_status, kakao_page_download, naver_api, repository
+from app import daily_plus, discord_notify, job_status, kakao_page_download, naver_api, repository
 from app.config import Settings
 from app.cookie_loader import get_adult_cookies
 
@@ -41,8 +41,9 @@ def decide(seen: int | None, latest: int | None) -> tuple[bool, int | None]:
 
 
 async def scan_naver(session: aiohttp.ClientSession, settings: Settings) -> list[NewEpisode]:
-    """구독해제 네이버 웹툰마다 최신 회차를 확인한다. 기준만 기록하는 작품은 바로 기록하고, 알릴 작품만 돌려준다(기록은 전송 성공 뒤)."""
-    targets = repository.list_by_status(repository.STATUS_UNSUBSCRIBED)
+    """구독해제 네이버 웹툰(매일+ 작품은 뺀다)마다 최신 회차를 확인한다. 기준만 기록하는 작품은 바로 기록하고, 알릴 작품만 돌려준다(기록은 전송 성공 뒤)."""
+    hidden = await daily_plus.current_ids(settings.request_timeout_seconds, session)  # 매일+ 작품은 화면에서 숨기므로 확인도 알림도 하지 않는다(목록을 모르면 거르지 않음)
+    targets = [wt for wt in repository.list_by_status(repository.STATUS_UNSUBSCRIBED) if wt.title_id not in hidden]
     cookies = get_adult_cookies(settings.cookie_file_path) if targets else {}
     semaphore = asyncio.Semaphore(settings.artist_scan_concurrency)
 
