@@ -116,6 +116,26 @@ async def set_author_auto_register(payload: AuthorAutoRegisterIn):
     return await get_author_auto_register()
 
 
+class RentalTicketAutoUseOut(BaseModel):
+    enabled: bool
+
+
+class RentalTicketAutoUseIn(BaseModel):
+    enabled: bool
+
+
+@router.get("/settings/kakao-rental-ticket-auto-use", response_model=RentalTicketAutoUseOut)
+async def get_kakao_rental_ticket_auto_use():
+    """자동 다운로드에서 보유한 카카오페이지 일반 대여권을 쓸지 여부(기본 꺼짐). 켜면 기다무로 못 여는 회차를 그 작품의 보유 대여권 수까지 연다."""
+    return RentalTicketAutoUseOut(enabled=await asyncio.to_thread(repository.is_kakao_rental_ticket_auto_use_enabled))
+
+
+@router.post("/settings/kakao-rental-ticket-auto-use", response_model=RentalTicketAutoUseOut)
+async def set_kakao_rental_ticket_auto_use(payload: RentalTicketAutoUseIn):
+    await asyncio.to_thread(repository.set_setting, repository.KAKAO_RENTAL_AUTO_USE_KEY, "1" if payload.enabled else None)
+    return await get_kakao_rental_ticket_auto_use()
+
+
 class WebtoonServerUrlOut(BaseModel):
     webtoon_server_url: str
 

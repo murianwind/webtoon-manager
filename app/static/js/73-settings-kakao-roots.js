@@ -24,6 +24,31 @@ async function loadKakaoPageCookieStatus() {
   }
 }
 
+// ── 대여권 자동 사용 설정(기본 꺼짐) ────────────────────────────
+
+async function loadKakaoRentalAutoSetting() {
+  try {
+    const data = await apiCall("/api/settings/kakao-rental-ticket-auto-use");
+    document.getElementById("kakao-rental-auto-toggle").checked = data.enabled;
+  } catch (e) {
+    // 조용히 무시
+  }
+}
+
+document.getElementById("btn-save-kakao-rental-auto").addEventListener("click", async () => {
+  const resultEl = document.getElementById("kakao-rental-auto-save-result");
+  resultEl.textContent = "";
+  try {
+    await apiCall("/api/settings/kakao-rental-ticket-auto-use", {
+      method: "POST",
+      body: JSON.stringify({ enabled: document.getElementById("kakao-rental-auto-toggle").checked }),
+    });
+    resultEl.textContent = "저장했습니다.";
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+});
+
 document.getElementById("btn-kp-cookie-save").addEventListener("click", async () => {
   const box = document.getElementById("kp-cookie-json");
   const statusEl = document.getElementById("kp-cookie-status");

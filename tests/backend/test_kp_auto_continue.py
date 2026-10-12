@@ -21,7 +21,7 @@ async def no_notify(*a, **k): return False
 auth.notify_if_needed = no_notify
 
 def E(n, acc=True): return kp.Episode(product_id=n, title="t", number=n, subtitle=f"{n}화", is_free=acc, accessible=acc, page_count=1, hidden=False)
-async def fake_run_download(client, *, series_id, title, download_root, max_episodes, on_progress=None):
+async def fake_run_download(client, *, series_id, title, download_root, max_episodes, on_progress=None, use_rental_tickets=False):
     """실제 run_download처럼 폴더(STATE) 기준으로 받을 회차를 계산해서 최대 max_episodes개 받은 것으로 친다."""
     st = STATE[series_id]; calls.append((series_id, max_episodes))
     todo = [n for n in range(1, st["total"] + 1) if n not in st["have"]]
@@ -77,7 +77,7 @@ async def main():
     print("5) 여러 작품 OK")
 
     # ── 6. 안전장치: 계속 "남았다"고만 하는 비정상 응답이어도 무한 반복하지 않는다 ──
-    async def stuck(client, *, series_id, title, download_root, max_episodes, on_progress=None):
+    async def stuck(client, *, series_id, title, download_root, max_episodes, on_progress=None, use_rental_tickets=False):
         calls.append((series_id, max_episodes)); plan = kp.DownloadPlan(mode="compare", to_download=[E(1), E(2)])
         return kp.RunResult([1], [(1, "1화")], None, plan, title="무한")
     kp.run_download = stuck; only([4]); reset(); await scheduler._download_kakao_subscriptions(S, [])

@@ -491,6 +491,15 @@ def is_author_auto_register_enabled() -> bool:
     return get_setting("auto_register_author_on_subscribe") != "0"
 
 
+KAKAO_RENTAL_AUTO_USE_KEY = "kakao_rental_ticket_auto_use"
+
+
+def is_kakao_rental_ticket_auto_use_enabled() -> bool:
+    """자동 다운로드에서 보유한 일반 대여권을 써서 기다무로 못 여는 회차를 열지 여부. 값이 명시적으로 '1'일 때만 켜짐(기본 꺼짐) —
+    대여권은 돈을 내고 산 것이라 사용자가 직접 켠 경우에만 쓴다."""
+    return get_setting(KAKAO_RENTAL_AUTO_USE_KEY) == "1"
+
+
 def set_kakao_finished(title_id: int, finished: bool) -> None:
     """완결(이고 받을 회차를 다 받은) 상태를 기록한다. 다시 연재로 돌아오면 알림 기록도 초기화해서 다음 완결 때 다시 알린다."""
     with write_transaction() as conn:

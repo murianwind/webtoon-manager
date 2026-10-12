@@ -57,7 +57,7 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - 기다무로 연 회차의 받기가 실패하면 기다무는 이미 소모된 상태이고, 그 회차는 대여 기간 동안 "보유"로 남아 이용권 없이 다시 받을 수 있습니다.
 
 **이용권**
-- `ticket/my`(보유 이용권), `ticket/ready_to_use`(사용 가능 여부), `ticket/use`(사용). 기다무는 `RT05`, 선물권은 `RT06`입니다. **자동으로는 `RT05`만 쓰고** 결제는 하지 않습니다. 일반 대여권의 종류 코드와 사용 응답은 확인된 캡처가 없어서 구현하지 않았습니다.
+- `ticket/my`(보유 이용권), `ticket/ready_to_use`(사용 가능 여부), `ticket/use`(사용). 기다무는 `RT05`, 일반 대여권은 `RT01`(대여권.har로 확인), 선물권은 `RT06`입니다. **`RT05`와 `RT01`만 쓰고**(선물권은 쓰지 않음) 결제(`ticket/buy`, `store/*`)는 코드에 아예 없습니다 — `tests/backend/test_kp_rental_ticket.py`가 모듈 소스에 구매/결제 주소가 없는지 검사합니다.
 - 기다무 지원 여부는 이용권 응답이 아니라 작품 정보의 `is_waitfree`로 판단합니다(이용권 응답은 기다무가 없는 작품에서도 "사용 중"으로 나옵니다). 충전 주기는 `charged_period_by_minute`(분)입니다.
 - 자동 다운로드는 받을 수 있는 회차를 다 받은 뒤 첫 잠긴 회차 하나를 기다무로 엽니다. 최신 회차처럼 `waitfree_blocked`인 회차는 건드리지 않습니다.
 - **대여권 필요 알림**: `RunResult.ticket_needed`가 "받을 회차를 다 받았는데 남은 첫 잠긴 회차(기다무로 막 연 회차는 건너뜀)가 기다무로 열 수 없는 회차"인지 판정합니다(기다무 없는 작품이거나 `waitfree_blocked`). 숨김/"N일 후 무료" 회차, 오류/실패, 받을 회차가 남은 경우는 대상이 아닙니다. `scheduler._notify_kakao_ticket_needed`가 웹훅으로 보내고, 알린 회차 번호를 `kakao_webtoons.ticket_notified_no`에 기록해 같은 회차는 다시 알리지 않습니다. `send_webhook_notification`은 전송 성공 여부를 돌려주며, 웹훅이 없거나 실패하면 기록하지 않아 다음 실행에서 다시 시도합니다.
@@ -103,7 +103,10 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 
 ## 알려진 문제 (미해결)
 
-- **일반 대여권 자동 사용은 미구현**: 종류 코드와 사용 응답을 확인할 캡처가 필요합니다. 만들게 되면 수동 다운로드에서 확인을 받은 뒤에만 쓰고, 자동 다운로드에서는 쓰지 않는 것을 권장합니다.
+- **일반 대여권(RT01) 사용** (`KakaoPageClient.use_rental_ticket`): `ticket/ready_to_use`가 알려 주는 `available.ticket_rental_type == "RT01"`, `my.ticket_rental_count`(작품별 보유 수 — 대여권은 작품에 귀속), 그리고 "기다무로 못 여는 회차"(`series.is_waitfree`가 거짓이거나 `single.waitfree_block`이 참)일 때만 `POST ticket/use`(`product_id`, `ticket_type=RT01`)를 **한 번** 보냅니다(재시도 없음). 응답을 못 받으면 `read_access_type == "RAT2"`(대여 중)인지 다시 조회해서 판단합니다 — 이중 소모 방지. 대상 판정은 `rental_eligible`(기다무 대기 회차와 숨김/"N일 후 무료" 회차는 제외) 한 곳입니다.
+  - **자동**: `run_download(use_rental_tickets=...)`가 기다무 단계 뒤에 `_download_locked_with_rental`로 잠긴 회차를 번호순으로 보유 수까지 엽니다. 기다무 대기/무료 전환 예정 회차나 대여권을 못 쓰는 경우에는 거기서 멈춥니다(번호 순서 유지). 설정은 `settings`의 `kakao_rental_ticket_auto_use`(`"1"`일 때만 켜짐, 기본 꺼짐; `GET/POST /api/settings/kakao-rental-ticket-auto-use`)이고, 작품별 설정은 없습니다(대여권이 작품에 귀속돼 있어서 전역 하나로 충분). `RunResult.rental_used/rental_remaining`가 결과이고, `ticket_needed`는 기다무와 대여권으로 연 회차 수만큼 건너뛰고 판정합니다. 쓸 때마다 `scheduler._notify_kakao_rental_used`가 웹훅으로 알립니다(배치마다 한 번).
+  - **수동**: 분석 표에서 보유 대여권이 있고 `rental_eligible`인 회차가 `state: "rental"`(선택 가능)입니다. 화면은 확인 창을 거쳐 `POST /api/kakao-manual/run`에 `use_rental_tickets: true`를 보내고, 서버는 이 값이 있을 때만 `download_selected`가 대여권을 씁니다(보유 수를 넘으면 앞 번호부터, 나머지는 "대여권이 부족합니다"로 건너뜀).
+  - 테스트: `test_kp_rental_ticket.py`(사용 로직, 가짜 서버 `fake_kakao_rental_site.py`), `test_kp_rental_auto.py`(설정/자동 연결/알림), `test_kp_rental_manual.py`(수동 API), `tests/js/test_kakao_rental_ui.js`(화면).
 - 받은 회차 기록의 소급 한계는 위 "받은 회차 기록" 항목을 보세요(이력/보관 폴더의 파일을 읽지 못하는 경우).
 
 ## 수동 다운로드 표 머리글 고정과 검색창 지우기 버튼

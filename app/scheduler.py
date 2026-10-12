@@ -234,10 +234,11 @@ def _record_kakao_batch(webtoon: dict, result, failures: list[dict]) -> None:
         job_status.log_line("download", f"[{title}] ⚠ 폴더의 파일(표식)이 사이트 회차와 맞지 않아 번호대로 이어받았습니다")
 
 
-async def _download_kakao_title(client, settings, webtoon: dict, root: str, failures: list[dict]):
+async def _download_kakao_title(client, settings, webtoon: dict, root: str, failures: list[dict], *, use_rental_tickets: bool = False, session=None):
     """작품 하나를 받는다. 상한(작품당 한 번에 받는 수)에 걸려 받을 회차가 남으면, 네이버와 같이 batch_rest_minutes만큼 쉬었다가 같은
     실행 안에서 이어서 받는다(다음 정기 실행까지 기다리지 않는다). 실패/오류가 나면 거기서 멈춘다. 마지막 배치의 결과를 돌려준다(예외로
-    중단되면 None) — 완결 판정은 이 결과로 한다."""
+    중단되면 None) — 완결 판정은 이 결과로 한다. use_rental_tickets면 기다무로 못 여는 회차를 이 작품의 보유 대여권으로 열고, 배치마다
+    쓴 내용을 session의 웹훅으로 알린다(여러 배치에 걸쳐 쓰면 배치마다 한 번씩)."""
     title, series_id = webtoon["title"], webtoon["title_id"]
     cap = settings.max_new_episodes_per_title
     max_episodes = cap if cap > 0 else _KAKAO_UNLIMITED_EPISODES
@@ -247,6 +248,7 @@ async def _download_kakao_title(client, settings, webtoon: dict, root: str, fail
             result = await kakao_page_download.run_download(
                 client, series_id=series_id, title=None, download_root=root, max_episodes=max_episodes,
                 on_progress=lambda line, t=title: job_status.log_line("download", f"[{t}] {line}"),
+                use_rental_tickets=use_rental_tickets,
             )
         except Exception as e:
             log.error("카카오페이지 웹툰(series_id=%s) 다운로드 중 예외 — 다음으로 진행: %s", series_id, e)
@@ -254,6 +256,8 @@ async def _download_kakao_title(client, settings, webtoon: dict, root: str, fail
             failures.append({"title_name": title, "episode_no": None, "subtitle": str(e)})
             return None
         _record_kakao_batch(webtoon, result, failures)
+        if session is not None:
+            await _notify_kakao_rental_used(session, settings, webtoon, result)
         remaining = _kakao_remaining_free(result)
         if remaining <= 0:
             break
@@ -264,6 +268,18 @@ async def _download_kakao_title(client, settings, webtoon: dict, root: str, fail
         job_status.log_line("download", f"[{title}] {len(result.downloaded)}화 받음, 남은 {remaining}화는 {rest_minutes:g}분 쉬었다가 이어받기")
         await asyncio.sleep(rest_minutes * 60)
     return result
+
+
+async def _notify_kakao_rental_used(session, settings, webtoon: dict, result) -> None:
+    """자동으로 대여권을 썼으면 쓴 회차와 이 작품에 남은 장수를 디스코드로 알린다(돈을 낸 자원이 자동으로 쓰였으니 매번 알린다).
+    알림이 실패해도 다운로드는 이미 끝났으므로 로그만 남기고 넘어간다."""
+    if not result.rental_used:
+        return
+    numbers = ", ".join(f"{n}번" for n in result.rental_used)
+    left = f" 남은 대여권 {result.rental_remaining}장" if result.rental_remaining is not None else ""
+    message = f"[{result.title or webtoon['title']}] 대여권 {len(result.rental_used)}장을 사용했습니다 ({numbers}).{left}"
+    if not await discord_notify.send_webhook_notification(session, settings, message):
+        job_status.log_line("download", f"[{webtoon['title']}] 대여권 사용 알림을 보내지 못했습니다(웹훅 없음/전송 실패)")
 
 
 async def _notify_kakao_ticket_needed(session, settings, webtoon: dict, result) -> None:
@@ -318,8 +334,11 @@ async def _download_kakao_subscriptions(settings, failures: list[dict]) -> None:
                 job_status.log_line("download", "카카오페이지 로그인이 풀려 있어서 건너뜁니다(쿠키를 다시 붙여넣어 주세요)")
                 return
 
+            use_rental_tickets = repository.is_kakao_rental_ticket_auto_use_enabled()
+            if use_rental_tickets:
+                job_status.log_line("download", "대여권 자동 사용이 켜져 있습니다 — 기다무로 못 여는 회차는 작품의 보유 대여권으로 엽니다")
             for webtoon in subscribed:
-                result = await _download_kakao_title(client, settings, webtoon, root, failures)
+                result = await _download_kakao_title(client, settings, webtoon, root, failures, use_rental_tickets=use_rental_tickets, session=session)
                 # 쉬는 시간이 긴 이어받기 중에 쿠키가 갱신될 수 있어서 작품마다 저장한다(중간에 멈춰도 갱신분이 남도록)
                 kakao_page_download.persist_refreshed_cookies(client)
                 if result is None:

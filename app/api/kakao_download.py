@@ -80,6 +80,7 @@ async def check_kakao_page_login():
 class KakaoManualRunIn(BaseModel):
     series_id: int
     numbers: list[int]
+    use_rental_tickets: bool = False  # 화면에서 "대여권 N장을 씁니다"를 확인받았을 때만 true — 없으면 대여권은 쓰지 않는다
 
     @field_validator("numbers")
     @classmethod
@@ -117,8 +118,17 @@ def _can_open_with_waitfree(episode, waitfree_ready: bool) -> bool:
     return waitfree_ready and not episode.accessible and not episode.waitfree_blocked
 
 
-def _kakao_episode_state(episode, waitfree_ready: bool) -> str:
-    return "waitfree" if _can_open_with_waitfree(episode, waitfree_ready) else kakao_page_download.episode_state(episode)
+def _can_open_with_rental(episode, series_item: dict, rental_ready: bool) -> bool:
+    """보유 대여권이 있고, 기다무로 못 여는 잠긴 회차(기다무가 없는 작품 / 기다무 불가 회차)이면 대여권으로 열 수 있다."""
+    return rental_ready and kakao_page_download.rental_eligible(episode, series_item)
+
+
+def _kakao_episode_state(episode, waitfree_ready: bool, series_item: dict, rental_ready: bool = False) -> str:
+    if _can_open_with_waitfree(episode, waitfree_ready):
+        return "waitfree"
+    if _can_open_with_rental(episode, series_item, rental_ready):
+        return "rental"
+    return kakao_page_download.episode_state(episode)
 
 
 @router.get("/kakao-manual/analyze")
@@ -144,6 +154,7 @@ async def kakao_manual_analyze(series_id: int):
     series_item, episodes = listing
     supported = kakao_page_download.waitfree_supported(series_item)
     waitfree_ready = supported and bool(tickets and tickets.waitfree_ready)  # 기다무가 없는 작품이면 이용권 응답이 "사용 가능"이어도 쓸 수 없다
+    rental_ready = bool(tickets and tickets.rental_count > 0)  # 보유 대여권이 있어야 "대여권" 상태로 고를 수 있다
     tracked = await asyncio.to_thread(repository.get_kakao_webtoon, series_id)
     title = series_item.get("title") or str(series_id)
     folder = kakao_page_download.series_folder(root, title)
@@ -178,17 +189,19 @@ async def kakao_manual_analyze(series_id: int):
             {
                 "number": row.episode.number, "subtitle": row.episode.subtitle,
                 # 잠긴 회차라도 기다무를 쓸 수 있으면 "waitfree" — 골라서 받으면 기다무로 열고 받는다(한 장이라 하나만)
-                "state": _kakao_episode_state(row.episode, waitfree_ready), "expire": row.episode.rent_expire,
+                "state": _kakao_episode_state(row.episode, waitfree_ready, series_item, rental_ready), "expire": row.episode.rent_expire,
                 "free_at": kakao_page_download.free_date_of(row.episode),  # 연재무료: 이 날짜에 무료가 된다
                 "downloaded": row.downloaded, "archived": row.archived, "before_start": row.before_start,
-                "selectable": row.episode.accessible or _can_open_with_waitfree(row.episode, waitfree_ready),  # 이미 받은 회차도 다시 받을 수 있다(수동)
+                "selectable": (  # 이미 받은 회차도 다시 받을 수 있다(수동)
+                    row.episode.accessible or _can_open_with_waitfree(row.episode, waitfree_ready) or _can_open_with_rental(row.episode, series_item, rental_ready)
+                ),
             }
             for row in plan.rows
         ],
     }
 
 
-async def _run_kakao_manual_download(series_id: int, numbers: list[int]) -> None:
+async def _run_kakao_manual_download(series_id: int, numbers: list[int], use_rental_tickets: bool = False) -> None:
     job = manual_download.JOB_NAME
     settings = get_settings()
 
@@ -213,7 +226,8 @@ async def _run_kakao_manual_download(series_id: int, numbers: list[int]) -> None
                     return
                 log_line(f"{len(numbers)}개 회차 다운로드 시작 (저장 폴더: {root})")
                 result = await kakao_page_download.download_selected(
-                    client, series_id=series_id, title=None, numbers=numbers, download_root=root, on_progress=log_line
+                    client, series_id=series_id, title=None, numbers=numbers, download_root=root, on_progress=log_line,
+                    use_rental_tickets=use_rental_tickets,
                 )
                 kakao_page_download.persist_refreshed_cookies(client)
         for number, subtitle in result.downloaded_items:
@@ -225,6 +239,9 @@ async def _run_kakao_manual_download(series_id: int, numbers: list[int]) -> None
             f"실패 {len(result.failed)}개 / 잠겨서 건너뜀 {len(result.skipped_locked)}개"
             + (f" / 기다무로 연 회차 {len(result.ticket_used)}개" if result.ticket_used else "")
         )
+        if result.rental_used:
+            left = f", 남은 대여권 {result.rental_remaining}장" if result.rental_remaining is not None else ""
+            log_line(f"[{result.title}] 대여권 {len(result.rental_used)}장 사용 ({', '.join(f'{n}번' for n in result.rental_used)}){left}")
         success = not result.failed and not result.not_found
     except Exception as e:
         log.exception("카카오페이지 수동 다운로드 중 예외")
@@ -245,5 +262,5 @@ async def kakao_manual_run(payload: KakaoManualRunIn):
     if kakao_page_download.download_lock.locked():
         raise HTTPException(status_code=409, detail="카카오페이지 자동 다운로드가 진행 중입니다. 끝난 뒤 다시 시도해주세요.")
     job_status.start(manual_download.JOB_NAME)
-    _kakao_manual_task = asyncio.create_task(_run_kakao_manual_download(payload.series_id, payload.numbers))
+    _kakao_manual_task = asyncio.create_task(_run_kakao_manual_download(payload.series_id, payload.numbers, payload.use_rental_tickets))
     return {"status": "started"}

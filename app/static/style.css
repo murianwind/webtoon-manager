@@ -1001,6 +1001,7 @@ select {
 .kp-owned { background: #0d6efd; }
 .kp-locked { background: #6c757d; }
 .kp-waitfree { background: #e08a00; }
+.kp-rental { background: #7b4bd1; }
 .kp-done { background: #0d6efd; }
 .kp-wait { color: #333; font-weight: 600; }
 .kp-before { color: #999; }

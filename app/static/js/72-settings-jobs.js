@@ -38,6 +38,7 @@ async function loadSettingsPage() {
   loadUnregisteredNewEpisodesToggle();
   loadKakaoWebtoonsEnabledToggle();
   loadKakaoPageCookieStatus();
+  loadKakaoRentalAutoSetting();
   loadDownloadRoots();
   loadAuthorAutoRegisterSetting();
   loadUnsubscribeHistoryList();

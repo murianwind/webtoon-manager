@@ -126,7 +126,7 @@ async function runKakaoManualAnalyze(seriesId) {
   }
 }
 
-const KAKAO_STATE_BADGE = { free: ["kp-free", "무료"], owned: ["kp-owned", "보유"], waitfree: ["kp-waitfree", "기다무"], locked: ["kp-locked", "잠금"] };
+const KAKAO_STATE_BADGE = { free: ["kp-free", "무료"], owned: ["kp-owned", "보유"], waitfree: ["kp-waitfree", "기다무"], rental: ["kp-rental", "대여권"], locked: ["kp-locked", "잠금"] };
 
 // 기다무를 다시 쓸 수 있기까지 남은 시간(카카오페이지 작품 화면의 "23시간 59분 남음"과 같은 표시)
 function formatRemaining(isoString) {
@@ -242,6 +242,7 @@ function renderKakaoManualTable() {
       <td>${progress}</td>`;
     tr.querySelector("input").dataset.downloaded = e.downloaded ? "1" : "";
     tr.querySelector("input").dataset.waitfree = e.state === "waitfree" ? "1" : "";
+    tr.querySelector("input").dataset.rental = e.state === "rental" ? "1" : "";
     tr.querySelector("input").dataset.missing = e.selectable && !e.downloaded && !e.before_start ? "1" : "";
     tbody.appendChild(tr);
   }
@@ -254,16 +255,32 @@ function kakaoManualCheckboxes() {
 
 // 고른 회차 중 기다무가 필요한 회차는 사용할 수 있는 장수(작품당 한 장)만큼만 고른다 — 번호가 가장 앞선 것부터. 나머지는 열 수 없어서
 // 골라 봐야 "건너뜀"이 되기 때문이다. 이미 받은 회차를 다시 받으려고 기다무를 쓰는 일은 이 버튼들이 하지 않는다(직접 체크하면 가능).
+// 대여권 회차도 같다 — 이 작품의 보유 대여권 수(작품마다 따로 귀속)만큼만 번호가 앞선 것부터 고른다.
 function selectKakaoManual(wanted) {
   let waitfreeLeft = 1;
+  let rentalLeft = kakaoManualAnalysis.tickets ? kakaoManualAnalysis.tickets.rental_count : 0;
   for (const cb of kakaoManualCheckboxes().sort((x, y) => Number(x.dataset.no) - Number(y.dataset.no))) {
     let on = wanted(cb);
     if (on && cb.dataset.waitfree === "1") {
       on = waitfreeLeft > 0 && cb.dataset.downloaded !== "1";
       if (on) waitfreeLeft -= 1;
     }
+    if (on && cb.dataset.rental === "1") {
+      on = rentalLeft > 0 && cb.dataset.downloaded !== "1";
+      if (on) rentalLeft -= 1;
+    }
     cb.checked = on;
   }
+}
+
+// 고른 대여권 회차를 열려고 쓸 대여권 확인 창 문구(되돌릴 수 없는 사용이라 장수와 남는 장수, 대여 기간을 알려 준다). 쓸 게 없으면 null.
+function rentalConfirmMessage(rentalNos, rentalCount) {
+  if (rentalNos.length === 0) return null;
+  const use = Math.min(rentalNos.length, rentalCount);
+  const opened = rentalNos.slice(0, use).map((n) => `${n}번`).join(", ");
+  const lines = [`대여권 ${use}장을 사용합니다 (${opened}).`, `이 작품의 보유 대여권 ${rentalCount}장 중 ${use}장을 쓰고 ${rentalCount - use}장이 남습니다. 대여는 3일간 유지되고 되돌릴 수 없습니다.`];
+  if (rentalNos.length > rentalCount) lines.splice(1, 0, `(선택한 ${rentalNos.length}개 중 번호가 앞선 ${use}개만 열리고 나머지는 건너뜁니다)`);
+  return lines.join("\n") + "\n계속할까요?";
 }
 document.getElementById("btn-kakao-manual-select-all").addEventListener("click", () => selectKakaoManual(() => true));
 document.getElementById("btn-kakao-manual-select-missing").addEventListener("click", () => selectKakaoManual((cb) => cb.dataset.missing === "1"));
@@ -281,10 +298,15 @@ document.getElementById("btn-kakao-manual-download").addEventListener("click", a
   // 기다무 상태인 회차는 기다무 대여권을 쓴다 — 한 장뿐이라 고른 것 중 번호가 가장 앞선 하나만 열린다
   const waitfreeNos = checked.filter((cb) => cb.dataset.waitfree === "1").map((cb) => Number(cb.dataset.no)).sort((x, y) => x - y);
   if (waitfreeNos.length > 0 && !confirm(`${waitfreeNos[0]}번 회차를 열려고 기다무 대여권 1장을 사용합니다.${waitfreeNos.length > 1 ? ` (기다무는 한 장이라 나머지 ${waitfreeNos.length - 1}개는 열리지 않습니다)` : ""}\n계속할까요?`)) return;
+  // 대여권 회차를 골랐으면(기다무로 못 여는 회차) 보유 대여권을 쓴다 — 확인을 받은 경우에만 서버에 use_rental_tickets=true를 보낸다
+  const rentalNos = checked.filter((cb) => cb.dataset.rental === "1").map((cb) => Number(cb.dataset.no)).sort((x, y) => x - y);
+  const rentalCount = kakaoManualAnalysis.tickets ? kakaoManualAnalysis.tickets.rental_count : 0;
+  const rentalMessage = rentalConfirmMessage(rentalNos, rentalCount);
+  if (rentalMessage && !confirm(rentalMessage)) return;
   try {
     await apiCall("/api/kakao-manual/run", {
       method: "POST",
-      body: JSON.stringify({ series_id: kakaoManualAnalysis.series_id, numbers: checked.map((cb) => Number(cb.dataset.no)) }),
+      body: JSON.stringify({ series_id: kakaoManualAnalysis.series_id, numbers: checked.map((cb) => Number(cb.dataset.no)), use_rental_tickets: rentalMessage !== null }),
     });
     kakaoManualJobRunning = true;
     startManualPolling();
