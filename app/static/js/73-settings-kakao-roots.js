@@ -314,7 +314,7 @@ document.getElementById("report-unregistered-toggle").addEventListener("change",
 async function loadKakaoWebtoonsEnabledToggle() {
   try {
     const data = await apiCall("/api/settings/kakao-webtoons-enabled");
-    kakaoWebtoonsEnabled = data.enabled;
+    setKakaoWebtoonsEnabled(data.enabled);
     document.getElementById("kakao-webtoons-enabled-toggle").checked = data.enabled;
   } catch (e) {
     // 조용히 무시 — 이 필드 하나 때문에 설정 탭 전체 로드가 막히면 안 됨
@@ -327,7 +327,7 @@ document.getElementById("kakao-webtoons-enabled-toggle").addEventListener("chang
       method: "POST",
       body: JSON.stringify({ enabled: e.target.checked }),
     });
-    kakaoWebtoonsEnabled = e.target.checked;
+    setKakaoWebtoonsEnabled(e.target.checked);
     syncDownloadRootsVisibility();
   } catch (err) {
     alert(err.message);

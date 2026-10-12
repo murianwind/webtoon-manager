@@ -44,6 +44,25 @@ function showManualPageLink(linkId, url) {
   link.classList.remove("hidden");
 }
 
+// 분석 결과 제목 옆 "다시 분석" 버튼 — 지금 보고 있는 작품을 같은 방법으로 다시 분석한다(네이버/카카오 공통).
+// 분석하는 동안은 눌리지 않게 해서 연타해도 요청이 겹치지 않는다. runAnalyze는 실패해도 스스로 알림 창을 띄우고 끝나므로 항상 버튼을 되돌린다.
+function bindReanalyzeButton(buttonId, currentId, runAnalyze) {
+  const btn = document.getElementById(buttonId);
+  btn.addEventListener("click", async () => {
+    const id = currentId();
+    if (!id || btn.disabled) return;
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "분석 중…";
+    try {
+      await runAnalyze(id);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  });
+}
+
 // ── 수동 다운로드: 카카오페이지 ───────────────────────────
 // 작품을 폴더 규칙으로 분석해서 회차 표(번호/제목/상태/대여 만료/진행)를 보여주고, 고른 회차를 받는다. 이미
 // 받은 회차는 표시만 되고, 직접 고르면 다시 받아 교체할 수 있다(자동 다운로드는 안 받은 회차만 받는다).
@@ -71,6 +90,8 @@ function syncManualPlatformSelect() {
 }
 
 document.getElementById("manual-platform").addEventListener("change", applyManualPlatformView);
+// 새로고침으로 이 탭이 먼저 복원된 뒤에 카카오 사용 여부가 도착하거나, 설정에서 바뀌면 플랫폼 선택을 다시 맞춘다
+document.addEventListener("kakao-webtoons-enabled-changed", syncManualPlatformSelect);
 
 function parseKakaoSeriesId(query) {
   if (/^\d+$/.test(query)) return Number(query);
@@ -152,6 +173,8 @@ function kakaoTicketsHtml(t) {
     : `사용 중${t.waitfree_available_at && formatRemaining(t.waitfree_available_at) ? ` (${formatRemaining(t.waitfree_available_at)})` : ""}`;
   return `<div class="kakao-manual-tickets"><span>대여권 <b>${t.rental_count}</b>장</span><span>${formatWaitfreePeriod(t.waitfree_period_minutes)} 기다무 대여권 ${waitfree}</span></div>`;
 }
+
+bindReanalyzeButton("btn-kakao-manual-reanalyze", () => kakaoManualAnalysis && kakaoManualAnalysis.series_id, runKakaoManualAnalyze);
 
 function refreshKakaoManualSubscribeButton() {
   // 구독만 있고 구독해제는 없다 — 구독 중이면 버튼 대신 "구독 중"만 보여준다(해제는 전체목록에서)
@@ -377,6 +400,8 @@ async function runManualAnalyze(titleId) {
     alert(e.message);
   }
 }
+
+bindReanalyzeButton("btn-manual-reanalyze", () => manualAnalyzeResult && manualAnalyzeResult.title_id, runManualAnalyze);
 
 function refreshManualSubscribeButton() {
   const btn = document.getElementById("btn-manual-subscribe");

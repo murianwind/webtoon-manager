@@ -130,8 +130,14 @@ apiCall("/api/settings/webtoon-server")
   .catch(() => {});
 
 let kakaoWebtoonsEnabled = false;
+// 카카오웹툰 사용 여부는 서버에서 비동기로 가져오므로, 새로고침으로 복원된 첫 화면이 이 값을 알기 전에 그려질 수 있다. 값이 정해지거나 바뀔 때
+// 이벤트로 알려서, 이 값에 기대는 화면(수동 다운로드의 플랫폼 선택 등)이 나중에라도 다시 맞춰지게 한다. 값은 항상 이 함수로 바꾼다.
+function setKakaoWebtoonsEnabled(enabled) {
+  kakaoWebtoonsEnabled = enabled;
+  document.dispatchEvent(new CustomEvent("kakao-webtoons-enabled-changed"));
+}
 apiCall("/api/settings/kakao-webtoons-enabled")
-  .then((data) => { kakaoWebtoonsEnabled = data.enabled; })
+  .then((data) => setKakaoWebtoonsEnabled(data.enabled))
   .catch(() => {});
 
 async function openInWebtoonServer(title, platform) {

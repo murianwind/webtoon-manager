@@ -132,3 +132,8 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - APScheduler 기본값은 1초라서, 앱이 다른 일로 1초만 바빠도 그 회차가 `Run time of job ... was missed by 0:00:01.x`로 **실행되지 않고 버려집니다**(실제로 06:50 다운로드가 이렇게 건너뛰어졌습니다). 그래서 `create_scheduler()`에서 `job_defaults`로 `misfire_grace_time=600`(10분)과 `coalesce=True`를 줍니다. 10분 안으로 늦은 실행은 그대로 실행하고, 여러 번 밀린 실행은 한 번으로 합칩니다. 앱이 잠깐 내려갔다 10분 안에 올라온 경우에도 놓친 스케줄이 한 번 실행됩니다.
 - 스케줄대로 실제로 돌았는지는 **실행 이력**(이력 탭)으로 확인합니다. 작업이 한 번 돌면 받은 게 없어도 기록되므로, 기록이 없으면 그 회차는 실행되지 않은 것입니다(다운로드 이력은 실제로 받은 회차가 있을 때만 남습니다). 로그에서는 `Running job ...` 줄이 있는지, 또는 `was missed by` 경고가 있는지 보면 됩니다.
 
+## 수동 다운로드: 다시 분석 버튼과 새로고침 시 설정 경쟁
+
+- **다시 분석**: 분석 결과 제목 옆(구독 버튼, 작품 페이지 버튼 오른쪽)의 `btn-kakao-manual-reanalyze`/`btn-manual-reanalyze`가 `bindReanalyzeButton`(`50-manual-download.js`) 한 곳에서 같은 방식으로 동작합니다. 지금 보고 있는 작품(`kakaoManualAnalysis.series_id`/`manualAnalyzeResult.title_id`)으로 기존 분석 함수(`runKakaoManualAnalyze`/`runManualAnalyze`)를 다시 부르고, 분석하는 동안은 `분석 중…`으로 비활성화해서 연타해도 요청이 겹치지 않습니다. 분석 함수가 실패해도 스스로 알림 창을 띄우고 끝나므로 버튼은 항상 원래대로 돌아옵니다. 테스트: `tests/js/test_manual_reanalyze.js`.
+- **새로고침 시 플랫폼 선택이 안 나오던 문제**: 새로고침하면 `99-main.js`가 마지막에 보던 탭(`sessionStorage`)을 즉시 복원하는데, `kakaoWebtoonsEnabled`는 서버에서 비동기로 가져오므로 복원 시점에는 아직 `false`라서 수동 다운로드의 플랫폼(네이버/카카오페이지) 선택이 숨겨진 채로 그려졌고, 값이 도착한 뒤에는 다시 맞춰 주는 곳이 없었습니다(탭을 다시 눌러야 나왔음). 그래서 이 값은 항상 `setKakaoWebtoonsEnabled(enabled)`(`00-core.js`)로 바꾸고, 값이 정해지거나 바뀔 때 `kakao-webtoons-enabled-changed` 이벤트가 나갑니다. 이 값에 기대는 화면은 이 이벤트를 들어서 다시 맞추면 됩니다(수동 다운로드의 `syncManualPlatformSelect`가 그렇게 합니다). 테스트: `tests/js/test_manual_platform_select_startup.js`. 같은 방식의 경쟁이 있을 수 있는 다른 화면(전체목록의 카카오 표시, 설정의 스케줄 대상 선택 등)은 아직 이 이벤트를 듣지 않습니다.
+

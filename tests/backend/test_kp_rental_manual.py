@@ -68,5 +68,23 @@ async def main():
         assert "대여권으로 열었습니다" in log_text and "대여권 2장" in log_text, log_text
         print("4~5) 수동 실행 OK — 확인 값 없으면 건너뜀, 있으면 보유 수까지")
 
+        # Scenario 6: 이미 대여 중인 회차(46,47: 직접 대여권을 써서 연 것)와 아직 안 연 회차(48: 기다무 불가)를 함께 골랐을 때
+        #   확인 값 없음 → 대여 중인 두 회차만 받고 48은 건너뜀(옛 화면이 보내는 요청과 같다) / 확인 값 있음 → 48도 대여권 1장으로 열어 받는다
+        for flag in (False, True):
+            SITE["site"] = site = Site([item(46, free=False), item(47, free=False), item(48, blocked=True), item(49, blocked=True)], rental=3)
+            site.opened.update({5046, 5047})          # 이미 대여 중
+            body = {"series_id": 1, "numbers": [46, 47, 48]}
+            if flag: body["use_rental_tickets"] = True
+            assert (await c.post("/api/kakao-manual/run", json=body)).status_code == 200
+            log_text = "\n".join((await wait_manual(c))["log"])
+            assert "✅ 46번 회차" in log_text and "✅ 47번 회차" in log_text, log_text      # 대여 중인 회차는 어느 쪽이든 받는다(두 번째 반복은 이미 있어서 "교체")
+            if flag:
+                assert "48번 회차를 대여권으로 열었습니다" in log_text and "✅ 48번 회차" in log_text, log_text
+                assert [p[1] for p in use_posts(site)] == [{"product_id": 5048, "ticket_type": "RT01"}] and site.rental == 2
+            else:
+                assert "48번 회차: 기다무로 열 수 없는 회차입니다 — 건너뜀" in log_text, log_text   # 옛 화면이 보내는 요청의 결과(스크린샷과 같은 로그)
+                assert use_posts(site) == [] and site.rental == 3
+        print("6) 대여 중인 회차 + 대여권 회차 함께 선택 OK")
+
 asyncio.run(main())
 print("ALL OK")
