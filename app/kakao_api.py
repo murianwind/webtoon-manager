@@ -314,13 +314,14 @@ async def search_by_author(
 ) -> list[dict]:
     """작가 이름으로 검색해서, 실제로 그 이름이 저자로 걸린 웹툰만 골라 반환한다(검색어는 제목에도
     걸릴 수 있어서 authors 목록에 그 이름이 정확히 있는 것만 남긴다. 완결작 포함). 반환은
-    title_id/title_name/is_adult만 담은 dict 리스트."""
+    title_id/title_name/is_adult/is_finished만 담은 dict 리스트."""
     cards = await _search_webtoon_cards(session, author_name, timeout_seconds, _MAX_SEARCH_PAGES)
     return [
         {
             "title_id": c["series_id"],
             "title_name": c.get("title", ""),
             "is_adult": (c.get("age_grade") or 0) >= _ADULT_AGE_GRADE,
+            "is_finished": c.get("on_issue") == _ON_ISSUE_FINISHED,
         }
         for c in cards
         if author_name in _split_author_names(c.get("authors"))

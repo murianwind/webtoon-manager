@@ -130,7 +130,7 @@ async def t5():
     s = FakeSession(lambda u, p: (200, real_search))
     got = await kakao_api.search_by_author(s, '연상호', 10)
     print('   검색 결과:', [(g['title_id'], g['title_name']) for g in got])
-    assert got and all(set(g) == {'title_id', 'title_name', 'is_adult'} for g in got)
+    assert got and all(set(g) == {'title_id', 'title_name', 'is_adult', 'is_finished'} for g in got)
     titles = {g['title_name'] for g in got}
     assert '오늘의 SF [단행본]' not in titles  # 책(category 16)은 제외
     assert s.calls[0][1]['keyword'] == '연상호' and s.calls[0][1]['category_uid'] == 10

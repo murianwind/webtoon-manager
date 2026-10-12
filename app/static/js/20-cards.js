@@ -128,6 +128,7 @@ function buildWebtoonCard(w, context) {
       // 설정했으면 구독 중인 카드에 "뷰어에서 보기" 아이콘이 붙을 뿐).
       if (w.status === "active") {
         actions.appendChild(makeButton("구독해제", () => webtoonListAction(w, "unsubscribe", "kakao", context)));
+        actions.appendChild(makeButton("제외됨으로", () => excludeSubscribedWebtoon(w, "kakao", context)));
         if (webtoonServerConfigured) {
           const viewerBtn = makeIconButton(READER_ICON_SVG, "뷰어에서 보기", () => openInWebtoonServer(w.title, "kakao"));
           viewerBtn.dataset.viewerCheckTitle = w.title; // 렌더링 뒤에 실제로 뷰어에 있는지 확인해서 없으면 지운다
@@ -140,6 +141,7 @@ function buildWebtoonCard(w, context) {
       }
     } else if (w.status === "active") {
       actions.appendChild(makeButton("구독해제", () => webtoonListAction(w, "unsubscribe", "naver", context)));
+      actions.appendChild(makeButton("제외됨으로", () => excludeSubscribedWebtoon(w, "naver", context)));
       if (webtoonServerConfigured) {
         const viewerBtn = makeIconButton(READER_ICON_SVG, "뷰어에서 보기", () => openInWebtoonServer(w.title, "naver"));
         viewerBtn.dataset.viewerCheckTitle = w.title;

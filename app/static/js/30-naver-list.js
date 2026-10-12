@@ -301,6 +301,14 @@ async function webtoonListAction(webtoon, action, platform, context, skipRender)
   }
 }
 
+// 구독 중인 작품을 구독해제가 아니라 "제외됨"으로 강제로 보낸다 — 구독 이력이 남아서 신작 스캔이 다시 구독하지 않는다(구독 중에 제외한 작품은 영구 제외).
+// 다운로드가 멈추는 큰 동작이라 확인 창을 한 번 거친다. 이미 받은 파일은 건드리지 않는다.
+async function excludeSubscribedWebtoon(webtoon, platform, context) {
+  const message = `「${webtoon.title}」을(를) 제외됨으로 보낼까요?\n다운로드가 멈추고 신작 스캔이 다시 구독하지 않습니다. 이미 받은 파일은 그대로입니다.\n(다시 받으려면 제외됨 탭에서 구독을 누르세요)`;
+  if (!confirm(message)) return;
+  await webtoonListAction(webtoon, "exclude", platform, context);
+}
+
 function patchWebtoonListCard(titleId, webtoon, newStatus, everSubscribed, platform, skipRender) {
   const cacheIndex = naverListCache.findIndex((w) => w.title_id === titleId && (w.platform || "naver") === platform);
   if (cacheIndex >= 0) {

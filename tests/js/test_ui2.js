@@ -68,7 +68,7 @@ const kakao = (id, title, extra = {}) => ({ title_id: id, title, thumbnail_url: 
   const cards = Array.from(w.document.querySelectorAll("#naver-list-grid .webtoon-card"));
   const btnTexts = (c) => Array.from(c.querySelectorAll(".webtoon-card-actions button")).map((b) => b.textContent.trim());
   ok(JSON.stringify(btnTexts(cards.find((c) => c.textContent.includes("달마부장")))) === '["구독","목록제외"]', "뷰어 서버가 없어도 미구독 카카오 카드에 '구독/목록제외'가 보임");
-  ok(JSON.stringify(btnTexts(cards.find((c) => c.textContent.includes("궁")))) === '["구독해제"]', "구독 중 카드는 '구독해제'(뷰어 아이콘은 뷰어를 설정했을 때만)");
+  ok(JSON.stringify(btnTexts(cards.find((c) => c.textContent.includes("궁")))) === '["구독해제","제외됨으로"]', "구독 중 카드는 '구독해제'/'제외됨으로'(뷰어 아이콘은 뷰어를 설정했을 때만)");
   let confirmed = 0; w.confirm = () => { confirmed++; return true; };
   routes["/api/kakao-webtoons/71000001/subscribe"] = () => kakao(71000001, "달마부장", { status: "active", ever_subscribed: true });
   cards.find((c) => c.textContent.includes("달마부장")).querySelector(".webtoon-card-actions button").click(); await sleep(40);

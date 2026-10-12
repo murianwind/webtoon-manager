@@ -212,12 +212,22 @@ async def _record_kakao_title_authors(series_id: int, settings) -> None:
             repository.upsert_watched_author(name, name, True, "kakao")
 
 
+async def _notify_kakao_auto_add(session: aiohttp.ClientSession, settings, author_name: str, title_text: str, title_id: int) -> None:
+    """카카오 작가 신작 자동 추가(새 작품, 제외됨에서 다시 구독)를 디스코드로 알린다. 알림이 실패해도 추가는 이미 끝났으므로 로그만 남긴다."""
+    message = f"🆕 **카카오웹툰 신작 자동 추가**\n작가: {author_name}\n제목: {title_text}\nID: {title_id}"
+    try:
+        await discord_notify.send_webhook_notification(session, settings, message)
+    except Exception as e:
+        log.error("카카오 신작 알림 전송 실패: %s", e)
+
+
 async def scan_kakao_authors_for_new_titles(session: aiohttp.ClientSession, settings) -> int:
     """
     등록된 카카오웹툰 작가(이름 기준) 각각을 검색해서, 그 작가의 작품 중 이번에 처음
     보는 것(kakao_seen_titles에 없는 title_id)이 있으면 구독 상태로 자동 추가하고 디스코드로 알린다
-    (네이버 신작 스캔과 같은 동작). 이미 이 앱이 추적 중인 작품(구독/구독해제/목록/제외됨)은 다시 추가하거나
-    알리지 않는다 — 특히 사용자가 제외한 작품이 되살아나면 안 된다. 카카오웹툰 관리를 꺼 두었으면 아예 돌지 않는다.
+    (네이버 신작 스캔과 같은 동작). 완결작은 추가하지 않는다. 이미 이 앱이 추적 중인 작품(구독/구독해제/목록/제외됨)은 다시 추가하거나
+    알리지 않는다 — 특히 사용자가 제외한 작품이 되살아나면 안 된다. 단 **제외됨인데 구독 이력이 없는 작품**(구독하지 않은 채 목록제외로 보낸 것)은
+    완결이 아니면 구독한다(구독 중에 제외했거나 구독했다가 제외한 이력 있는 작품은 그대로). 카카오웹툰 관리를 꺼 두었으면 아예 돌지 않는다.
 
     최초로 어떤 작가를 등록한 직후 첫 스캔에서는, 그 작가의 기존 작품 전체가
     "새로 발견됨"으로 잡혀서 전부 알림이 가버린다 — 그래서 그 작가를 이번에 처음
@@ -252,33 +262,38 @@ async def scan_kakao_authors_for_new_titles(session: aiohttp.ClientSession, sett
             )
 
         for item in results:
-            if item["title_id"] in already_seen:
-                continue
-            repository.add_seen_kakao_title(author.author_name, item["title_id"], item["title_name"])
-            if is_first_scan:
-                continue  # 기준선 저장만, 알림 없음
+            title_id = item["title_id"]
+            unseen = title_id not in already_seen
+            if unseen:
+                repository.add_seen_kakao_title(author.author_name, title_id, item["title_name"])
+            row = repository.get_kakao_webtoon(title_id)
 
-            if repository.get_kakao_webtoon(item["title_id"]) is not None:
+            if row is not None and _is_exclusion_without_history(row["status"], row["ever_subscribed"]) and not item.get("is_finished"):
+                # 제외됨인데 구독 이력이 없고 완결이 아닌 등록 작가의 작품 → 구독한다(이미 본 작품이어도, 처음 스캔하는 작가여도)
+                repository.set_kakao_webtoon_status(title_id, repository.STATUS_ACTIVE)
+                new_titles_found += 1
+                await _record_kakao_title_authors(title_id, settings)
+                await _notify_kakao_auto_add(session, settings, author.author_name, f"{item['title_name']} (제외됨에서 구독)", title_id)
+                job_status.log_line("discovery", f"[카카오/{author.author_name}] 제외됨에서 구독: {item['title_name']} (id={title_id})")
+                continue
+
+            if not unseen or is_first_scan:
+                continue  # 이미 본 작품이거나, 처음 등록한 작가의 기존 작품(기준선 저장만, 알림 없음)
+            if row is not None:
                 job_status.log_line("discovery", f"[카카오/{author.author_name}] {item['title_name']}: 이미 추적 중이라 건너뜀")
+                continue
+            if item.get("is_finished"):
+                job_status.log_line("discovery", f"[카카오/{author.author_name}] {item['title_name']}: 완결작이라 건너뜀")
                 continue
 
             new_titles_found += 1
             repository.upsert_new_kakao_webtoon(
-                item["title_id"], item["title_name"], item.get("thumbnail_url") or "", repository.STATUS_ACTIVE,
+                title_id, item["title_name"], item.get("thumbnail_url") or "", repository.STATUS_ACTIVE,
                 ", ".join(item.get("author_names") or []),
             )
-            await _record_kakao_title_authors(item["title_id"], settings)
-            message = (
-                f"🆕 **카카오웹툰 신작 자동 추가**\n"
-                f"작가: {author.author_name}\n"
-                f"제목: {item['title_name']}\n"
-                f"ID: {item['title_id']}"
-            )
-            try:
-                await discord_notify.send_webhook_notification(session, settings, message)
-            except Exception as e:
-                log.error("카카오 신작 알림 전송 실패: %s", e)
-            job_status.log_line("discovery", f"[카카오/{author.author_name}] 신작 자동 추가: {item['title_name']} (id={item['title_id']})")
+            await _record_kakao_title_authors(title_id, settings)
+            await _notify_kakao_auto_add(session, settings, author.author_name, item["title_name"], title_id)
+            job_status.log_line("discovery", f"[카카오/{author.author_name}] 신작 자동 추가: {item['title_name']} (id={title_id})")
 
         await asyncio.sleep(settings.delay_seconds)
 
@@ -493,26 +508,42 @@ async def resync_kakao_registry(client: kakao_page_download.KakaoPageClient, set
     return sum(1 for r in results if r)
 
 
+def _is_exclusion_without_history(status: str, ever_subscribed: bool) -> bool:
+    """제외됨인데 구독한 이력이 없다 — 구독하지 않은 채 "목록제외"로 보낸 작품. 이런 작품은 사용자가 "이건 싫다"고 고른 게 아니라 목록에서 치워 둔 것이라서,
+    등록한 작가/태그에 해당하고 완결이 아니면 신작 스캔이 구독한다. 구독 중에 "제외됨으로"를 눌렀거나 구독했다가 제외한 작품(이력 있음)은 다시 구독하지 않는다."""
+    return status == repository.STATUS_EXCLUDED and not ever_subscribed
+
+
 async def _add_discovered_titles(
     session: aiohttp.ClientSession, settings: Settings, others: list[dict], enabled_author_ids: set[str]
 ) -> list[tuple[str, str]]:
-    """'작가의 다른 작품' 목록에서, 아직 안 지워지고 완결도 아니고 등록된 작가 역할이
-    맞는 것만 새로 구독 추가한다. 새로 추가된 (title_id, title_name) 리스트(로그용)를 반환한다."""
+    """'작가의 다른 작품' 목록에서, 등록된 작가 역할이 맞고 완결이 아닌 것을 구독으로 추가한다 — 앱에 없는 작품은 새로 추가하고, 제외됨인데 구독 이력이 없는
+    작품(_is_exclusion_without_history)은 다시 구독한다. 이미 있는 다른 상태(구독 중/구독해제/목록/이력 있는 제외됨)와 매일+ 작품은 건드리지 않는다.
+    (title_id, 알림에 보일 제목) 리스트를 반환한다(다시 구독한 작품은 제목 뒤에 "(제외됨에서 구독)"이 붙는다)."""
     added = []
     hidden = await daily_plus.current_ids(settings.request_timeout_seconds, session)  # 매일+ 작품은 이 앱에서 다루지 않으므로 새로 구독하지 않는다
     for other in others:
         other_title_id = str(other.get("titleId", ""))
-        if not other_title_id or repository.exists(other_title_id) or other_title_id in hidden:
+        if not other_title_id or other_title_id in hidden:
+            continue
+        existing = repository.get(other_title_id)
+        resubscribe = existing is not None and _is_exclusion_without_history(existing.status, existing.ever_subscribed)
+        if existing is not None and not resubscribe:
             continue
         if not _matches_enabled_writer(other, enabled_author_ids):
             continue  # 등록 해제된 작가이거나 그림작가만 겹치는 작품은 제외
         if await _is_other_finished(session, other, other_title_id, settings):
-            continue  # 이미 완결된 작품은 신규로 추가하지 않음
+            continue  # 이미 완결된 작품은 구독하지 않음
 
         other_title_name = other.get("titleName", "")
-        repository.upsert_new(title_id=other_title_id, title=other_title_name, added_source=repository.SOURCE_ARTIST)
+        if resubscribe:
+            repository.set_status(other_title_id, repository.STATUS_ACTIVE)
+            display_name = f"{other_title_name or existing.title} (제외됨에서 구독)"
+        else:
+            repository.upsert_new(title_id=other_title_id, title=other_title_name, added_source=repository.SOURCE_ARTIST)
+            display_name = other_title_name
         await enrich_one(session, other_title_id, settings)  # writer_ids/tags 없이 들어가는 것 방지
-        added.append((other_title_id, other_title_name))
+        added.append((other_title_id, display_name))
     return added
 
 
@@ -642,19 +673,28 @@ async def scan_curation_tags(session: aiohttp.ClientSession, settings: Settings)
 
         for item in items:
             other_title_id = str(item.get("titleId", ""))
-            if not other_title_id or repository.exists(other_title_id) or other_title_id in hidden:
+            if not other_title_id or other_title_id in hidden:
+                continue
+            existing = repository.get(other_title_id)
+            resubscribe = existing is not None and _is_exclusion_without_history(existing.status, existing.ever_subscribed)
+            if existing is not None and not resubscribe:
                 continue
             if item.get("finished"):
                 continue
 
             other_title_name = item.get("titleName", "")
-            repository.upsert_new(
-                title_id=other_title_id,
-                title=other_title_name,
-                added_source=repository.SOURCE_TAG,
-            )
+            if resubscribe:
+                repository.set_status(other_title_id, repository.STATUS_ACTIVE)  # 구독 이력 없는 제외됨 → 구독
+            else:
+                repository.upsert_new(
+                    title_id=other_title_id,
+                    title=other_title_name,
+                    added_source=repository.SOURCE_TAG,
+                )
             await enrich_one(session, other_title_id, settings)  # writer_ids/tags 없이 들어가는 것 방지
-            new_entry_lines.append(f"- {other_title_name} (`{other_title_id}`) [태그: {tag_name}]")
+            new_entry_lines.append(
+                f"- {other_title_name} (`{other_title_id}`) [태그: {tag_name}]" + (" — 제외됨에서 구독" if resubscribe else "")
+            )
             log.info("태그 '%s'(id=%s)에서 신작 발견: %s (%s)", tag_name, tag_id, other_title_name, other_title_id)
 
     if new_entry_lines:

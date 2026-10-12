@@ -145,3 +145,10 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 
 - 워크플로의 `runs-on`은 `ubuntu-24.04`로 고정합니다. `ubuntu-latest`는 2026-10-19부터 몇 주에 걸쳐 Ubuntu 26.04로 바뀌어서, 테스트 → 이미지 빌드 → 자동 갱신으로 이어지는 배포 파이프라인이 예고 없이 깨질 수 있기 때문입니다(`actionlint` 같은 러너에 미리 설치된 도구나 `setup-python`/`setup-node`의 새 OS 지원 여부에 기대고 있습니다). 26.04로 옮길 때는 `ubuntu-26.04`로 먼저 한 번 돌려 본 뒤 값을 바꾸세요. `tests/backend/test_workflows_pinned.py`가 모든 `runs-on`이 같은 고정 버전인지 검사합니다.
 
+## 신작 스캔의 구독 규칙과 "제외됨으로" 버튼
+
+- **구독 이력(`ever_subscribed`)이 제외됨의 두 종류를 가릅니다.** `set_status(active)`가 `ever_subscribed`를 1로 세우고 이후 다른 상태로 바뀌어도 풀리지 않으므로, 제외됨 + `ever_subscribed=0`은 "구독하지 않은 채 목록제외로 보낸 것"(`/api/naver-list/{id}/exclude`가 새 행을 `mark_ever_subscribed=False`로 만든다), 제외됨 + `ever_subscribed=1`은 "구독했다가(또는 구독 중에) 제외한 것"입니다. 판정은 `tracker._is_exclusion_without_history` 한 곳입니다.
+- **네이버**(`_add_discovered_titles` — 구독 작가/미구독 관심 작가 두 경로가 공유, `scan_curation_tags` — 태그): DB에 없으면 새로 구독하고, 제외됨 + 이력 없음이면 `set_status(active)`로 다시 구독하며(알림에 "제외됨에서 구독"), 그 밖의 상태(구독 중/구독해제/목록/이력 있는 제외됨)는 건드리지 않습니다. 완결작(`_is_other_finished`/태그 항목의 `finished`)과 매일+, 등록 작가 역할이 안 맞는 작품은 어느 경우에도 구독하지 않습니다.
+- **카카오**(`scan_kakao_authors_for_new_titles`): 같은 규칙입니다. 완결 여부는 작가 검색 결과(`kakao_api.search_by_author`)의 `is_finished`(`on_issue == "N"`)를 씁니다. 제외됨 + 이력 없음 + 완결 아님은 **이미 본 작품이어도, 처음 스캔하는 작가여도** 구독하고(기준선은 앱에 없는 작품의 대량 추가를 막으려는 것이라 이 경우와 무관), 앱에 없는 새 완결작은 추가하지 않되 "본 작품"으로는 기록합니다.
+- **"제외됨으로" 버튼**(`20-cards.js`의 구독 중 카드 → `excludeSubscribedWebtoon`, `30-naver-list.js`): 확인 창을 거쳐 기존 제외 API(`/api/naver-list/{id}/exclude`, `/api/kakao-webtoons/{id}/exclude`)를 부릅니다. 서버 변경은 없습니다 — 구독 중 작품에도 제외 API가 동작하고 이력은 유지됩니다. 사용자가 제외됨 작품을 직접 다시 구독하면(`subscribe` API) 상태가 active가 되어 제외됨 상태가 사라지고, 다시 제외하면 이력이 있으므로 영구 제외입니다. 테스트: `tests/backend/test_resubscribe_excluded.py`, `tests/js/test_exclude_subscribed_button.js`.
+
