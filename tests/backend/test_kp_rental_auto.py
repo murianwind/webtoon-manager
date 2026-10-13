@@ -27,7 +27,7 @@ asyncio.sleep = _ns; asyncio.sleep = _ns
 kakao_cover.fetch_official_cover_bytes = lambda sid, **k: JPG
 
 sent, state = [], {"ok": True}
-async def fake_send(session, settings, message):
+async def fake_send(session, message):
     if not discord_config.get_webhook_url() or not state["ok"]: return False
     sent.append(message); return True
 discord_notify.send_webhook_notification = fake_send
@@ -53,13 +53,13 @@ async def notice_message():
     sent.clear(); discord_config.set_webhook_url("https://discord.com/api/webhooks/1/x")
     wt = {"title": "블루엔젤", "title_id": 9}
     base = dict(downloaded=[2, 3], downloaded_items=[(2, "a"), (3, "b")], failed=None, plan=kp.DownloadPlan(mode="compare"), title="블루엔젤")
-    await scheduler._notify_kakao_rental_used(None, None, wt, kp.RunResult(**base, rental_used=[2, 3], rental_remaining=1))
-    await scheduler._notify_kakao_rental_used(None, None, wt, kp.RunResult(**base, rental_used=[7], rental_remaining=None))
-    await scheduler._notify_kakao_rental_used(None, None, wt, kp.RunResult(**base, rental_used=[], rental_remaining=3))
+    await scheduler._notify_kakao_rental_used(None, wt, kp.RunResult(**base, rental_used=[2, 3], rental_remaining=1))
+    await scheduler._notify_kakao_rental_used(None, wt, kp.RunResult(**base, rental_used=[7], rental_remaining=None))
+    await scheduler._notify_kakao_rental_used(None, wt, kp.RunResult(**base, rental_used=[], rental_remaining=3))
     assert sent == ["[블루엔젤] 대여권 2장을 사용했습니다 (2번, 3번). 남은 대여권 1장", "[블루엔젤] 대여권 1장을 사용했습니다 (7번)."], sent
     # 전송이 실패해도 예외 없이 지나간다(다운로드는 이미 끝났다)
     state["ok"] = False
-    await scheduler._notify_kakao_rental_used(None, None, wt, kp.RunResult(**base, rental_used=[2], rental_remaining=0))
+    await scheduler._notify_kakao_rental_used(None, wt, kp.RunResult(**base, rental_used=[2], rental_remaining=0))
     state["ok"] = True
     print("2) 사용 알림 문구 OK")
 

@@ -46,7 +46,7 @@ async def set_kakao_page_login(payload: KakaoPageLoginIn):
     try:
         cookies = kakao_page_auth.parse_cookie_export(payload.cookies_json)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     await asyncio.to_thread(kakao_page_auth.save_cookies, cookies)
     return kakao_page_auth.cookie_status(cookies)
 
@@ -75,7 +75,7 @@ async def check_kakao_page_login():
         logged_in = await client.check_login()
         kakao_page_download.persist_refreshed_cookies(client)
         status = kakao_page_auth.cookie_status(kakao_page_auth.load_cookies())
-        await kakao_page_auth.notify_if_needed(session, settings, logged_in, status["days_left"])
+        await kakao_page_auth.notify_if_needed(session, logged_in, status["days_left"])
     return {**status, "logged_in": logged_in, "message": _KAKAO_LOGIN_CHECK_MESSAGES[logged_in]}
 
 
@@ -153,7 +153,7 @@ async def kakao_manual_analyze(series_id: int):
         if cookie_saved:
             logged_in = await client.check_login()
             status = kakao_page_auth.cookie_status(kakao_page_auth.load_cookies())
-            await kakao_page_auth.notify_if_needed(session, settings, logged_in, status["days_left"])
+            await kakao_page_auth.notify_if_needed(session, logged_in, status["days_left"])
         listing = await client.list_episodes(series_id)
         # 대여권/소장권/기다무 현황(작품 화면의 "대여권 N장 | 소장권 N장 | 기다무"와 같은 값) — 로그인돼 있을 때만 의미가 있다
         tickets = await client.ticket_info(series_id) if cookie_saved and logged_in is not False else None
@@ -231,7 +231,7 @@ async def _run_kakao_manual_download(series_id: int, numbers: list[int], use_ren
                 log_line(f"카카오페이지 series_id={series_id} — 로그인 확인 중...")
                 logged_in = await client.check_login()
                 status = kakao_page_auth.cookie_status(kakao_page_auth.load_cookies())
-                await kakao_page_auth.notify_if_needed(session, settings, logged_in, status["days_left"])
+                await kakao_page_auth.notify_if_needed(session, logged_in, status["days_left"])
                 if logged_in is False:
                     log_line("카카오페이지 로그인이 풀려 있어서 받지 않았습니다. 쿠키를 다시 export해서 붙여넣어 주세요.")
                     return

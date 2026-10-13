@@ -16,7 +16,7 @@ import app.main as m
 
 settings = get_settings()
 sent = []
-async def fake_send(session, settings_, message): sent.append(message); return True
+async def fake_send(session, message): sent.append(message); return True
 tracker.send_webhook_notification = fake_send; discord_notify.send_webhook_notification = fake_send
 async def fake_enrich(session, title_id, settings_, **k): return True, "ok"
 tracker.enrich_one = fake_enrich

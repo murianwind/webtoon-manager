@@ -77,16 +77,16 @@ assert "만료" in auth.health_alert_message(False, 10) and "다시" in auth.hea
 assert "5" in (auth.health_alert_message(True, 4) or "") or "4" in (auth.health_alert_message(True, 4) or "")
 assert auth.health_alert_message(True, 6) is None
 sent = []
-async def fake_send(session, settings, message): sent.append(message)
+async def fake_send(session, message): sent.append(message)
 auth.discord_notify.send_webhook_notification = fake_send
 auth.discord_config.set_webhook_url("https://discord.com/api/webhooks/1/test")   # 실제처럼 웹훅이 있어야 쿠키 알림이 나간다(없으면 보내지도 기록하지도 않음)
 async def t3():
-    assert await auth.notify_if_needed(None, None, False, 10) is True and len(sent) == 1
-    assert await auth.notify_if_needed(None, None, False, 10) is False and len(sent) == 1         # 24시간 안엔 또 안 보냄
-    await auth.notify_if_needed(None, None, True, 30)                                              # 다시 정상이면 기록 초기화
-    assert await auth.notify_if_needed(None, None, False, 10) is True and len(sent) == 2           # 그 뒤 또 만료되면 다시 알림
-    assert await auth.notify_if_needed(None, None, True, 3) is True and len(sent) == 3             # 곧 만료 경고는 별도로
-    assert await auth.notify_if_needed(None, None, True, 3) is False
+    assert await auth.notify_if_needed(None, False, 10) is True and len(sent) == 1
+    assert await auth.notify_if_needed(None, False, 10) is False and len(sent) == 1         # 24시간 안엔 또 안 보냄
+    await auth.notify_if_needed(None, True, 30)                                              # 다시 정상이면 기록 초기화
+    assert await auth.notify_if_needed(None, False, 10) is True and len(sent) == 2           # 그 뒤 또 만료되면 다시 알림
+    assert await auth.notify_if_needed(None, True, 3) is True and len(sent) == 3             # 곧 만료 경고는 별도로
+    assert await auth.notify_if_needed(None, True, 3) is False
 asyncio.run(t3())
 print("3) 만료 알림 OK (하루 1번, 정상 복귀 시 초기화, 곧 만료 경고 별도)")
 

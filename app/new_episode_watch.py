@@ -112,7 +112,7 @@ async def run(session: aiohttp.ClientSession, settings: Settings) -> int:
             kakao_page_download.persist_refreshed_cookies(client)
     if not items:
         return 0
-    if not await discord_notify.send_webhook_notification(session, settings, format_message(items)):
+    if not await discord_notify.send_webhook_notification(session, format_message(items)):
         job_status.log_line("discovery", f"구독해제 웹툰 새 에피소드 {len(items)}건을 알리지 못했습니다(웹훅 없음/전송 실패) — 다음 스캔 때 다시 시도합니다")
         return 0
     for item in items:

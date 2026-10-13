@@ -38,7 +38,7 @@ async def report_candidates():
 
 async def unsubscribed_watch():
     sent, fetched = [], []
-    async def fake_send(session, settings_, message): sent.append(message); return True
+    async def fake_send(session, message): sent.append(message); return True
     discord_notify.send_webhook_notification = fake_send
     discord_config.set_webhook_url("https://discord.com/api/webhooks/1/x")
     async def fake_latest(session, title_id, timeout, cookies=None):

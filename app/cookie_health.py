@@ -18,7 +18,6 @@ import logging
 import aiohttp
 
 from app import discord_notify, repository
-from app.config import Settings
 
 log = logging.getLogger(__name__)
 
@@ -44,7 +43,7 @@ class AdultFetchTracker:
 
 
 async def finalize_and_notify(
-    session: aiohttp.ClientSession, settings: Settings, tracker: AdultFetchTracker
+    session: aiohttp.ClientSession, tracker: AdultFetchTracker
 ) -> None:
     """다운로드 잡이 끝날 때 1회 호출 — 이번 실행 결과를 보고 필요하면 알린다."""
     if tracker.attempted == 0:
@@ -59,7 +58,7 @@ async def finalize_and_notify(
             "회차 목록을 하나도 가져오지 못했습니다.\n"
             "브라우저에서 comic.naver.com에 다시 로그인한 뒤, 쿠키 파일을 새로 export해서 교체해주세요."
         )
-        await discord_notify.send_webhook_notification(session, settings, message)
+        await discord_notify.send_webhook_notification(session, message)
         repository.set_setting(_SETTING_KEY_EXPIRED_NOTIFIED, "1")
         log.warning("쿠키 만료 의심 — 디스코드로 알림 전송")
     elif not tracker.all_failed and already_notified:

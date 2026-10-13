@@ -6,7 +6,7 @@ from app import db, repository, scheduler, job_status, discord_notify
 db.get_connection()
 
 sent = []; FAIL = {"on": False}
-async def fake_send(session, settings, message):
+async def fake_send(session, message):
     if FAIL["on"]: raise RuntimeError("웹훅 전송 실패")
     sent.append(message)
 discord_notify.send_webhook_notification = fake_send

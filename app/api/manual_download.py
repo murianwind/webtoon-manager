@@ -81,7 +81,10 @@ async def manual_download_analyze(title_id: str):
     settings = get_settings()
     tracked = await asyncio.to_thread(repository.get, title_id)
     recorded_up_to = tracked.last_downloaded_no if tracked and tracked.status == repository.STATUS_ACTIVE else 0   # 구독 중인 작품만 "여기까지 받음" 기록을 반영한다
-    info, rows = await manual_download.analyze(title_id, settings, recorded_up_to)
+    try:
+        info, rows = await manual_download.analyze(title_id, settings, recorded_up_to)
+    except naver_api.NaverApiError as e:
+        raise HTTPException(status_code=502, detail=f"회차 목록을 불러오지 못했습니다: {e}") from e
     if info is None:
         raise HTTPException(status_code=400, detail="해당 titleId 정보를 네이버에서 찾지 못했습니다.")
     return ManualAnalyzeOut(

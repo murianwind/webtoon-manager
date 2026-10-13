@@ -7,7 +7,7 @@ from app import db, repository, tracker, job_status, kakao_api, discord_notify
 db.get_connection()
 S = NS(request_timeout_seconds=5, delay_seconds=0)
 sent = []; results = {}
-async def fake_send(session, settings, message): sent.append(message)
+async def fake_send(session, message): sent.append(message)
 async def fake_search(session, author_name, timeout): return list(results.get(author_name, []))
 kakao_api.search_by_author = fake_search; discord_notify.send_webhook_notification = fake_send
 _o = asyncio.sleep
@@ -48,7 +48,7 @@ async def main():
     print("4) 이미 추적 중인 작품 OK")
 
     # ── 5. 알림 전송이 실패해도 추가는 된다 ──
-    async def boom(session, settings, message): raise RuntimeError("웹훅 오류")
+    async def boom(session, message): raise RuntimeError("웹훅 오류")
     discord_notify.send_webhook_notification = boom; results["작가A"].append(card(104, "알림실패작"))
     assert await scan() == 1 and repository.get_kakao_webtoon(104)["status"] == "active"
     discord_notify.send_webhook_notification = fake_send

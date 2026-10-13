@@ -32,10 +32,10 @@ def _run(config_path: str, args: list[str], timeout: int = _TIMEOUT_SECONDS) -> 
             ["rclone", "--config", config_path, *args],
             capture_output=True, text=True, timeout=timeout,
         )
-    except FileNotFoundError:
-        raise RcloneError("rclone 프로그램을 찾을 수 없습니다 (이미지에 설치되어 있어야 합니다).")
-    except subprocess.TimeoutExpired:
-        raise RcloneError(f"rclone 응답이 {timeout}초 내에 오지 않았습니다 (원격 저장소 연결 상태를 확인하세요).")
+    except FileNotFoundError as e:
+        raise RcloneError("rclone 프로그램을 찾을 수 없습니다 (이미지에 설치되어 있어야 합니다).") from e
+    except subprocess.TimeoutExpired as e:
+        raise RcloneError(f"rclone 응답이 {timeout}초 내에 오지 않았습니다 (원격 저장소 연결 상태를 확인하세요).") from e
     if result.returncode != 0:
         raise RcloneError(result.stderr.strip() or f"rclone 명령 실패 (종료코드 {result.returncode})")
     return result.stdout
@@ -113,7 +113,7 @@ def list_files_recursive(config_path: str, remote: str, path: str) -> list[str]:
     try:
         output = _run(config_path, ["lsjson", target, "--recursive", "--files-only"])
     except RcloneError as e:
-        raise RcloneError(f"'{target}' 목록을 읽을 수 없습니다: {e}")
+        raise RcloneError(f"'{target}' 목록을 읽을 수 없습니다: {e}") from e
     entries = json.loads(output)
     return [e["Path"] for e in entries]
 
@@ -151,7 +151,7 @@ def list_top_level_files(config_path: str, remote: str, path: str) -> list[str]:
     try:
         output = _run(config_path, ["lsjson", target, "--files-only"])
     except RcloneError as e:
-        raise RcloneError(f"'{target}' 목록을 읽을 수 없습니다: {e}")
+        raise RcloneError(f"'{target}' 목록을 읽을 수 없습니다: {e}") from e
     entries = json.loads(output)
     return [e["Name"] for e in entries]
 

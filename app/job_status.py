@@ -7,9 +7,12 @@ job_history 테이블에도 남긴다 — 스케줄대로 자동 실행된 잡�
 성공했는지를 나중에(설정 페이지를 안 보고 있었어도) 확인할 수 있어야 하기 때문이다.
 """
 
+import logging
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+
+log = logging.getLogger(__name__)
 
 _MAX_LOG_LINES = 300
 _lock = threading.Lock()
@@ -69,8 +72,8 @@ def finish(job_name: str, success: bool) -> None:
 
     try:
         repository.add_job_history(job_name, started_at or finished_at, finished_at, st.status, log_copy)
-    except Exception:
-        pass  # 이력 저장 실패가 잡 자체의 실행 결과에 영향을 주면 안 됨
+    except Exception as e:
+        log.warning("실행 이력 저장 실패 (%s): %s", job_name, e)  # 이력 저장 실패가 잡 자체의 실행 결과에 영향을 주면 안 되지만, 흔적은 남긴다
 
 
 def snapshot() -> dict:

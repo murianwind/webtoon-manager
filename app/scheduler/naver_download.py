@@ -45,7 +45,12 @@ async def _plan_naver_download(
     cookies = cookies or {}
 
     webtoon_dir = Path(download_roots.naver_root(settings)) / remove_forbidden_str(info.title_name)
-    all_episodes = await naver_api.fetch_all_episodes(session, title_id, cookies, settings.request_timeout_seconds)
+    try:
+        all_episodes = await naver_api.fetch_all_episodes(session, title_id, cookies, settings.request_timeout_seconds)
+    except naver_api.NaverApiError as e:
+        # 뒤쪽 페이지를 못 받은 불완전한 목록으로 진행하면 빠진 회차가 영영 누락될 수 있다 — 이 작품만 이번엔 건너뛰고 다음 실행에서 다시 시도한다.
+        job_status.log_line("download", f"[{info.title_name}] 회차 목록 조회 실패, 건너뜀 — {e}")
+        return None
     if info.is_adult:
         # 쿠키 만료 감지용 — 별도 API 호출 없이, 이번에 실제로 받아온 회차 개수를 그대로 신호로 쓴다.
         adult_tracker.record(len(all_episodes))

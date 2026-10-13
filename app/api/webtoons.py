@@ -236,7 +236,7 @@ async def browse_naver_list():
             items = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
             hidden = await daily_plus.current_ids(settings.request_timeout_seconds, session)
     except naver_api.NaverApiError as e:
-        raise HTTPException(status_code=502, detail=f"네이버 웹툰 목록을 불러오지 못했습니다: {e}")
+        raise HTTPException(status_code=502, detail=f"네이버 웹툰 목록을 불러오지 못했습니다: {e}") from e
     items = [item for item in items if item.title_id not in hidden]  # 매일+ 작품은 목록에 보이지 않는다(구독 중이어도)
 
     existing = await asyncio.to_thread(repository.list_all)

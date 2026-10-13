@@ -172,8 +172,9 @@ async def fetch_all_episodes(
     timeout_seconds: int,
 ) -> list[EpisodeInfo]:
     """
-    전체 회차를 no 오름차순으로 반환한다. list API 자체에 접근 불가(성인+미인증 등)면
+    전체 회차를 no 오름차순으로 반환한다. list API 자체에 접근 불가(성인+미인증 등, 첫 페이지 실패)면
     빈 리스트를 반환하며, 이 경우 상위 로직에서 "다운로드 가능한 회차 없음"으로 처리된다.
+    첫 페이지는 받았는데 뒤쪽 페이지가 끝내 실패하면 NaverApiError를 낸다(불완전한 목록을 돌려주지 않는다).
     """
     first_page = await _fetch_episode_list_page(session, title_id, 1, cookies, timeout_seconds)
     if not first_page:
@@ -187,12 +188,15 @@ async def fetch_all_episodes(
             _fetch_episode_list_page(session, title_id, page, cookies, timeout_seconds)
             for page in range(2, total_pages + 1)
         ]
-        pages_raw.extend(await asyncio.gather(*tasks))
+        later_pages = await asyncio.gather(*tasks)
+        failed_pages = [page for page, data in zip(range(2, total_pages + 1), later_pages) if not data]
+        if failed_pages:
+            # 한 페이지라도 빠진 목록을 그대로 쓰면 빠진 회차를 모른 채 더 큰 번호를 받아서, 그 사이 회차가 영영 누락된다 — 불완전한 목록은 오류로 올린다.
+            raise NaverApiError(f"회차 목록 {', '.join(str(p) for p in failed_pages)}페이지를 받지 못했습니다 (titleId={title_id}, 전체 {total_pages}페이지)")
+        pages_raw.extend(later_pages)
 
     episodes: list[EpisodeInfo] = []
     for page_data in pages_raw:
-        if not page_data:
-            continue
         for article in page_data.get("articleList") or []:
             episodes.append(
                 EpisodeInfo(
@@ -270,9 +274,10 @@ async def fetch_full_webtoon_list(
 
     for weekday, items in title_list_map.items():
         for item in items:
-            title_id = str(item.get("titleId", ""))
-            if not title_id:
-                continue
+            raw_id = item.get("titleId")
+            if raw_id is None or str(raw_id) == "":
+                continue  # id가 없거나 null이면 건너뛴다(str(None)이 "None"이라는 가짜 번호가 되지 않게)
+            title_id = str(raw_id)
 
             existing = merged.get(title_id)
             if existing:

@@ -46,7 +46,7 @@ def judge():
 
 
 sent, state = [], {"ok": True}
-async def fake_send(session, settings, message):
+async def fake_send(session, message):
     if not discord_config.get_webhook_url() or not state["ok"]:
         return False
     sent.append(message); return True
@@ -55,7 +55,7 @@ discord_notify.send_webhook_notification = fake_send
 
 async def notify(webtoon_id, r):
     wt = repository.get_kakao_webtoon(webtoon_id)
-    await scheduler._notify_kakao_ticket_needed(None, None, wt, r)
+    await scheduler._notify_kakao_ticket_needed(None, wt, r)
 
 
 async def notice():

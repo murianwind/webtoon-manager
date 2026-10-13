@@ -271,7 +271,7 @@ async def get_tag_catalog():
         async with aiohttp.ClientSession() as session:
             return await naver_api.fetch_tag_catalog(session, settings.request_timeout_seconds)
     except naver_api.NaverApiError as e:
-        raise HTTPException(status_code=502, detail=f"태그 카탈로그를 불러오지 못했습니다: {e}")
+        raise HTTPException(status_code=502, detail=f"태그 카탈로그를 불러오지 못했습니다: {e}") from e
 
 
 @router.get("/authors/search")
@@ -324,5 +324,5 @@ async def list_author_candidates():
         async with aiohttp.ClientSession() as session:
             items = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
     except naver_api.NaverApiError as e:
-        raise HTTPException(status_code=502, detail=f"작가 후보 목록을 불러오지 못했습니다: {e}")
+        raise HTTPException(status_code=502, detail=f"작가 후보 목록을 불러오지 못했습니다: {e}") from e
     return naver_api.extract_candidate_author_names(items)

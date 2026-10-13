@@ -31,7 +31,7 @@ def _split_message(text: str, limit: int = DISCORD_MESSAGE_CHUNK_LIMIT) -> list[
     return chunks
 
 
-async def send_webhook_notification(session: aiohttp.ClientSession, settings, message: str) -> bool:
+async def send_webhook_notification(session: aiohttp.ClientSession, message: str) -> bool:
     """웹훅으로 보낸다. 모두 보냈으면 True, 웹훅이 없거나 보낼 내용이 없거나 하나라도 실패하면 False(알림 기록을 남길지 정하는 데 쓴다)."""
     webhook_url = discord_config.get_webhook_url()
     if not webhook_url or not message.strip():

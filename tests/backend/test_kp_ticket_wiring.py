@@ -45,7 +45,7 @@ asyncio.sleep = _ns; asyncio.sleep = _ns
 kakao_cover.fetch_official_cover_bytes = lambda sid, **k: b"\xff\xd8\xffcover"
 
 sent = []
-async def fake_send(session, settings, message):
+async def fake_send(session, message):
     if not discord_config.get_webhook_url(): return False
     sent.append(message); return True
 discord_notify.send_webhook_notification = fake_send

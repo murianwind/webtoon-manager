@@ -347,7 +347,7 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
             )
             if used_fallback:
                 message = "🧪 **[테스트 발송 — 오늘 기록 없어 어제 기록으로 대체됨]**\n" + message
-            await discord_notify.send_webhook_notification(session, settings, message)
+            await discord_notify.send_webhook_notification(session, message)
             if not force_test:
                 # 전송이 성공한 뒤에만 기록(실패하면 다음에 다시 시도)
                 report_seen.remember(unregistered_new_episodes, kakao_new_episodes)

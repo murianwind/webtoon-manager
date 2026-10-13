@@ -1,4 +1,4 @@
-"""네이버 API 모듈(naver_api.py) 특성화 테스트 — 응답 파싱, 재시도/백오프, 페이지 합치기, 오류 처리의 "현재 동작"을 고정한다.
+"""네이버 API 모듈(naver_api.py) 특성화 테스트 — 응답 파싱, 재시도/백오프, 페이지 합치기, 오류 처리의 "현재 동작"을 고정한다(뒤쪽 페이지 실패는 오류로 바꿨다).
 
 가짜 응답은 코드가 문서로 남겨 둔 실제 응답 모양(HAR 캡처 기반)을 따른다. 네이버가 응답 형식을 바꿨는지는 잡지 못한다(그건 실서버에서만 확인된다).
 """
@@ -82,11 +82,17 @@ async def episode_lists():
     episodes = await naver_api.fetch_all_episodes(session, "9", {"NID_SES": "x"}, 10)
     assert [(e.episode_no, e.subtitle, e.is_locked) for e in episodes] == [(1, "1화", False), (2, "2화", False), (3, "3화", False), (4, "4화", True), (5, "5화", False)]
     assert all(call[0] == NAVER_LIST_URL and call[3] == {"NID_SES": "x"} for call in session.calls) and sorted(c[1]["page"] for c in session.calls) == [1, 2, 3]
-    # Scenario 6: [현재 동작] 뒤쪽 페이지 하나가 끝내 실패해도 오류 없이 나머지만 돌려준다 — 목록이 조용히 불완전해질 수 있다(리뷰 보고서의 확인 필요 항목)
+    # Scenario 6: 뒤쪽 페이지 하나라도 끝내 실패하면 불완전한 목록을 돌려주지 않고 오류를 낸다 — 빠진 회차를 모른 채 더 큰 번호를 받으면 그 사이 회차가 영영 누락된다
     sleeps.clear()
     holes = {1: page([5, 4], total=3), 2: FakeResponse(500), 3: page([1])}
-    partial = await naver_api.fetch_all_episodes(FakeSession(lambda url, params, n: holes[params["page"]]), "9", {}, 10)
-    assert [e.episode_no for e in partial] == [1, 4, 5]
+    try:
+        await naver_api.fetch_all_episodes(FakeSession(lambda url, params, n: holes[params["page"]]), "9", {}, 10)
+        raise SystemExit("불완전한 목록을 그대로 돌려줌")
+    except naver_api.NaverApiError as e:
+        assert "9" in str(e) and "2" in str(e), str(e)           # 어느 작품의 몇 페이지가 실패했는지 알려 준다
+    # 첫 페이지 실패는 예전처럼 빈 목록(접근 불가 — 성인 미인증 등)
+    sleeps.clear()
+    assert await naver_api.fetch_all_episodes(FakeSession(lambda *a: FakeResponse(403)), "9", {}, 10) == []
     # Scenario 7: 최신 회차만 가볍게 — 한 페이지에서 가장 큰 번호, 비었거나 실패면 None
     latest_page = FakeSession(lambda *a: page([9, 10, 8], locked={10}))
     latest = await naver_api.fetch_latest_episode(latest_page, "1", 10, {"c": "v"})
@@ -103,12 +109,12 @@ async def episode_lists():
 async def weekday_list_and_tags():
     data = {"titleListMap": {
         "MONDAY": [{"titleId": 10, "titleName": "나 작품", "thumbnailUrl": "u2", "author": "A / B", "up": True},
-                   {"titleId": 20, "titleName": "가 작품", "rest": True, "finish": True, "adult": True, "new": True}, {"titleName": "id 없음"}],
+                   {"titleId": 20, "titleName": "가 작품", "rest": True, "finish": True, "adult": True, "new": True}, {"titleName": "id 없음"}, {"titleId": None, "titleName": "id가 null"}, {"titleId": "", "titleName": "id가 빈 문자열"}],
         "TUESDAY": [{"titleId": 10, "titleName": "나 작품"}],
     }}
     session = FakeSession(lambda *a: FakeResponse(200, json_data=data))
     items = await naver_api.fetch_full_webtoon_list(session, 10)
-    # Scenario 9: 요일별 목록을 하나로 합치고(같은 작품은 요일만 추가), 제목순으로 정렬, id 없는 항목은 건너뛴다
+    # Scenario 9: 요일별 목록을 하나로 합치고(같은 작품은 요일만 추가), 제목순으로 정렬, id가 없거나 null/빈 값인 항목은 건너뛴다("None"이라는 가짜 번호로 들어오지 않는다)
     assert [i.title_id for i in items] == ["20", "10"] and session.calls[0][0] == NAVER_WEEKDAY_LIST_URL and session.calls[0][1] == {"order": "user"}
     first, second = items
     assert (first.is_finished, first.is_paused, first.is_adult, first.is_new, first.has_update, first.weekdays) == (True, True, True, True, False, ["MONDAY"])

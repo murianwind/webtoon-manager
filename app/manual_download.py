@@ -194,7 +194,11 @@ async def download_selected(title_id: str, episode_nos: list[int], settings: Set
             return
         cookies = cookies or {}
 
-        all_episodes = await naver_api.fetch_all_episodes(session, title_id, cookies, settings.request_timeout_seconds)
+        try:
+            all_episodes = await naver_api.fetch_all_episodes(session, title_id, cookies, settings.request_timeout_seconds)
+        except naver_api.NaverApiError as e:
+            _fail(f"[{info.title_name}] 회차 목록을 불러오지 못했습니다: {e}")
+            return
         wanted_nos = set(episode_nos)
         target_episodes = sorted((ep for ep in all_episodes if ep.episode_no in wanted_nos), key=lambda ep: ep.episode_no)
         if not target_episodes:

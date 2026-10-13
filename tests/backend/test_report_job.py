@@ -6,7 +6,7 @@ from app import db, repository, scheduler, job_status, discord_notify, webtoon_s
 db.get_connection()
 
 sent = []; lookups = []; collected = []
-async def fake_send(session, settings, message): sent.append(message)
+async def fake_send(session, message): sent.append(message)
 discord_notify.send_webhook_notification = fake_send
 async def fake_naver(session, settings): collected.append("naver"); return []
 async def fake_kakao(session, settings): collected.append("kakao"); return []

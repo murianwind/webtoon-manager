@@ -7,7 +7,7 @@ import logging
 import aiohttp
 
 from app import cookie_health, daily_plus, discord_notify, job_status, repository, schedule_config
-from app.config import Settings, get_settings
+from app.config import get_settings
 
 from app.scheduler.common import (
     DEFAULT_SCHEDULES,
@@ -84,7 +84,7 @@ async def _run_download_job_impl(platforms: set[str]) -> None:
             await asyncio.sleep(settings.delay_seconds)
 
         try:
-            await cookie_health.finalize_and_notify(session, settings, adult_tracker)
+            await cookie_health.finalize_and_notify(session, adult_tracker)
         except Exception as e:
             log.error("쿠키 상태 판단/알림 중 예외: %s", e)
 
@@ -106,7 +106,7 @@ async def _run_download_job_impl(platforms: set[str]) -> None:
             ).mode != "off"
             if not report_configured:
                 try:
-                    await _notify_download_failures(session, settings, failures)
+                    await _notify_download_failures(session, failures)
                 except Exception as e:
                     log.error("실패 요약 알림 전송 중 예외: %s", e)
 
@@ -153,7 +153,7 @@ def _cleanup_old_episode_history() -> None:
 
 
 async def _notify_download_failures(
-    session: aiohttp.ClientSession, settings: Settings, failures: list[dict]
+    session: aiohttp.ClientSession, failures: list[dict]
 ) -> None:
     """이번 실행에서 실패한 웹툰/회차를 한 번에 모아서 디스코드로 보낸다 — 실패마다
     따로 알림을 보내면 스팸이 되니, 실행이 끝날 때 요약 1건으로 보낸다."""
@@ -163,4 +163,4 @@ async def _notify_download_failures(
             lines.append(f"- {f['title_name']} {f['episode_no']}화 \"{f['subtitle']}\"")
         else:
             lines.append(f"- {f['title_name']}: {f['subtitle']}")
-    await discord_notify.send_webhook_notification(session, settings, "\n".join(lines))
+    await discord_notify.send_webhook_notification(session, "\n".join(lines))

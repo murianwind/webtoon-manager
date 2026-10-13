@@ -42,12 +42,12 @@ async def restore_backup(data: dict, request: Request):
     try:
         report = await asyncio.to_thread(backup_restore.restore_backup, data, get_settings())
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         # 스키마가 안 맞는 백업(필수 컬럼 없음 등)은 DB 예외가 그대로 올라올 수 있다 —
         # 원문 그대로 500으로 흘리는 대신 "복원 실패"로 명확히 감싼다. 트랜잭션은
         # write_transaction이 이미 롤백했으므로 DB는 이전 상태 그대로 안전하다.
-        raise HTTPException(status_code=400, detail=f"백업 파일 형식이 올바르지 않아 복원하지 못했습니다: {e}")
+        raise HTTPException(status_code=400, detail=f"백업 파일 형식이 올바르지 않아 복원하지 못했습니다: {e}") from e
 
     # 예전 백업에는 받은 회차 기록이 없다 — 복원한 폴더가 있으면 그 폴더와 아카이빙 이력으로 만든다(없으면 첫 자동 다운로드 때)
     await asyncio.to_thread(kakao_records.backfill_and_log, get_settings())

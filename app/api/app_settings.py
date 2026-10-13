@@ -70,8 +70,8 @@ def _validate_download_folder(raw_path: str) -> str:
     try:
         with tempfile.NamedTemporaryFile(dir=folder):
             pass
-    except OSError:
-        raise HTTPException(status_code=400, detail="그 폴더에 파일을 쓸 수 없습니다. 권한을 확인해주세요.")
+    except OSError as e:
+        raise HTTPException(status_code=400, detail="그 폴더에 파일을 쓸 수 없습니다. 권한을 확인해주세요.") from e
     return path
 
 

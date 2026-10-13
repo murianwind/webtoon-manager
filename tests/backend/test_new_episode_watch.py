@@ -43,7 +43,7 @@ kp.client_from_saved_cookies = lambda session, timeout: FakeKakaoClient()
 kp.persist_refreshed_cookies = lambda client: None
 
 sent, state = [], {"ok": True}
-async def fake_send(session, settings_, message):
+async def fake_send(session, message):
     if not discord_config.get_webhook_url() or not state["ok"]:
         return False
     sent.append(message); return True

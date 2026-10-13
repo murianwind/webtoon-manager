@@ -115,6 +115,8 @@ async def _download_single_image(
                     # 깨진 다운로드가 남는 문제는 실행 실패 시 폴더를 정리하는 별도 로직으로
                     # 이미 커버된다(다운로드 도중에는 크기 추측으로 재시도하지 않는다).
                     return True
+                if response.status != 200 and attempt >= IMAGE_DOWNLOAD_MAX_RETRIES:
+                    log.error("이미지 다운로드 최종 실패: %s (HTTP %s)", img_url, response.status)  # 예전에는 예외일 때만 기록해서 HTTP 오류의 원인을 알 수 없었다
         except Exception as e:
             if attempt >= IMAGE_DOWNLOAD_MAX_RETRIES:
                 log.error("이미지 다운로드 최종 실패: %s (%s)", img_url, e)
@@ -142,8 +144,8 @@ async def download_single_episode(
 ) -> tuple[bool, Optional[Path]]:
     """
     회차 하나를 완전히 받는다. 이미지 목록을 못 가져오거나 일부라도 다운로드에
-    실패하면 (False, episode_dir)를 반환한다 — 호출자가 이 경우 다음 회차로
-    넘어가지 않고 멈춰야, "다음 실행 때 이 화부터 재시도"가 성립한다.
+    실패하면 (False, None)을 반환하고 만들던 회차 폴더는 지운다 — 호출자가 이 경우
+    다음 회차로 넘어가지 않고 멈춰야, "다음 실행 때 이 화부터 재시도"가 성립한다.
     """
     detail_url = NAVER_DETAIL_URL_TEMPLATES.get(webtoon_type, NAVER_DETAIL_URL_TEMPLATES["webtoon"])
     safe_title = remove_forbidden_str(title_name)

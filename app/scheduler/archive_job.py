@@ -7,7 +7,7 @@ import logging
 import aiohttp
 
 from app import archiver, discord_notify, download_roots, job_status, rclone_updater, repository
-from app.config import Settings, get_settings
+from app.config import get_settings
 
 log = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ def _cleanup_old_archive_history() -> None:
 
 
 async def _notify_archive_issues(
-    session: aiohttp.ClientSession, settings: Settings, conflicts: list[tuple[str, str, str]], failures: list[tuple[str, str, str]]
+    session: aiohttp.ClientSession, conflicts: list[tuple[str, str, str]], failures: list[tuple[str, str, str]]
 ) -> None:
     """주기 아카이빙(완결 자동이동 포함) 실행 중 이름 충돌을 처리했거나 실패한 게
     있으면 한 번에 모아서 디스코드로 알린다 — 다운로드 실패 요약과 같은 패턴
@@ -44,7 +44,7 @@ async def _notify_archive_issues(
         lines.append(f"❌ 이동 실패 {len(failures)}건")
         for title_name, file_name, error in failures:
             lines.append(f"- {title_name}: {file_name} — {error}")
-    await discord_notify.send_webhook_notification(session, settings, "\n".join(lines))
+    await discord_notify.send_webhook_notification(session, "\n".join(lines))
 
 
 async def run_archive_job() -> None:
@@ -79,7 +79,7 @@ async def run_archive_job() -> None:
 
             if conflicts or failures:
                 async with aiohttp.ClientSession() as session:
-                    await _notify_archive_issues(session, settings, conflicts, failures)
+                    await _notify_archive_issues(session, conflicts, failures)
 
             job_status.finish("archive", success=True)
         except Exception as e:

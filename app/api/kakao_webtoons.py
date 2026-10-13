@@ -147,7 +147,7 @@ async def browse_kakao_list(refresh: bool = False):
                 "status": wt["status"], "ever_subscribed": wt["ever_subscribed"],
             }
         )
-    version = hashlib.sha1(json.dumps(result, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+    version = hashlib.sha256(json.dumps(result, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
     return {
         "items": result, "version": version, "refreshing": refreshing,
         "refreshed_at": datetime.fromtimestamp(fetched_at, tz=timezone.utc).isoformat() if fetched_at else None,

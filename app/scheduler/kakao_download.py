@@ -65,7 +65,7 @@ async def _download_kakao_title(client, settings, webtoon: dict, root: str, fail
             return None
         _record_kakao_batch(webtoon, result, failures)
         if session is not None:
-            await _notify_kakao_rental_used(session, settings, webtoon, result)
+            await _notify_kakao_rental_used(session, webtoon, result)
         remaining = _kakao_remaining_free(result)
         if remaining <= 0:
             break
@@ -77,7 +77,7 @@ async def _download_kakao_title(client, settings, webtoon: dict, root: str, fail
     return result
 
 
-async def _notify_kakao_rental_used(session, settings, webtoon: dict, result) -> None:
+async def _notify_kakao_rental_used(session, webtoon: dict, result) -> None:
     """자동으로 대여권을 썼으면 쓴 회차와 이 작품에 남은 장수를 디스코드로 알린다(돈을 낸 자원이 자동으로 쓰였으니 매번 알린다).
     알림이 실패해도 다운로드는 이미 끝났으므로 로그만 남기고 넘어간다."""
     if not result.rental_used:
@@ -85,23 +85,23 @@ async def _notify_kakao_rental_used(session, settings, webtoon: dict, result) ->
     numbers = ", ".join(f"{n}번" for n in result.rental_used)
     left = f" 남은 대여권 {result.rental_remaining}장" if result.rental_remaining is not None else ""
     message = f"[{result.title or webtoon['title']}] 대여권 {len(result.rental_used)}장을 사용했습니다 ({numbers}).{left}"
-    if not await discord_notify.send_webhook_notification(session, settings, message):
+    if not await discord_notify.send_webhook_notification(session, message):
         job_status.log_line("download", f"[{webtoon['title']}] 대여권 사용 알림을 보내지 못했습니다(웹훅 없음/전송 실패)")
 
 
-async def _notify_kakao_ticket_needed(session, settings, webtoon: dict, result) -> None:
+async def _notify_kakao_ticket_needed(session, webtoon: dict, result) -> None:
     """다음 회차가 대여권이 필요해서 더 못 받으면 디스코드로 알린다. 같은 회차는 한 번만 알리고(알린 번호를 기록),
     웹훅이 없거나 전송이 실패하면 기록하지 않아 다음 실행 때 다시 시도한다."""
     needed = result.ticket_needed
     if needed is None or webtoon.get("ticket_notified_no") == needed.number:
         return
     message = f"[{result.title or webtoon['title']}] 다음 회차 ({needed.number}번 '{needed.subtitle}')부터는 대여권 충전이 필요합니다."
-    if await discord_notify.send_webhook_notification(session, settings, message):
+    if await discord_notify.send_webhook_notification(session, message):
         repository.set_kakao_ticket_notified(webtoon["title_id"], needed.number)
         job_status.log_line("download", f"[{webtoon['title']}] 대여권 필요 알림 전송 ({needed.number}번 회차)")
 
 
-async def _notify_kakao_caught_up(session, settings, webtoon: dict, result) -> None:
+async def _notify_kakao_caught_up(session, webtoon: dict, result) -> None:
     """연재작을 최신 회차까지 다 받아서 더 받을 회차가 없으면 디스코드로 알린다. 같은 마지막 회차는 한 번만 알린다.
     이미 따라잡은 채로 처음 확인되는 작품(이번에 받은 회차가 없고 기록도 없음)은 알리지 않고 기준만 기록한다 — 안 그러면 이 기능을 켠 첫 실행에
     구독 중인 연재작 전부에 알림이 간다. 웹훅이 없거나 전송이 실패하면 기록하지 않아 다음 실행 때 다시 시도한다."""
@@ -113,7 +113,7 @@ async def _notify_kakao_caught_up(session, settings, webtoon: dict, result) -> N
         repository.set_kakao_caught_up_notified(webtoon["title_id"], last.number)
         return
     message = f"[{result.title or webtoon['title']}] 더 이상 받을 회차가 없습니다. (마지막 {last.number}번 '{last.subtitle}')"
-    if await discord_notify.send_webhook_notification(session, settings, message):
+    if await discord_notify.send_webhook_notification(session, message):
         repository.set_kakao_caught_up_notified(webtoon["title_id"], last.number)
         job_status.log_line("download", f"[{webtoon['title']}] 더 이상 받을 회차 없음 알림 전송 (마지막 {last.number}번)")
 
@@ -150,7 +150,7 @@ async def _download_kakao_subscriptions(settings, failures: list[dict]) -> None:
                 return
             logged_in = await client.check_login()
             status = kakao_page_auth.cookie_status(kakao_page_auth.load_cookies())
-            await kakao_page_auth.notify_if_needed(session, settings, logged_in, status["days_left"])
+            await kakao_page_auth.notify_if_needed(session, logged_in, status["days_left"])
             if logged_in is False:
                 job_status.log_line("download", "카카오페이지 로그인이 풀려 있어서 건너뜁니다(쿠키를 다시 붙여넣어 주세요)")
                 return
@@ -170,8 +170,8 @@ async def _download_kakao_subscriptions(settings, failures: list[dict]) -> None:
                 # 연재 중으로 돌아왔으면 기록을 되돌려 다음 완결 때 다시 알린다.
                 if result.error is None:
                     repository.set_kakao_finished(webtoon["title_id"], result.finished and result.nothing_left)
-                await _notify_kakao_ticket_needed(session, settings, webtoon, result)
-                await _notify_kakao_caught_up(session, settings, webtoon, result)
+                await _notify_kakao_ticket_needed(session, webtoon, result)
+                await _notify_kakao_caught_up(session, webtoon, result)
                 await asyncio.sleep(settings.delay_seconds)
             job_status.log_line("download", _kakao_download_summary(len(subscribed), results, use_rental_tickets))
         await _notify_kakao_newly_finished()

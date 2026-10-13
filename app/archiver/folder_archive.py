@@ -5,6 +5,7 @@ import logging
 import os
 import shutil
 from pathlib import Path, PurePosixPath
+from xml.etree import ElementTree
 
 from app import kakao_cover, rclone_client, repository
 from app.zipper import _LEADING_DIGITS_RE
@@ -42,7 +43,7 @@ def _bulk_move_collect_source_files(
         try:
             rel_files = [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()]
         except OSError as e:
-            raise ValueError(f"원본 폴더 목록을 읽을 수 없습니다 (마운트가 불안정할 수 있습니다): {e}")
+            raise ValueError(f"원본 폴더 목록을 읽을 수 없습니다 (마운트가 불안정할 수 있습니다): {e}") from e
         return rel_files, root
 
     remote, base_path = _parse_rclone_target(path_value)
@@ -51,7 +52,7 @@ def _bulk_move_collect_source_files(
     try:
         rel_files = rclone_client.list_files_recursive(rclone_config_path, remote, base_path)
     except rclone_client.RcloneError as e:
-        raise ValueError(f"원본 원격 폴더 목록을 읽을 수 없습니다: {e}")
+        raise ValueError(f"원본 원격 폴더 목록을 읽을 수 없습니다: {e}") from e
     return rel_files, (remote, base_path)
 
 
@@ -356,12 +357,10 @@ def _extract_web_url_from_xml_text(xml_text: str | None) -> str | None:
     if not xml_text:
         return None
     try:
-        import xml.etree.ElementTree as ET
-
-        web = ET.fromstring(xml_text).find("Web")
-        return (web.text or "").strip() if web is not None else None
-    except Exception:
-        return None
+        web = ElementTree.fromstring(xml_text).find("Web")
+    except ElementTree.ParseError:
+        return None  # 깨진 info.xml은 "알 수 없음" — 다른 오류(프로그램 실수)까지 숨기지 않으려고 이 예외만 받는다
+    return (web.text or "").strip() if web is not None else None
 
 
 def _download_kakao_cover_to_temp_file(series_id: str) -> str | None:

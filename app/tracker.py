@@ -212,11 +212,11 @@ async def _record_kakao_title_authors(series_id: int, settings) -> None:
             repository.upsert_watched_author(name, name, True, "kakao")
 
 
-async def _notify_kakao_auto_add(session: aiohttp.ClientSession, settings, author_name: str, title_text: str, title_id: int) -> None:
+async def _notify_kakao_auto_add(session: aiohttp.ClientSession, author_name: str, title_text: str, title_id: int) -> None:
     """카카오 작가 신작 자동 추가(새 작품, 제외됨에서 다시 구독)를 디스코드로 알린다. 알림이 실패해도 추가는 이미 끝났으므로 로그만 남긴다."""
     message = f"🆕 **카카오웹툰 신작 자동 추가**\n작가: {author_name}\n제목: {title_text}\nID: {title_id}"
     try:
-        await discord_notify.send_webhook_notification(session, settings, message)
+        await discord_notify.send_webhook_notification(session, message)
     except Exception as e:
         log.error("카카오 신작 알림 전송 실패: %s", e)
 
@@ -273,7 +273,7 @@ async def scan_kakao_authors_for_new_titles(session: aiohttp.ClientSession, sett
                 repository.set_kakao_webtoon_status(title_id, repository.STATUS_ACTIVE)
                 new_titles_found += 1
                 await _record_kakao_title_authors(title_id, settings)
-                await _notify_kakao_auto_add(session, settings, author.author_name, f"{item['title_name']} (제외됨에서 구독)", title_id)
+                await _notify_kakao_auto_add(session, author.author_name, f"{item['title_name']} (제외됨에서 구독)", title_id)
                 job_status.log_line("discovery", f"[카카오/{author.author_name}] 제외됨에서 구독: {item['title_name']} (id={title_id})")
                 continue
 
@@ -292,7 +292,7 @@ async def scan_kakao_authors_for_new_titles(session: aiohttp.ClientSession, sett
                 ", ".join(item.get("author_names") or []),
             )
             await _record_kakao_title_authors(title_id, settings)
-            await _notify_kakao_auto_add(session, settings, author.author_name, item["title_name"], title_id)
+            await _notify_kakao_auto_add(session, author.author_name, item["title_name"], title_id)
             job_status.log_line("discovery", f"[카카오/{author.author_name}] 신작 자동 추가: {item['title_name']} (id={title_id})")
 
         await asyncio.sleep(settings.delay_seconds)
@@ -600,7 +600,7 @@ async def scan_subscriptions_for_updates(session: aiohttp.ClientSession, setting
 
     if new_entry_lines:
         message = "🆕 **작가 신작 자동 추가**\n" + "\n".join(new_entry_lines)
-        await send_webhook_notification(session, settings, message)
+        await send_webhook_notification(session, message)
 
 
 async def discover_titles_for_unlinked_watched_authors(session: aiohttp.ClientSession, settings: Settings) -> list[str]:
@@ -646,7 +646,7 @@ async def discover_titles_for_unlinked_watched_authors(session: aiohttp.ClientSe
 
     if new_entry_lines:
         message = "🆕 **작가 신작 자동 추가 (미구독 작가)**\n" + "\n".join(new_entry_lines)
-        await send_webhook_notification(session, settings, message)
+        await send_webhook_notification(session, message)
 
     return new_entry_lines
 
@@ -699,4 +699,4 @@ async def scan_curation_tags(session: aiohttp.ClientSession, settings: Settings)
 
     if new_entry_lines:
         message = "🆕 **태그 신작 자동 추가**\n" + "\n".join(new_entry_lines)
-        await send_webhook_notification(session, settings, message)
+        await send_webhook_notification(session, message)

@@ -6,7 +6,7 @@ from app import db, repository, scheduler, job_status, discord_notify, report_se
 db.get_connection()
 
 sent = []
-async def fake_send(session, settings, message): sent.append(message)
+async def fake_send(session, message): sent.append(message)
 discord_notify.send_webhook_notification = fake_send
 async def none(session, settings): return []
 scheduler.report_job._collect_unregistered_new_episodes = none; scheduler.report_job._collect_kakao_new_episodes = none
@@ -51,7 +51,7 @@ async def main():
     print("5) 테스트 발송 OK")
 
     # ── 6. 전송이 실패하면 기록하지 않아서 다음에 다시 보낸다 ──
-    async def boom(session, settings, message): raise RuntimeError("웹훅 오류")
+    async def boom(session, message): raise RuntimeError("웹훅 오류")
     discord_notify.send_webhook_notification = boom; add("66", "전송실패작", 1, "naver"); sent.clear(); job_status.start("report"); await scheduler._run_report_job_impl()
     discord_notify.send_webhook_notification = fake_send; msgs = await report(); assert len(msgs) == 1 and "전송실패작" in msgs[0]
     print("6) 전송 실패 시 재시도 OK")

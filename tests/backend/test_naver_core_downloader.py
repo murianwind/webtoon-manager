@@ -1,8 +1,9 @@
-"""네이버 회차 다운로더(downloader.py) 특성화 테스트 — 이미지 주소 수집(재시도/백오프), 이미지 받기, 회차 하나 받기의 "현재 동작"을 고정한다.
+"""네이버 회차 다운로더(downloader.py) 특성화 테스트 — 이미지 주소 수집(재시도/백오프), 이미지 받기, 회차 하나 받기의 "현재 동작"을 고정한다(이미지 HTTP 오류의 최종 실패 원인은 로그에 남는다).
 
 회차 하나는 "이미지 주소 수집 → 폴더 만들기 → 이미지 동시 받기"이고, 이미지가 하나라도 실패하면 폴더를 통째로 지우고 (False, None)을 돌려준다.
 """
 import asyncio
+import logging
 import tempfile
 from pathlib import Path
 
@@ -11,6 +12,10 @@ from app.constants import DEFAULT_HEADERS, IMAGE_DOWNLOAD_MAX_RETRIES, NAVER_DET
 from app.models import EpisodeInfo
 from fake_naver_http import FakeResponse, FakeSession, InflightTracker
 
+logs = []
+class Capture(logging.Handler):
+    def emit(self, record): logs.append(record.getMessage())
+logging.getLogger("app.downloader").addHandler(Capture()); logging.getLogger("app.downloader").setLevel(logging.WARNING)
 sleeps = []
 async def fake_sleep(seconds): sleeps.append(seconds)
 downloader.asyncio.sleep = fake_sleep
@@ -59,6 +64,8 @@ async def single_image():
     # Scenario 7: 200이 아니면 백오프(1~16초)로 다시 시도하고 끝까지 안 되면 False — 파일은 만들지 않는다
     sleeps.clear(); dead = FakeSession(lambda *a: FakeResponse(500)); missing = tmp / "no.jpg"
     assert await downloader._download_single_image(dead, "u", missing, {}, 10) is False and len(dead.calls) == IMAGE_DOWNLOAD_MAX_RETRIES + 1 and sleeps == BACKOFF and not missing.exists()
+    # 끝내 실패하면 HTTP 상태를 로그에 남긴다(예전에는 예외일 때만 기록해서 HTTP 오류로 실패한 원인을 알 수 없었다)
+    assert any("최종 실패" in line and "HTTP 500" in line and "u" in line for line in logs), logs
     # Scenario 8: 네트워크 예외는 재시도하다가 마지막 시도에서 False. 한 번 실패하고 성공하면 True
     sleeps.clear(); boom = FakeSession(lambda *a: RuntimeError("끊김"))
     assert await downloader._download_single_image(boom, "u", tmp / "e.jpg", {}, 10) is False and len(boom.calls) == IMAGE_DOWNLOAD_MAX_RETRIES + 1

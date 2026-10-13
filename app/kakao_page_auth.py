@@ -142,7 +142,7 @@ def _recently_sent(key: str) -> bool:
         return False
 
 
-async def notify_if_needed(session, settings, logged_in: bool | None, days_left: int | None) -> bool:
+async def notify_if_needed(session, logged_in: bool | None, days_left: int | None) -> bool:
     """필요하면 디스코드로 알린다(같은 종류는 24시간에 한 번). 실제로 보냈으면 True."""
     if logged_in is True:
         repository.set_setting(_ALERT_EXPIRED_KEY, None)  # 다시 정상이면, 다음에 또 풀렸을 때 바로 알릴 수 있게
@@ -155,7 +155,7 @@ async def notify_if_needed(session, settings, logged_in: bool | None, days_left:
     if not discord_config.get_webhook_url():
         # 보낼 곳이 없으면 "보냈다"고 기록하지 않는다 — 기록하면 나중에 웹훅을 달았을 때 같은 알림이 최대 하루 늦어진다
         return False
-    await discord_notify.send_webhook_notification(session, settings, message)
+    await discord_notify.send_webhook_notification(session, message)
     repository.set_setting(key, str(time.time()))
     log.warning("카카오페이지 쿠키 알림 전송: %s", "로그인 풀림" if logged_in is False else "곧 만료")
     return True

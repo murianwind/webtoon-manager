@@ -22,7 +22,7 @@ daily_plus.cached_ids = lambda: set(HIDDEN)
 async def no_sleep(x): pass
 asyncio.sleep = no_sleep
 
-async def fake_send(session, settings_, message): sent.append(message); return True
+async def fake_send(session, message): sent.append(message); return True
 tracker.send_webhook_notification = fake_send
 async def fake_enrich(session, title_id, settings_, **k): return True, "ok"
 tracker.enrich_one = fake_enrich
@@ -96,7 +96,7 @@ async def jobs():
     downloaded = []
     async def fake_download(session, settings_, title_id, adult_tracker, failures): downloaded.append(title_id)
     scheduler.download_job._download_new_episodes_for_one = fake_download   # _run_download_job_impl이 있는 download_job 모듈이 이 이름을 가져다 쓴다
-    async def no_finalize(session, settings_, tracker_): return None
+    async def no_finalize(session, tracker_): return None
     cookie_health.finalize_and_notify = no_finalize
     await scheduler._run_download_job_impl({"naver"})
     assert "852777" not in downloaded and state("852777") == repository.STATUS_EXCLUDED, (downloaded, state("852777"))

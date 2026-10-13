@@ -58,8 +58,8 @@ class CompletionBotClient(discord.Client):
             try:
                 if not interaction.response.is_done():
                     await interaction.response.send_message("처리 중 오류가 발생했습니다.", ephemeral=True)
-            except Exception:
-                pass  # 알림 시도 자체가 실패해도 봇이 죽으면 안 됨
+            except Exception as notify_error:
+                log.warning("오류 안내 메시지 전송도 실패 (custom_id=%s): %s", custom_id, notify_error)  # 알림 시도 자체가 실패해도 봇이 죽으면 안 됨
 
     async def _handle_unsubscribe(self, interaction: discord.Interaction, title_id: str) -> None:
         webtoon = await asyncio.to_thread(repository.get, title_id)

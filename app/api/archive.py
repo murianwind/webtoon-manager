@@ -399,7 +399,7 @@ async def list_rclone_remotes():
     try:
         remotes = await asyncio.to_thread(rclone_client.list_remotes, settings.rclone_config_path)
     except rclone_client.RcloneError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from e
     return {"remotes": remotes}
 
 
@@ -411,7 +411,7 @@ async def list_rclone_folders(remote: str, path: str = ""):
     try:
         folders = await asyncio.to_thread(rclone_client.list_folders, settings.rclone_config_path, remote, path)
     except rclone_client.RcloneError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from e
     return {"remote": remote, "path": path, "folders": folders}
 
 
@@ -431,7 +431,7 @@ async def check_folder_selectable(dest_type: str, path: str, remote: str = ""):
                 archiver.is_folder_selectable_as_dest_rclone, settings.rclone_config_path, f"{remote}:{path}"
             )
         except rclone_client.RcloneError as e:
-            raise HTTPException(status_code=502, detail=str(e))
+            raise HTTPException(status_code=502, detail=str(e)) from e
     else:
         if not settings.archive_root:
             raise HTTPException(status_code=400, detail="로컬 아카이빙 경로(ARCHIVE_ROOT)가 설정되어 있지 않습니다.")
@@ -452,7 +452,7 @@ async def create_rclone_folder(payload: CreateRcloneFolderIn):
     try:
         await asyncio.to_thread(rclone_client.create_folder, settings.rclone_config_path, payload.remote, payload.path)
     except rclone_client.RcloneError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e)) from e
     return {"remote": payload.remote, "path": payload.path}
 
 
@@ -487,7 +487,7 @@ async def list_archive_folders(path: str = "", local_root: str = "archive"):
         raise HTTPException(
             status_code=502,
             detail=f"이 폴더의 목록을 읽을 수 없습니다 (마운트가 불안정할 수 있습니다): {e}",
-        )
+        ) from e
 
     for entry in entries:
         try:
