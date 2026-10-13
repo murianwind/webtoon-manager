@@ -158,3 +158,7 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - **서버는 아무것도 쓰지 않습니다**: `GET /api/manual-download/metadata-zip?title_id=`(네이버, `manual_download.build_metadata_bundle`)와 `GET /api/kakao-manual/metadata-zip?series_id=`(카카오페이지, `kakao_page_download.build_series_metadata_bundle`)가 폴더에 저장하던 것과 같은 내용을 메모리에서 만들어 `metadata_zip.MetadataBundle`에 담고, `api/common.metadata_zip_response`가 zip 응답으로 보냅니다. 폴더에 쓰는 `write_comicinfo_file`/`write_info_xml`을 부르지 않는 이유는 카카오의 `write_info_xml`이 작가 정보를 DB에 저장하는 부수 효과가 있기 때문입니다(그래서 `build_*_comicinfo_xml`을 직접 씁니다). 네이버 표지 받기는 `comicinfo.fetch_cover_image`(확장자, 바이트)로 분리해서 폴더에 저장하는 `download_cover_image`와 공유합니다.
 - 표지를 못 받으면 `info.xml`만 담은 zip을 보내고 `X-Metadata-Warning: cover-missing` 헤더로 알립니다(헤더라서 ASCII 코드). 작품 정보를 못 받으면 404입니다. 카카오는 `client_or_anonymous`라서 로그인 쿠키가 없어도 됩니다. 테스트: `tests/backend/test_metadata_zip_naver.py`, `test_metadata_zip_kakao.py`, `tests/js/test_metadata_zip_button.js`.
 
+## 전체목록 카드: 뷰어 아이콘 자리 유지
+
+- 뷰어 서버를 설정하면 구독 중 카드에 "뷰어에서 보기" 아이콘이 붙고, 렌더링 뒤에 실제로 뷰어에 있는지 확인해서(`pruneMissingViewerIcons`) 없는 작품은 숨깁니다. 예전에는 아이콘을 **지워서** 카드마다 버튼 줄 수가 2~3줄로 달라졌고, 카드 안에서 버튼이 아래쪽 정렬이라 "구독해제" 버튼이 카드마다 위아래로 어긋났습니다. 지금은 `hideViewerIcon`이 아이콘을 지우지 않고 자리만 남긴 채(`visibility: hidden`, 비활성, `aria-hidden`) 숨겨서 모든 카드의 버튼 줄 수가 같습니다 — 같은 줄의 카드는 높이가 같고 버튼이 같은 줄 수만큼 아래에서 쌓이므로 "구독해제"가 같은 줄에 정렬됩니다. 뷰어 서버가 없으면 아이콘이 처음부터 없어서 모든 카드가 같은 줄 수입니다. 테스트: `tests/js/test_viewer_icon_slot.js`.
+

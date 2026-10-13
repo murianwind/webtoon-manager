@@ -182,11 +182,19 @@ function renderNaverList() {
 
 let naverListBulkSelectStartScrollY = null;
 
+// 뷰어에 없는 작품의 아이콘 — 지우면 카드마다 버튼 줄 수가 달라져서 "구독해제"가 위아래로 어긋난다. 자리는 그대로 두고 눈에 안 보이게만 한다.
+function hideViewerIcon(button) {
+  button.style.visibility = "hidden";
+  button.disabled = true;
+  button.tabIndex = -1;
+  button.setAttribute("aria-hidden", "true");
+}
+
 async function pruneMissingViewerIcons() {
   // "뷰어에서 보기" 아이콘은 구독 중이면 무조건 붙는데, 실제로 뷰어 라이브러리에
   // 없는 작품도 있다(특히 카카오는 구독=다운로드가 아니라서 더 흔함) — 렌더링
   // 자체를 그 확인 때문에 늦추지 않고, 그려진 뒤 백그라운드로 하나씩 확인해서
-  // 없는 것만 조용히 지운다. 뷰어가 로컬망에 있다는 전제라 확인 자체는 빠르다.
+  // 없는 것은 자리만 남기고 숨긴다. 뷰어가 로컬망에 있다는 전제라 확인 자체는 빠르다.
   // 네이버/카카오는 폴더명 만드는 도구가 서로 달라서 특수문자 치환 규칙도 다르므로
   // (예: 콜론 -> 네이버는 전각 콜론, 카카오는 밑줄), 같은 제목이라도 플랫폼별로
   // 따로 조회해야 한다 — (제목, 플랫폼) 조합 단위로 묶는다.
@@ -208,7 +216,7 @@ async function pruneMissingViewerIcons() {
             .querySelectorAll(
               `[data-viewer-check-title="${CSS.escape(title)}"][data-viewer-check-platform="${CSS.escape(platform)}"]`
             )
-            .forEach((b) => b.remove());
+            .forEach(hideViewerIcon);
         }
       } catch (e) {
         // 조회 자체가 실패하면(네트워크 문제 등) 아이콘은 그냥 둔다 — 눌렀을 때
