@@ -162,3 +162,9 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 
 - 뷰어 서버를 설정하면 구독 중 카드에 "뷰어에서 보기" 아이콘이 붙고, 렌더링 뒤에 실제로 뷰어에 있는지 확인해서(`pruneMissingViewerIcons`) 없는 작품은 숨깁니다. 예전에는 아이콘을 **지워서** 카드마다 버튼 줄 수가 2~3줄로 달라졌고, 카드 안에서 버튼이 아래쪽 정렬이라 "구독해제" 버튼이 카드마다 위아래로 어긋났습니다. 지금은 `hideViewerIcon`이 아이콘을 지우지 않고 자리만 남긴 채(`visibility: hidden`, 비활성, `aria-hidden`) 숨겨서 모든 카드의 버튼 줄 수가 같습니다 — 같은 줄의 카드는 높이가 같고 버튼이 같은 줄 수만큼 아래에서 쌓이므로 "구독해제"가 같은 줄에 정렬됩니다. 뷰어 서버가 없으면 아이콘이 처음부터 없어서 모든 카드가 같은 줄 수입니다. 테스트: `tests/js/test_viewer_icon_slot.js`.
 
+## 다운로드 속도 조절 (`app/download_pacing.py`)
+
+- 자동 다운로드는 **작품을 한 개씩 차례로** 받습니다(네이버 `for webtoon in active_webtoons`, 카카오 `for webtoon in subscribed` — 둘 다 순차). 그래서 한 작품이 상한(`max_new_episodes_per_title`)에 걸려 `batch_rest_minutes`를 쉬는 동안 **모든 작품이 함께 멈춥니다.** 이 쉬는 시간이 사이트에 대한 전체 냉각 시간 역할을 하므로, 쉬는 동안 다른 작품을 먼저 받는 방식은 요청이 끊김 없이 이어져 쉬는 의미가 없어서 택하지 않았습니다(검토 후 보류).
+- 값은 `download_pacing.limits(settings)`가 돌려줍니다: 설정 화면에서 저장한 값(DB `settings`의 `download_max_new_episodes_per_title`, `download_batch_rest_minutes`)이 있으면 그 값, 없으면 환경변수 기본값(`Settings`). 배치마다 다시 읽어서 재시작 없이 다음 배치부터 적용되고(`scheduler._download_pending_batches`, `_download_kakao_title`), DB에 범위 밖이거나 숫자가 아닌 값이 있으면 그 항목만 기본값으로 돌아갑니다. 범위는 회차 0~200(0=제한 없음), 쉬는 시간 0.5~120분이고 저장 전 검사는 `download_pacing.validate`(서버, 400)와 `validateDownloadPacingInput`(화면) 두 곳이 같은 범위를 씁니다.
+- API: `GET/POST/DELETE /api/settings/download-pacing`(DELETE = 기본값으로). 화면은 설정 탭의 "다운로드 속도 조절" 카드(`72-settings-jobs.js`). 테스트: `tests/backend/test_download_pacing.py`, `tests/js/test_download_pacing_settings.js`.
+

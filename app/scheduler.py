@@ -28,7 +28,7 @@ from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app import daily_plus, download_roots, archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, kakao_api, kakao_catalog, kakao_page_auth, kakao_page_download, naver_api, new_episode_watch, report_seen, repository, schedule_config, tracker, webtoon_server_client
+from app import daily_plus, download_pacing, download_roots, archiver, comicinfo, cookie_health, discord_bot, discord_notify, job_status, kakao_api, kakao_catalog, kakao_page_auth, kakao_page_download, naver_api, new_episode_watch, report_seen, repository, schedule_config, tracker, webtoon_server_client
 from app import rclone_updater
 from app.config import Settings, get_settings
 from app.constants import NAVER_DETAIL_URL_TEMPLATES
@@ -125,8 +125,8 @@ async def _download_pending_batches(
     total_pending = len(pending)
     job_status.log_line("download", f"[{info.title_name}] 새 회차 {total_pending}개 다운로드 시작")
 
-    cap = settings.max_new_episodes_per_title
     while pending:
+        cap, rest_minutes = download_pacing.limits(settings)  # 설정 화면에서 바꾼 값이 있으면 그 값(배치마다 다시 읽어서 재시작 없이 적용)
         batch = pending[:cap] if cap > 0 else pending
         pending = pending[len(batch):]
 
@@ -159,8 +159,7 @@ async def _download_pending_batches(
             await asyncio.sleep(settings.delay_seconds)
 
         if pending:
-            rest_minutes = settings.batch_rest_minutes
-            job_status.log_line("download", f"[{info.title_name}] {cap}화 받음, 남은 {len(pending)}화는 {rest_minutes}분 쉬었다가 이어받기")
+            job_status.log_line("download", f"[{info.title_name}] {cap}화 받음, 남은 {len(pending)}화는 {rest_minutes:g}분 쉬었다가 이어받기")
             await asyncio.sleep(rest_minutes * 60)
 
 
@@ -240,10 +239,10 @@ async def _download_kakao_title(client, settings, webtoon: dict, root: str, fail
     중단되면 None) — 완결 판정은 이 결과로 한다. use_rental_tickets면 기다무로 못 여는 회차를 이 작품의 보유 대여권으로 열고, 배치마다
     쓴 내용을 session의 웹훅으로 알린다(여러 배치에 걸쳐 쓰면 배치마다 한 번씩)."""
     title, series_id = webtoon["title"], webtoon["title_id"]
-    cap = settings.max_new_episodes_per_title
-    max_episodes = cap if cap > 0 else _KAKAO_UNLIMITED_EPISODES
     result = None
     for batch in range(1, _KAKAO_MAX_BATCHES_PER_TITLE + 1):
+        cap, rest_minutes = download_pacing.limits(settings)  # 설정 화면에서 바꾼 값이 있으면 그 값(배치마다 다시 읽어서 재시작 없이 적용)
+        max_episodes = cap if cap > 0 else _KAKAO_UNLIMITED_EPISODES
         try:
             result = await kakao_page_download.run_download(
                 client, series_id=series_id, title=None, download_root=root, max_episodes=max_episodes,
@@ -264,7 +263,6 @@ async def _download_kakao_title(client, settings, webtoon: dict, root: str, fail
         if batch == _KAKAO_MAX_BATCHES_PER_TITLE:
             job_status.log_line("download", f"[{title}] 한 번에 받을 배치가 너무 많아 여기서 멈춥니다(남은 {remaining}화는 다음 실행에서)")
             break
-        rest_minutes = settings.batch_rest_minutes
         job_status.log_line("download", f"[{title}] {len(result.downloaded)}화 받음, 남은 {remaining}화는 {rest_minutes:g}분 쉬었다가 이어받기")
         await asyncio.sleep(rest_minutes * 60)
     return result

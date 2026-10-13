@@ -39,6 +39,7 @@ async function loadSettingsPage() {
   loadKakaoWebtoonsEnabledToggle();
   loadKakaoPageCookieStatus();
   loadKakaoRentalAutoSetting();
+  loadDownloadPacing();
   loadDownloadRoots();
   loadAuthorAutoRegisterSetting();
   loadUnsubscribeHistoryList();
@@ -257,3 +258,64 @@ document.getElementById("btn-run-report").addEventListener("click", async () => 
   await apiCall("/api/jobs/report/run", { method: "POST" });
   await refreshJobStatus();
 });
+
+// ── 다운로드 속도 조절(작품당 한 번에 받을 회차 / 배치 사이 쉬는 시간) ─────────────────────
+
+function renderDownloadPacing(data) {
+  document.getElementById("pacing-cap").value = data.max_new_episodes_per_title;
+  document.getElementById("pacing-rest").value = data.batch_rest_minutes;
+  document.getElementById("btn-reset-pacing").disabled = !data.customized;
+  document.getElementById("pacing-default-note").textContent =
+    `기본값: 작품당 ${data.default_max_new_episodes_per_title}회차, 쉬는 시간 ${data.default_batch_rest_minutes}분` + (data.customized ? " (지금은 바꾼 값을 쓰는 중)" : " (지금은 기본값을 쓰는 중)");
+}
+
+async function loadDownloadPacing() {
+  try {
+    renderDownloadPacing(await apiCall("/api/settings/download-pacing"));
+  } catch (e) {
+    // 조용히 무시
+  }
+}
+
+// 서버로 보내기 전에 입력을 검사한다(서버도 같은 범위를 검사하므로, 여기서는 빠른 안내용). 맞으면 null, 아니면 이유.
+function validateDownloadPacingInput(capText, restText) {
+  const cap = Number(capText);
+  if (capText.trim() === "" || !Number.isInteger(cap) || cap < 0 || cap > 200) return "작품당 한 번에 받을 회차는 0~200 사이의 정수여야 합니다(0은 제한 없음).";
+  const rest = Number(restText);
+  if (restText.trim() === "" || Number.isNaN(rest) || rest < 0.5 || rest > 120) return "쉬는 시간은 0.5~120분(30초 이상) 사이여야 합니다.";
+  return null;
+}
+
+document.getElementById("btn-save-pacing").addEventListener("click", async () => {
+  const resultEl = document.getElementById("pacing-save-result");
+  const capText = document.getElementById("pacing-cap").value;
+  const restText = document.getElementById("pacing-rest").value;
+  const problem = validateDownloadPacingInput(capText, restText);
+  if (problem) {
+    resultEl.textContent = problem;
+    return;
+  }
+  resultEl.textContent = "";
+  try {
+    const data = await apiCall("/api/settings/download-pacing", {
+      method: "POST",
+      body: JSON.stringify({ max_new_episodes_per_title: Number(capText), batch_rest_minutes: Number(restText) }),
+    });
+    renderDownloadPacing(data);
+    resultEl.textContent = "저장했습니다. 다음 배치부터 바로 적용됩니다.";
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+});
+
+document.getElementById("btn-reset-pacing").addEventListener("click", async () => {
+  const resultEl = document.getElementById("pacing-save-result");
+  resultEl.textContent = "";
+  try {
+    renderDownloadPacing(await apiCall("/api/settings/download-pacing", { method: "DELETE" }));
+    resultEl.textContent = "기본값으로 되돌렸습니다.";
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+});
+

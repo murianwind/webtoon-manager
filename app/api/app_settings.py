@@ -14,7 +14,7 @@ from app import (
     download_roots,
     repository,
 )
-from app import kakao_page_download
+from app import download_pacing, kakao_page_download
 from app import webtoon_server_client
 from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
 from app.config import get_settings
@@ -114,6 +114,51 @@ async def set_author_auto_register(payload: AuthorAutoRegisterIn):
         repository.set_setting, "auto_register_author_on_subscribe", None if payload.enabled else "0"
     )
     return await get_author_auto_register()
+
+
+class DownloadPacingOut(BaseModel):
+    max_new_episodes_per_title: int  # 지금 쓰는 값(저장한 값이 있으면 그 값, 없으면 기본값)
+    batch_rest_minutes: float
+    default_max_new_episodes_per_title: int  # 환경변수 기본값 — "기본값으로" 버튼과 안내에 쓴다
+    default_batch_rest_minutes: float
+    customized: bool  # 설정 화면에서 바꾼 값이 있는지
+
+
+class DownloadPacingIn(BaseModel):
+    max_new_episodes_per_title: int
+    batch_rest_minutes: float
+
+
+def _download_pacing_out() -> DownloadPacingOut:
+    settings = get_settings()
+    cap, rest = download_pacing.limits(settings)
+    return DownloadPacingOut(
+        max_new_episodes_per_title=cap, batch_rest_minutes=rest,
+        default_max_new_episodes_per_title=settings.max_new_episodes_per_title, default_batch_rest_minutes=settings.batch_rest_minutes,
+        customized=download_pacing.is_customized(),
+    )
+
+
+@router.get("/settings/download-pacing", response_model=DownloadPacingOut)
+async def get_download_pacing():
+    """자동 다운로드의 속도 조절 값 — 작품당 한 번에 받을 회차와 배치 사이 쉬는 시간(네이버/카카오페이지 공통)."""
+    return await asyncio.to_thread(_download_pacing_out)
+
+
+@router.post("/settings/download-pacing", response_model=DownloadPacingOut)
+async def set_download_pacing(payload: DownloadPacingIn):
+    problem = download_pacing.validate(payload.max_new_episodes_per_title, payload.batch_rest_minutes)
+    if problem:
+        raise HTTPException(status_code=400, detail=problem)
+    await asyncio.to_thread(download_pacing.save, payload.max_new_episodes_per_title, payload.batch_rest_minutes)
+    return await asyncio.to_thread(_download_pacing_out)
+
+
+@router.delete("/settings/download-pacing", response_model=DownloadPacingOut)
+async def reset_download_pacing():
+    """설정 화면에서 바꾼 값을 지우고 기본값으로 되돌린다."""
+    await asyncio.to_thread(download_pacing.reset)
+    return await asyncio.to_thread(_download_pacing_out)
 
 
 class RentalTicketAutoUseOut(BaseModel):
