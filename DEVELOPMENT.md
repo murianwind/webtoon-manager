@@ -175,3 +175,9 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - **지운 환경변수**(`REMOVED_ENV_VARIABLES`: `MAX_NEW_EPISODES_PER_TITLE`, `BATCH_REST_MINUTES`, `DELAY_SECONDS`, `REQUEST_TIMEOUT_SECONDS`, `MAX_CONCURRENT_DOWNLOADS`, `ARTIST_SCAN_CONCURRENCY`, `FOLDER_ZERO_FILL`, `IMAGE_ZERO_FILL`)를 환경변수나 `.env`에 지정해 둔 배포는 값이 조용히 무시되지 않도록 `main.lifespan`이 시작할 때 `config.warn_removed_env_variables`로 경고를 한 번 남깁니다(`.env`는 `KEY=VALUE` 줄의 이름만 봅니다). 지운 이름도 README "더 이상 쓰이지 않는 환경변수"에 남깁니다.
 - DB `settings`에 있는 값 중 설정 화면에 없는 것은 옵션이 아니라 **앱 내부 상태**입니다(알림을 이미 보냈는지, 마이그레이션을 마쳤는지, 매일+ 목록 캐시, 리포트 마지막 발송 시각 등).
 
+## 네이버 핵심 경로 특성화 테스트
+
+- `tests/backend/test_naver_core_api.py`(`naver_api.py`), `test_naver_core_downloader.py`(`downloader.py`), `test_naver_core_zipper.py`(`zipper.py`), `test_naver_core_folder_scanner.py`(`folder_scanner.py`)는 **현재 동작을 그대로 고정하는 특성화 테스트**입니다(이 모듈들의 커버리지는 20~25%에서 약 100%로 올랐습니다). 네이버를 호출하는 쪽은 `tests/backend/fake_naver_http.py`의 `FakeSession(handler)`를 쓰는데, `handler(url, params, attempt)`가 응답 또는 예외를 돌려주며 `attempt`(같은 요청의 몇 번째 시도인지)로 "처음엔 실패하고 다시 하면 성공" 같은 재시도를 만듭니다. 가짜 응답은 코드가 문서로 남긴 실제 응답 모양(HAR 캡처 기반)을 따르므로 **네이버가 응답 형식을 바꿨는지는 잡지 못합니다**(그건 실서버에서만 확인됩니다).
+- 일부러 [현재 동작]으로 고정한 것(바꾸려면 테스트도 함께 의도적으로 바꿔야 합니다): 회차 목록의 뒤쪽 페이지 하나가 끝내 실패해도 오류 없이 나머지만 돌려줌(`fetch_all_episodes`), 이미지 받기가 HTTP 오류로 끝내 실패해도 원인을 로그에 남기지 않음(`_download_single_image`는 예외일 때만 기록).
+- 새 테스트가 실제로 동작 변경을 잡는지 확인하려고 운영 코드를 일시적으로 바꾸는 변형 검사를 10가지로 해 보았고(정렬 기준, 무료 회차 중단, 재시도 간격, 실패 폴더 삭제, 동시 받기 상한, `Retry-After`, 압축 번호 이어붙이기, 원본 폴더 삭제, 최신부터 검사, 일련번호 정렬) 모두 테스트가 실패로 잡았습니다.
+
