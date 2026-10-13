@@ -20,7 +20,7 @@ async def fake_search(session, keyword, timeout_seconds):
     return [result("111", "구독중 작품"), result("222", "제외한 작품"), result("333", "처음 보는 작품")]
 
 
-async def fake_analyze(title_id, settings):
+async def fake_analyze(title_id, settings, recorded_up_to=0):
     info = TitleInfo(title_id=title_id, title_name=f"작품{title_id}", synopsis="", is_adult=False, webtoon_type="webtoon", is_finished=False, thumbnail_url=f"https://t/{title_id}.jpg")
     return info, []
 

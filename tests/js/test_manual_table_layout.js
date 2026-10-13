@@ -1,4 +1,4 @@
-// 수동 다운로드 표: 스크롤해도 머리글(번호/제목/상태/대여 만료/진행) 줄이 고정되고, 진행 칸에 "이미받음 + 보관 폴더로 옮김"이 잘리지 않고 다 보인다.
+// 수동 다운로드 표: 스크롤해도 머리글(번호/제목/상태/대여 만료/진행) 줄이 고정되고, 진행 칸에 "이미받음 + 폴더에 없음"이 잘리지 않고 다 보인다.
 // (jsdom은 레이아웃을 계산하지 못해서, 문제를 일으켰던 CSS 규칙이 없는지/필요한 규칙이 있는지를 스타일 시트 글자로 확인한다)
 const fs = require("fs");
 const path = require("path");
@@ -22,7 +22,7 @@ ok(!!wrapper, "wrapper가 세로 스크롤 영역");
 const stickyHasBackground = rulesFor("#manual-table th, #kakao-manual-table th").length > 0 || /#kakao-manual-table th[^{]*\{[^}]*background/.test(css);
 ok(stickyHasBackground, "머리글 칸에 배경색이 있어 아래 줄이 비쳐 보이지 않는다");
 
-// Scenario 3: 진행(6번째) 칸이 "이미받음" 배지 + "보관 폴더로 옮김" 글자를 담을 만큼 넓다
+// Scenario 3: 진행(6번째) 칸이 "이미받음" 배지 + "폴더에 없음" 글자를 담을 만큼 넓다
 const progress = rulesFor("#kakao-manual-table th:nth-child(6)").concat(rulesFor("#kakao-manual-table td:nth-child(6)")).map((r) => r.body).join(" ");
 const width = /width\s*:\s*(\d+)px/.exec(progress);
 ok(width && Number(width[1]) >= 180, `진행 칸 폭이 180px 이상: ${width ? width[1] : "없음"}px`);

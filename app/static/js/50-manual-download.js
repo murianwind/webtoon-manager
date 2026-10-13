@@ -231,6 +231,7 @@ function refreshKakaoManualSubscribeButton() {
   const a = kakaoManualAnalysis;
   const btn = document.getElementById("btn-kakao-manual-subscribe");
   btn.classList.toggle("hidden", !a);
+  document.getElementById("kakao-manual-record-actions").classList.toggle("hidden", !a || a.subscription !== "active");  // 받은 기록 고치기는 구독 중인 작품만
   if (!a) return;
   applySubscribeButton(btn, a.subscription === "active");
 }
@@ -267,7 +268,7 @@ function kakaoManualSummaryHtml(a) {
   else if (a.marker && a.marker.resolved_number !== a.marker.number) {
     lines.push(`파일의 번호(${a.marker.number})가 사이트와 달라서 제목으로 찾은 ${a.marker.resolved_number}번 이후부터 받습니다.`);
   }
-  const archivedNote = a.archived_count > 0 ? `(그중 보관 폴더로 옮긴 ${a.archived_count}개)` : "";
+  const archivedNote = a.archived_count > 0 ? `(그중 폴더에 없는 기록 ${a.archived_count}개)` : "";
   const counts = [`이미 받음 ${a.downloaded_count}개${archivedNote}`, `받을 회차 ${a.to_download_count}개`, `잠겨서 대기 ${a.locked_count}개`];
   if (a.before_start_count > 0) counts.push(`시작 지점 이전 ${a.before_start_count}개`);
   lines.push(counts.join(" · "));
@@ -295,11 +296,12 @@ function renderKakaoManualTable() {
   // "미보유만 선택"은 이미 받았거나 시작 지점 이전인 회차가 있어서 "전체선택"과 결과가 다를 때만 보여준다
   const missingDiffers = a.episodes.some((e) => e.selectable && (e.downloaded || e.before_start));
   document.getElementById("btn-kakao-manual-select-missing").classList.toggle("hidden", !missingDiffers);
+  const recordable = a.subscription === "active";  // 구독 중이면 잠긴 회차도 체크할 수 있다(받은 기록을 고치기 위해) — 다운로드/전체선택은 받을 수 있는 회차만 쓴다
   for (const e of a.episodes) {
     const [badgeClass, badgeLabel] = KAKAO_STATE_BADGE[e.state] || ["kp-locked", e.state];
-    // 이미 받음: 폴더에 파일이 있거나, 받은 회차 기록에는 있는데 아카이빙으로 보관 폴더에 옮겨진 회차(구분해서 표시)
+    // 이미 받음: 폴더에 파일이 있거나, 받은 회차 기록에는 있는데 폴더에는 없는 회차(아카이빙으로 옮겼거나 파일을 지운 경우 — "폴더에 없음"으로 구분해서 표시)
     const progress = e.downloaded
-      ? '<span class="kp-badge kp-done">이미받음</span>' + (e.archived ? ' <span class="kp-archived">보관 폴더로 옮김</span>' : "")
+      ? '<span class="kp-badge kp-done">이미받음</span>' + (e.archived ? ' <span class="kp-archived" title="받은 회차 기록에만 있고 폴더에는 파일이 없습니다(아카이빙으로 옮겼거나 파일을 지운 경우)">폴더에 없음</span>' : "")
       : e.before_start
         ? '<span class="kp-before">이전 회차</span>'
         : '<span class="kp-wait">대기</span>';
@@ -307,7 +309,7 @@ function renderKakaoManualTable() {
     const expire = e.expire ? String(e.expire).replace("T", " ").slice(0, 16) : e.free_at ? `${e.free_at} 무료` : "";
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td><input type="checkbox" class="kakao-manual-ep-checkbox" data-no="${e.number}" ${e.selectable ? "" : "disabled"} /></td>
+      <td><input type="checkbox" class="kakao-manual-ep-checkbox" data-no="${e.number}" data-selectable="${e.selectable ? "1" : "0"}" ${e.selectable || recordable ? "" : "disabled"} /></td>
       <td>${e.number}</td>
       <td>${escapeHtml(e.subtitle)}</td>
       <td><span class="kp-badge ${badgeClass}">${badgeLabel}</span></td>
@@ -323,7 +325,7 @@ function renderKakaoManualTable() {
 }
 
 function kakaoManualCheckboxes() {
-  return Array.from(document.querySelectorAll(".kakao-manual-ep-checkbox:not(:disabled)"));
+  return Array.from(document.querySelectorAll('.kakao-manual-ep-checkbox:not(:disabled):not([data-selectable="0"])'));  // 받을 수 있는 회차만(전체선택 등)
 }
 
 // 고른 회차 중 기다무가 필요한 회차는 사용할 수 있는 장수(작품당 한 장)만큼만 고른다 — 번호가 가장 앞선 것부터. 나머지는 열 수 없어서
@@ -358,10 +360,39 @@ function rentalConfirmMessage(rentalNos, rentalCount) {
 document.getElementById("btn-kakao-manual-select-all").addEventListener("click", () => selectKakaoManual(() => true));
 document.getElementById("btn-kakao-manual-select-missing").addEventListener("click", () => selectKakaoManual((cb) => cb.dataset.missing === "1"));
 document.getElementById("btn-kakao-manual-select-none").addEventListener("click", () => {
-  kakaoManualCheckboxes().forEach((cb) => (cb.checked = false));
+  document.querySelectorAll(".kakao-manual-ep-checkbox").forEach((cb) => (cb.checked = false));
 });
+// ── 받은 기록 고치기(구독 중인 작품만): 고른 회차를 "받은 것으로"/"받지 않은 것으로" 기록한다. 기존 기록을 사용자가 정한 대로 다시 쓰는 것이라 확인을 받는다 ──
+document.getElementById("btn-kakao-manual-record-select-all").addEventListener("click", () => {
+  document.querySelectorAll(".kakao-manual-ep-checkbox:not(:disabled)").forEach((cb) => (cb.checked = true));
+});
+
+async function recordKakaoManual(downloaded) {
+  const a = kakaoManualAnalysis;
+  const numbers = Array.from(document.querySelectorAll(".kakao-manual-ep-checkbox:checked")).map((cb) => Number(cb.dataset.no));
+  if (!a || numbers.length === 0) {
+    alert("기록할 회차를 선택해주세요.");
+    return;
+  }
+  const message = downloaded
+    ? `선택한 ${numbers.length}개 회차를 받은 것으로 기록할까요?\n앱의 받은 회차 기록만 바꾸고 폴더의 파일은 건드리지 않습니다.`
+    : `선택한 ${numbers.length}개 회차를 받지 않은 것으로 기록할까요?\n이 회차들은 앞으로 자동으로 받는 대상이 됩니다(폴더에 파일이 있는 회차는 바꿀 수 없습니다).`;
+  if (!confirm(message)) return;
+  try {
+    const r = await apiCall("/api/kakao-manual/record", { method: "POST", body: JSON.stringify({ series_id: a.series_id, numbers, downloaded }) });
+    let result = `${r.marked.length}개 회차를 ${downloaded ? "받은" : "받지 않은"} 것으로 기록했습니다.`;
+    if (r.ignored_in_folder.length) result += `\n폴더에 파일이 있어 바꾸지 못한 회차: ${r.ignored_in_folder.map((n) => `${n}번`).join(", ")}`;
+    alert(result);
+    await runKakaoManualAnalyze(String(a.series_id));
+  } catch (e) {
+    alert(e.message);
+  }
+}
+document.getElementById("btn-kakao-manual-record-done").addEventListener("click", () => recordKakaoManual(true));
+document.getElementById("btn-kakao-manual-record-undone").addEventListener("click", () => recordKakaoManual(false));
+
 document.getElementById("btn-kakao-manual-download").addEventListener("click", async () => {
-  const checked = Array.from(document.querySelectorAll(".kakao-manual-ep-checkbox:checked"));
+  const checked = Array.from(document.querySelectorAll('.kakao-manual-ep-checkbox:checked:not([data-selectable="0"])'));  // 잠긴 회차(기록용으로 체크한 것)는 받을 수 없어 뺀다
   if (checked.length === 0) {
     alert("다운로드할 회차를 선택해주세요.");
     return;
@@ -457,6 +488,7 @@ bindMetadataZipButton("btn-manual-metadata", () => manualAnalyzeResult && `/api/
 function refreshManualSubscribeButton() {
   const btn = document.getElementById("btn-manual-subscribe");
   btn.classList.remove("hidden");
+  document.getElementById("manual-record-actions").classList.toggle("hidden", manualAnalyzeResult.subscription !== "active");  // 받은 기록 고치기는 구독 중인 작품만
   applySubscribeButton(btn, manualAnalyzeResult.subscription === "active");
 }
 
@@ -485,7 +517,7 @@ function renderManualTable() {
   tbody.innerHTML = "";
   for (const ep of manualAnalyzeResult.episodes) {
     const tr = document.createElement("tr");
-    const statusLabel = ep.is_locked ? "유료/잠김" : ep.owned ? "보유함" : "미보유";
+    const statusLabel = ep.is_locked ? "유료/잠김" : ep.owned ? (ep.recorded ? "보유함(기록)" : "보유함") : "미보유";  // 기록: 폴더에는 없고 "여기까지 받음" 기록으로만 받은 것
     tr.innerHTML = `
       <td><input type="checkbox" class="manual-ep-checkbox" data-no="${ep.episode_no}" ${ep.is_locked ? "disabled" : ""} /></td>
       <td>${ep.episode_no}</td>
@@ -512,6 +544,30 @@ document.getElementById("btn-manual-select-missing").addEventListener("click", (
     cb.checked = !cb.disabled && ep && !ep.owned;
   });
 });
+
+async function recordNaverManual(downloaded) {
+  const a = manualAnalyzeResult;
+  const numbers = Array.from(document.querySelectorAll(".manual-ep-checkbox:checked")).map((cb) => Number(cb.dataset.no)).sort((x, y) => x - y);
+  if (!a || numbers.length === 0) {
+    alert("기록할 회차를 선택해주세요.");
+    return;
+  }
+  const message = downloaded
+    ? `선택한 회차 중 가장 큰 번호(${numbers[numbers.length - 1]}화)까지 모두 받은 것으로 기록할까요?\n네이버는 '여기까지 받음' 한 지점만 기억합니다. 폴더의 파일은 건드리지 않습니다.`
+    : `${numbers[0]}화부터 뒤의 모든 회차를 받을 대상으로 기록할까요?\n네이버는 '여기까지 받음' 한 지점만 기억해서 고른 회차만이 아니라 그 뒤 전부가 받을 대상이 됩니다.`;
+  if (!confirm(message)) return;
+  try {
+    const r = await apiCall("/api/manual-download/record", { method: "POST", body: JSON.stringify({ title_id: a.title_id, episode_nos: numbers, downloaded }) });
+    let result = `받은 기록을 ${r.previous}화에서 ${r.last_downloaded_no}화까지로 바꿨습니다.`;
+    if (r.warning) result += `\n${r.warning}`;
+    alert(result);
+    await runManualAnalyze(String(a.title_id));
+  } catch (e) {
+    alert(e.message);
+  }
+}
+document.getElementById("btn-manual-record-done").addEventListener("click", () => recordNaverManual(true));
+document.getElementById("btn-manual-record-undone").addEventListener("click", () => recordNaverManual(false));
 
 document.getElementById("btn-manual-download").addEventListener("click", async () => {
   const episodeNos = Array.from(document.querySelectorAll(".manual-ep-checkbox:checked")).map((cb) => Number(cb.dataset.no));

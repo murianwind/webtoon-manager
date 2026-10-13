@@ -90,7 +90,7 @@ with db.write_transaction() as cx: cx.execute("UPDATE kakao_webtoons SET downloa
 put(*F)
 client = FakeClient(eps(448, locked=range(317, 364)))
 r1 = run(client)
-assert r1.downloaded == [448, 317] and r1.ticket_used == 317 and client.used == [317] and r1.failed is None, (r1.downloaded, r1.ticket_used)     # 무료 448을 바로, 이어서 317을 기다무로
+assert r1.downloaded == [317, 448] and r1.ticket_used == 317 and client.used == [317] and r1.failed is None, (r1.downloaded, r1.ticket_used)     # 번호순: 잠긴 317을 자기 차례에 기다무로 열고, 이어서 무료 448(예전에는 448을 먼저 받고 317을 나중에 열었다)
 assert {317, 448} <= repository.get_kakao_downloaded_numbers(7) and set(F) <= repository.get_kakao_downloaded_numbers(7)                        # 처음 실행에서 폴더로 기록을 만들고 받은 회차를 더함
 archive_all_but_last(); assert present() == [448]                                                                                           # 아카이빙이 지나감
 r2 = run(client)

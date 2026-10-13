@@ -65,6 +65,33 @@ def sync_before_planning(series_id: int, existing, plan_without_record) -> set[i
     return recorded or None
 
 
+def mark(series_id: int, numbers, downloaded: bool, existing) -> dict:
+    """수동 다운로드에서 사용자가 고른 회차를 "받은 것으로"(downloaded=True) 또는 "받지 않은 것으로"(False) 기록한다 — 기존 기록을 사용자가 정한 대로 다시 쓴다.
+    - 받은 것으로: 기록에 더하고 "받을 대상 지정"에서 뺀다. 폴더 파일은 건드리지 않는다.
+    - 받지 않은 것으로: 기록에서 빼고 받을 대상으로 지정한다(시작 지점보다 앞이어도 자동으로 받는다). 폴더에 파일이 있는 회차는 파일이 있는 한 받은 것이라
+      바꿀 수 없어서 ignored_in_folder로 돌려준다.
+    기록이 아직 없으면 폴더 파일과 아카이빙 이력으로 만든 기준(처음 기록을 만들 때와 같은 재료)에서 시작한다. 구독 중인 작품인지는 호출부가 확인한다."""
+    wanted = {int(n) for n in numbers}
+    folder_numbers = {f.number for f in existing}
+    record = repository.get_kakao_downloaded_numbers(series_id)
+    if record is None:
+        record = folder_numbers | archived_numbers(series_id)
+    pending = repository.get_kakao_pending_numbers(series_id)
+    if downloaded:
+        record = record | wanted | folder_numbers      # 폴더에 있는 회차는 어차피 받은 것이라 함께 기록해 폴더와 기록이 어긋나지 않게 한다
+        pending = pending - wanted
+        marked, ignored = sorted(wanted), []
+    else:
+        ignored = sorted(wanted & folder_numbers)
+        targets = wanted - folder_numbers
+        record = record - targets
+        pending = pending | targets
+        marked = sorted(targets)
+    repository.set_kakao_downloaded_numbers(series_id, record)
+    repository.set_kakao_pending_numbers(series_id, pending)
+    return {"marked": marked, "ignored_in_folder": ignored, "recorded_count": len(record), "pending_count": len(pending)}
+
+
 def backfill_all(settings) -> list[str]:
     """시작할 때 한 번 — 기록이 없는 모든 카카오 작품에 대해 폴더와 아카이빙 이력으로 처음 기록을 만든다(폴더 규칙에 쓰는 사이트 연결 없이).
     결과를 작품마다 한 줄로 돌려준다(실행 기록에 남겨서 확인할 수 있게). 폴더가 없거나 비어 있으면 건너뛰고, 이미 기록이 있으면 건드리지 않는다."""

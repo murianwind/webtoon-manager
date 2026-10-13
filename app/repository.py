@@ -453,6 +453,28 @@ def set_kakao_authors(title_id: int, writer_names: list[str], origin_names: list
         )
 
 
+def get_kakao_pending_numbers(title_id: int) -> set[int]:
+    """사용자가 "받지 않은 것으로" 기록해 둔, 시작 지점보다 앞이어도 자동으로 받을 회차 번호들(없거나 추적하지 않는 작품이면 빈 집합)."""
+    row = fetchone("SELECT pending_numbers FROM kakao_webtoons WHERE title_id = ?", (title_id,))
+    if row is None or not row["pending_numbers"]:
+        return set()
+    return {int(n) for n in json.loads(row["pending_numbers"])}
+
+
+def set_kakao_pending_numbers(title_id: int, numbers) -> None:
+    """받을 대상 지정을 통째로 바꾼다(빈 집합이면 지운다). 추적하지 않는 작품이면 아무것도 하지 않는다."""
+    values = sorted({int(n) for n in numbers})
+    with write_transaction() as conn:
+        conn.execute("UPDATE kakao_webtoons SET pending_numbers = ? WHERE title_id = ?", (json.dumps(values) if values else None, title_id))
+
+
+def remove_kakao_pending_numbers(title_id: int, numbers) -> None:
+    """받을 대상 지정에서 번호를 뺀다(회차를 받았을 때). 지정이 없으면 아무것도 하지 않는다."""
+    current = get_kakao_pending_numbers(title_id)
+    if current & {int(n) for n in numbers}:
+        set_kakao_pending_numbers(title_id, current - {int(n) for n in numbers})
+
+
 def get_kakao_downloaded_numbers(title_id: int) -> set[int] | None:
     """이 앱이 받았거나 폴더에서 확인한 회차 번호의 "받은 회차 기록". 아카이빙으로 파일이 폴더에서 옮겨져도 남는다. 기록이 아직 없으면
     None(빈 기록 set()과 구분한다 — 없으면 예전 폴더 규칙을, 있으면 기록을 쓴다). 추적하지 않는 작품도 None."""
@@ -1201,7 +1223,7 @@ _WATCHED_TAG_COLUMNS = ("tag_id", "tag_name", "enabled", "created_at", "updated_
 _KAKAO_SEEN_TITLE_COLUMNS = ("author_name", "title_id", "title_name", "seen_at")
 _KAKAO_WEBTOON_COLUMNS = (
     "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "author_summary", "writer_names", "origin_names",
-    "is_finished", "finish_notified", "finish_ack", "downloaded_numbers", "ticket_notified_no", "caught_up_notified_no", "new_episode_seen_no", "created_at", "updated_at",
+    "is_finished", "finish_notified", "finish_ack", "downloaded_numbers", "pending_numbers", "ticket_notified_no", "caught_up_notified_no", "new_episode_seen_no", "created_at", "updated_at",
 )
 _FILENAME_TEMPLATE_PRESET_COLUMNS = ("id", "name", "template", "created_at", "updated_at")
 _ARCHIVE_TARGET_COLUMNS = (

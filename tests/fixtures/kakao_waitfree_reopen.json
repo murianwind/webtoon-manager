@@ -1,0 +1,493 @@
+{
+ "captured_at": "2026-10-13T16:01:33+09:00",
+ "note": "기다무.har(도굴왕: 엔드라인, series_id=69500409)에서 가져온 실제 응답. 만료된 기다무 대여가 rent_expire_dt를 ISO 8601(+09:00)로 돌려준다.",
+ "product_list": {
+  "result": {
+   "has_next": true,
+   "series_item": {
+    "id": 69500409,
+    "title": "도굴왕: 엔드라인",
+    "is_waitfree": true,
+    "waitfree_block_count": 7,
+    "waitfree_period_by_minute": 180,
+    "on_issue": "Y",
+    "authors": "윤쓰(REDICE STUDIO),3B2S,산지직송"
+   },
+   "list": [
+    {
+     "item": {
+      "product_id": 70873430,
+      "title": "도굴왕: 엔드라인 29화",
+      "order_value": 30,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": true,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 149,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "not_purchased"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 70832319,
+      "title": "도굴왕: 엔드라인 28화",
+      "order_value": 29,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": true,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 132,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "not_purchased"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 70717188,
+      "title": "도굴왕: 엔드라인 27화",
+      "order_value": 28,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": true,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 148,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "not_purchased"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 70651483,
+      "title": "도굴왕: 엔드라인 26화",
+      "order_value": 27,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": true,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 165,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "not_purchased"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 70564332,
+      "title": "도굴왕: 엔드라인 25화",
+      "order_value": 26,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": true,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 152,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "not_purchased"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 70393283,
+      "title": "도굴왕: 엔드라인 24화",
+      "order_value": 25,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": true,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 152,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "not_purchased"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 70289165,
+      "title": "도굴왕: 엔드라인 23화",
+      "order_value": 24,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": true,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 156,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "not_purchased"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 70155721,
+      "title": "도굴왕: 엔드라인 22화",
+      "order_value": 23,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": false,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 158,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "rent",
+        "rent_expire_dt": "2026-10-12T01:46:22+09:00"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 70084733,
+      "title": "도굴왕: 엔드라인 21화",
+      "order_value": 22,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": false,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 149,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "rent",
+        "rent_expire_dt": "2026-10-06T01:46:38+09:00"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 69969890,
+      "title": "도굴왕: 엔드라인 20화",
+      "order_value": 21,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": false,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 160,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "rent",
+        "rent_expire_dt": "2026-10-05T21:46:26+09:00"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 70050516,
+      "title": "도굴왕: 엔드라인 19화",
+      "order_value": 20,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": false,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 152,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "rent",
+        "rent_expire_dt": "2026-10-05T17:46:26+09:00"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 69736877,
+      "title": "도굴왕: 엔드라인 18화",
+      "order_value": 19,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": false,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 173,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "rent",
+        "rent_expire_dt": "2026-10-05T13:46:36+09:00"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 69813139,
+      "title": "도굴왕: 엔드라인 17화",
+      "order_value": 18,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": false,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 135,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "rent",
+        "rent_expire_dt": "2026-10-05T09:46:24+09:00"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 69600852,
+      "title": "도굴왕: 엔드라인 16화",
+      "order_value": 17,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": false,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 122,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "rent",
+        "rent_expire_dt": "2026-10-05T05:46:41+09:00"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 69515225,
+      "title": "도굴왕: 엔드라인 15화",
+      "order_value": 16,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": false,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 128,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "rent",
+        "rent_expire_dt": "2026-10-03T21:54:03+09:00"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 69500893,
+      "title": "도굴왕: 엔드라인 14화",
+      "order_value": 15,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": false,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 127,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "rent",
+        "rent_expire_dt": "2026-10-05T01:47:25+09:00"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 69500890,
+      "title": "도굴왕: 엔드라인 13화",
+      "order_value": 14,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": false,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 132,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "not_purchased"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 69500886,
+      "title": "도굴왕: 엔드라인 12화",
+      "order_value": 13,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": false,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 130,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "not_purchased"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 69628627,
+      "title": "도굴왕: 엔드라인 11화",
+      "order_value": 12,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": false,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 163,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "not_purchased"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 69500876,
+      "title": "도굴왕: 엔드라인 10화",
+      "order_value": 11,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": false,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 142,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "not_purchased"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 69500870,
+      "title": "도굴왕: 엔드라인 9화",
+      "order_value": 10,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": false,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 137,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "not_purchased"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 69500866,
+      "title": "도굴왕: 엔드라인 8화",
+      "order_value": 9,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": false,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 149,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "not_purchased"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 69500860,
+      "title": "도굴왕: 엔드라인 7화",
+      "order_value": 8,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": false,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 175,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "not_purchased"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 69500908,
+      "title": "도굴왕: 엔드라인 6화",
+      "order_value": 7,
+      "is_free": false,
+      "hidden": false,
+      "waitfree_blocked": false,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 150,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "not_purchased"
+       }
+      }
+     }
+    },
+    {
+     "item": {
+      "product_id": 69500916,
+      "title": "도굴왕: 엔드라인 5화",
+      "order_value": 6,
+      "is_free": true,
+      "hidden": false,
+      "waitfree_blocked": false,
+      "free_change_dt": "1980-01-01T00:00:00+09:00",
+      "page_count": 145,
+      "service_property": {
+       "purchase_info": {
+        "purchase_type": "not_purchased"
+       }
+      }
+     }
+    }
+   ]
+  }
+ },
+ "ready_to_use_expired_episode": {
+  "result": {
+   "single": {
+    "is_done": false,
+    "waitfree_block": false,
+    "title": "도굴왕: 엔드라인 14화",
+    "read_access_type": "RAT3"
+   },
+   "rental_period_by_minute": 4320,
+   "available": {
+    "ticket_rental_type": "RT05"
+   }
+  },
+  "result_code": 0
+ },
+ "use_waitfree": {
+  "result": {
+   "waitfree_charged_at": "2026-10-13T19:01:59+09:00",
+   "rent_expire_dt": "2026-10-16T16:01:59+09:00",
+   "series_id": 69500409
+  },
+  "result_code": 0
+ },
+ "ticket_my": {
+  "result": {
+   "waitfree": {
+    "charged_complete": true,
+    "user_activation": true,
+    "charged_at": "2026-10-09T04:46:22+09:00",
+    "charged_period_by_minute": 180
+   },
+   "my": {
+    "ticket_own_count": 0,
+    "cash_amount": 0,
+    "ticket_rental_count": 0
+   }
+  },
+  "result_code": 0
+ }
+}

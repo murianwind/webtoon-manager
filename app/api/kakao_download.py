@@ -14,7 +14,7 @@ from app import (
     manual_download,
     repository,
 )
-from app import kakao_api
+from app import kakao_api, kakao_records
 from app import kakao_page_auth
 from app import kakao_page_download
 from app.api.common import metadata_zip_response
@@ -169,7 +169,8 @@ async def kakao_manual_analyze(series_id: int):
     folder = kakao_page_download.series_folder(root, title)
     existing = await asyncio.to_thread(kakao_page_download.scan_existing_files, folder)
     plan = kakao_page_download.plan_by_folder_rules(
-        episodes, existing, series_item.get("title") or "", repository.get_kakao_downloaded_numbers(series_id)
+        episodes, existing, series_item.get("title") or "", repository.get_kakao_downloaded_numbers(series_id),
+        repository.get_kakao_pending_numbers(series_id),
     )
     return {
         "series_id": series_id, "title": title, "folder": str(folder), "mode": plan.mode, "existing_count": plan.existing_count,
@@ -274,6 +275,27 @@ async def kakao_manual_run(payload: KakaoManualRunIn):
     job_status.start(manual_download.JOB_NAME)
     _kakao_manual_task = asyncio.create_task(_run_kakao_manual_download(payload.series_id, payload.numbers, payload.use_rental_tickets))
     return {"status": "started"}
+
+
+class KakaoRecordIn(BaseModel):
+    series_id: int
+    numbers: list[int]
+    downloaded: bool  # True = 받은 것으로 기록, False = 받지 않은 것으로 기록
+
+
+@router.post("/kakao-manual/record")
+async def kakao_manual_record(payload: KakaoRecordIn):
+    """수동 다운로드에서 고른 회차를 "받은 것으로" 또는 "받지 않은 것으로" 기록한다 — 구독 중인 작품만. 폴더의 파일은 건드리지 않는다.
+    받지 않은 것으로 기록하면 그 회차는 시작 지점보다 앞이어도 자동으로 받는 대상이 되고, 폴더에 파일이 있는 회차는 파일이 있는 한 바꿀 수 없다."""
+    numbers = sorted({n for n in payload.numbers if n > 0})
+    if not numbers or len(numbers) != len(set(payload.numbers)):
+        raise HTTPException(status_code=400, detail="기록할 회차를 선택해주세요(번호는 1 이상이어야 합니다).")
+    tracked = await asyncio.to_thread(repository.get_kakao_webtoon, payload.series_id)
+    if tracked is None or tracked["status"] != repository.STATUS_ACTIVE:
+        raise HTTPException(status_code=400, detail="구독 중인 웹툰만 받은 기록을 바꿀 수 있습니다. 먼저 구독해주세요.")
+    root = await asyncio.to_thread(download_roots.kakao_root, get_settings())
+    existing = await asyncio.to_thread(kakao_page_download.scan_existing_files, kakao_page_download.series_folder(root, tracked["title"]))
+    return await asyncio.to_thread(kakao_records.mark, payload.series_id, numbers, payload.downloaded, existing)
 
 
 @router.get("/kakao-manual/metadata-zip")

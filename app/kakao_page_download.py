@@ -294,7 +294,7 @@ def _subtitle_key(subtitle: str, series_title: str) -> str:
 
 
 def plan_by_folder_rules(
-    episodes: list[Episode], existing: list[ExistingFile], series_title: str = "", recorded: set[int] | None = None
+    episodes: list[Episode], existing: list[ExistingFile], series_title: str = "", recorded: set[int] | None = None, pending: set[int] | None = None
 ) -> DownloadPlan:
     """폴더 규칙(모듈 설명 참고)과 "받은 회차 기록"으로 받을 회차를 정한다.
 
@@ -307,6 +307,7 @@ def plan_by_folder_rules(
     숨김(hidden) 회차는 "아직 무료/대여로 열리지 않은 예정 회차"다 — 사이트는 "N일 후 무료"로 목록에 보여 주므로 빼지 않고 잠긴 회차로
     센다(화면에는 무료가 되는 날짜가 보인다). 받을 수는 없다."""
     visible = sorted((e for e in episodes if e.number > 0), key=lambda e: e.number)
+    pending = pending or set()  # 사용자가 "받지 않은 것으로" 기록한 회차 — 시작 지점보다 앞이어도 받을 대상(받은 것이 이긴다)
     marker: MarkerInfo | None = None
     folder_numbers = {f.number for f in existing}
     archived_numbers: set[int] = set()
@@ -343,7 +344,7 @@ def plan_by_folder_rules(
     for episode in visible:
         in_folder = episode.number in folder_numbers or normalize_subtitle(episode.subtitle) in have_subtitles
         done = in_folder or episode.number in have_numbers
-        skipped = not done and episode.number < lower_bound
+        skipped = not done and episode.number < lower_bound and episode.number not in pending
         plan.rows.append(EpisodeRow(episode=episode, downloaded=done, before_start=skipped, archived=done and not in_folder))
         if done or skipped:
             continue
@@ -363,6 +364,19 @@ def series_folder(download_root: str, title: str) -> Path:
     return Path(download_root) / remove_forbidden_str_kakao(title)
 
 
+_warned_expire_formats: set[str] = set()  # 읽지 못한 만료일의 "모양"(숫자를 9로 바꾼 것) — 같은 모양은 경고를 한 번만 남긴다
+
+
+def _parse_expire(value: str) -> datetime | None:
+    """rent_expire_dt를 한국 시각 기준(시간대 없는) datetime으로. 서버가 실제로 주는 ISO 8601("2026-10-12T01:46:22+09:00", Z 포함)과
+    예전 형식("2026-10-12 01:46:22", 초 없는 "… 01:46")을 읽는다. 못 읽으면 None."""
+    try:
+        parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.astimezone(_KST).replace(tzinfo=None) if parsed.tzinfo is not None else parsed
+
+
 def _is_accessible(item: dict, now_kst: datetime) -> bool:
     if item.get("is_free"):
         return True
@@ -372,10 +386,15 @@ def _is_accessible(item: dict, now_kst: datetime) -> bool:
     expire = purchase.get("rent_expire_dt")
     if not expire:
         return True
-    try:
-        return datetime.strptime(expire, "%Y-%m-%d %H:%M:%S") > now_kst
-    except ValueError:
-        return True
+    expires_at = _parse_expire(expire)
+    if expires_at is None:
+        # 읽을 수 없는 형식이면 "아직 대여 중"으로 믿지 않는다 — 만료된 회차를 받으려다 실패하며 작품이 멈추는 것보다 받을 수 없는 회차로 보는 편이 안전하다
+        shape = re.sub(r"\d", "9", str(expire))
+        if shape not in _warned_expire_formats:
+            _warned_expire_formats.add(shape)
+            log.warning("카카오페이지 대여 만료일을 읽지 못해 받을 수 없는 회차로 봅니다: %r (product_id=%s)", expire, item.get("product_id"))
+        return False
+    return expires_at > now_kst
 
 
 def is_video_item(item: dict) -> bool:
@@ -437,6 +456,7 @@ class KakaoPageClient:
         self._timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         self.cookies = dict(cookies)
         self.cookies_changed = False
+        self.last_failure: str | None = None  # 가장 최근 받기 실패의 원인(화면 로그 한 줄에 붙인다). 새 회차를 받기 시작할 때 지운다
 
     def _headers(self, *, image: bool = False, post: bool = False) -> dict:
         headers = dict(kakao_api.IMAGE_HEADERS if image else kakao_api.HEADERS)
@@ -609,15 +629,23 @@ class KakaoPageClient:
         return data.get("result") or None
 
     async def viewer_image_urls(self, series_id: int, product_id: int) -> list[str] | None:
-        _, data = await self._request_json(
+        status, data = await self._request_json(
             "GET", VIEWER_DATA_URL, params={"series_id": series_id, "product_id": product_id},
             label=f"이미지 목록 product_id={product_id}",
         )
         if not data:
+            # 서버가 이 회차를 열어 주지 않은 경우(HTTP 403 등)는 예전에는 아무 로그도 남지 않았다 — 상태를 원인으로 남긴다(요청 예외는 _request_json이 이미 기록)
+            self.last_failure = f"이미지 목록 요청 실패(HTTP {status})" if status else "이미지 목록 요청 실패(네트워크 오류)"
+            if status:
+                log.warning("카카오페이지 이미지 목록을 받지 못했습니다 (series_id=%s, product_id=%s): HTTP %s", series_id, product_id, status)
             return None
         files = (((data.get("viewer_data") or {}).get("imageDownloadData") or {}).get("files")) or []
         urls = [f["secureUrl"] for f in sorted(files, key=lambda f: f.get("no", 0)) if f.get("secureUrl")]
-        return urls or None
+        if not urls:
+            self.last_failure = f"이미지 목록이 비어 있음(result_code={data.get('result_code')})"
+            log.warning("카카오페이지 이미지 목록이 비어 있습니다 (series_id=%s, product_id=%s): result_code=%s", series_id, product_id, data.get("result_code"))
+            return None
+        return urls
 
     async def download_image(self, url: str) -> tuple[bytes, str] | None:
         """이미지 하나를 (바이트, Content-Type)으로. 실패하면 잠깐 쉬고 몇 번 더 시도하고, 그래도 안 되면 None.
@@ -635,8 +663,10 @@ class KakaoPageClient:
                         # 토큰/서명은 남기지 않고, 어느 서버의 어느 경로가 어떤 응답이었는지만 기록한다(원인 파악용)
                         snippet = (await response.text(errors="replace"))[:120].replace("\n", " ") if response.status != 200 else ""
                         log.warning("카카오페이지 이미지 받기 실패: HTTP %s (%s%s) %s", response.status, target.host, target.path, snippet)
+                        self.last_failure = f"이미지 받기 실패(HTTP {response.status})"
             except Exception as e:
                 log.warning("카카오페이지 이미지 받기 예외: %s", e)
+                self.last_failure = f"이미지 받기 실패({type(e).__name__})"
             if attempt < _IMAGE_RETRIES - 1:
                 await asyncio.sleep(1.5 * (attempt + 1))
         return None
@@ -669,12 +699,19 @@ def persist_refreshed_cookies(client: KakaoPageClient) -> None:
 
 # ── 받기 ─────────────────────────────────────────────────────────────────
 
+def _failure_note(client) -> str:
+    """받기 실패 로그 줄 뒤에 붙일 원인(없으면 빈 문자열)."""
+    reason = getattr(client, "last_failure", None)
+    return f" · 원인: {reason}" if reason else ""
+
+
 async def download_episode(client: KakaoPageClient, series_id: int, episode: Episode, folder: Path) -> Path | None:
     """회차 하나를 zip으로 저장하고 경로를 돌려준다. 이미지 목록을 못 받거나 이미지가 하나라도 안 받히면
     아무것도 남기지 않고 None — 일부만 담긴 zip이 있으면 다음에 "이미 받은 회차"로 오인하기 때문이다.
     zip은 임시 이름으로 완성한 뒤 한 번에 이름을 바꿔서, 도중에 끊겨도 반쪽짜리가 남지 않는다.
     같은 번호의 예전 파일(이름이 다른 것, 예: 뒤에 #페이지수가 붙은 것)이 있으면 새 파일을 다 저장한 뒤에
     지운다 — 다시 받기를 하면 한 회차에 파일이 둘이 되지 않도록."""
+    client.last_failure = None
     urls = await client.viewer_image_urls(series_id, episode.product_id)
     if not urls:
         return None
@@ -713,6 +750,7 @@ async def download_episode(client: KakaoPageClient, series_id: int, episode: Epi
         return None
     _remove_superseded(folder, episode.number, keep=final_path)
     repository.add_kakao_downloaded_numbers(series_id, [episode.number])  # 자동/수동/기다무가 모두 거치는 저장 지점 — 받은 회차 기록에 더한다
+    repository.remove_kakao_pending_numbers(series_id, [episode.number])  # "받지 않은 것으로" 기록해 둔 회차를 받았으면 그 지정은 푼다
     return final_path
 
 
@@ -730,7 +768,7 @@ async def run_download(
     client: KakaoPageClient, *, series_id: int, title: str | None, download_root: str, max_episodes: int, on_progress=None,
     use_rental_tickets: bool = False,
 ) -> RunResult:
-    """폴더 규칙(자동 다운로드용)으로 받을 회차를 정해 순서대로 최대 max_episodes개 받는다. 실패하면 그 회차에서 멈춘다.
+    """폴더 규칙(자동 다운로드용)으로 받을 회차를 정해 번호순으로 최대 max_episodes개 받는다(기다무로 여는 회차도 자기 번호 차례에). 실패하면 그 회차에서 멈춘다.
     폴더 이름은 title(있으면), 없으면 카카오페이지에 등록된 작품 제목을 쓴다."""
     listing = await client.list_episodes(series_id)
     if listing is None:
@@ -741,28 +779,35 @@ async def run_download(
     existing = scan_existing_files(folder)
     plan = plan_by_folder_rules(episodes, existing, series_item.get("title") or "")
     recorded = kakao_records.sync_before_planning(series_id, existing, plan)  # 기록이 없으면 폴더+아카이빙 이력으로 처음 만들고, 폴더를 비웠으면 버린다
-    if recorded:
-        plan = plan_by_folder_rules(episodes, existing, series_item.get("title") or "", recorded)
+    pending = repository.get_kakao_pending_numbers(series_id)
+    if recorded or pending:
+        plan = plan_by_folder_rules(episodes, existing, series_item.get("title") or "", recorded, pending)
     downloaded: list[int] = []
     items: list[tuple[int, str]] = []
     failed: int | None = None
-    for episode in plan.to_download[:max_episodes]:
+    ticket_used: int | None = None
+    # 번호순으로 처리한다: 받을 수 있는 회차는 받고, 가장 앞의 잠긴 회차는 자기 번호 차례에 기다무로 연다(한 장뿐이라 그 뒤 잠긴 회차는 대기).
+    # 지금 못 여는 잠긴 회차(기다무 충전 중이거나 기다무로 못 여는 회차)는 건너뛰고 뒤의 열린 회차를 받는다 — 뒤에 무료가 있어도 영원히 막히지 않게.
+    # 받기에 실패하면 번호순을 지키려고 그 회차에서 멈춘다(다음에 이 회차부터 다시 시도).
+    waitfree_target = plan.locked[0] if plan.locked and waitfree_supported(series_item) else None
+    for episode in sorted([*plan.to_download, *([waitfree_target] if waitfree_target else [])], key=lambda e: e.number):
+        if len(downloaded) >= max_episodes:
+            break
+        if episode is waitfree_target:
+            ticket_used, failed = await _download_first_locked_with_waitfree(client, series_id, episode, folder, downloaded, items, on_progress)
+            if failed is not None:
+                break
+            continue
         path = await download_episode(client, series_id, episode, folder)
         if path is None:
             failed = episode.number
             if on_progress:
-                on_progress(f"{episode.number}번 회차 받기 실패 — 여기서 멈춥니다(다음에 이 회차부터 다시 시도)")
+                on_progress(f"{episode.number}번 회차 받기 실패 — 여기서 멈춥니다(다음에 이 회차부터 다시 시도)" + _failure_note(client))
             break
         downloaded.append(episode.number)
         items.append((episode.number, episode.subtitle))
         if on_progress:
             on_progress(f"{episode.number}번 회차 받음 ({path.name})")
-    ticket_used: int | None = None
-    if failed is None and len(downloaded) < max_episodes and plan.locked and waitfree_supported(series_item):
-        # 받을 수 있는 건 다 받았고 잠긴 회차가 남았으면, 첫 잠긴 회차를 기다무로 열어 받는다(한 장뿐이라 그 뒤는 대기)
-        ticket_used, failed = await _download_first_locked_with_waitfree(
-            client, series_id, plan.locked[0], folder, downloaded, items, on_progress
-        )
     rental_used: list[int] = []
     rental_remaining: int | None = None
     if failed is None and use_rental_tickets and plan.locked:
@@ -798,7 +843,7 @@ async def _download_first_locked_with_waitfree(client, series_id, episode, folde
     path = await download_episode(client, series_id, episode, folder)
     if path is None:
         if on_progress:
-            on_progress(f"{episode.number}번 회차 받기 실패 — 기다무로 이미 열렸으니 대여 기간 안에 다음 실행에서 다시 받습니다")
+            on_progress(f"{episode.number}번 회차 받기 실패 — 기다무로 이미 열렸으니 대여 기간 안에 다음 실행에서 다시 받습니다" + _failure_note(client))
         return episode.number, episode.number
     downloaded.append(episode.number)
     items.append((episode.number, episode.subtitle))
@@ -840,7 +885,7 @@ async def _download_locked_with_rental(
         path = await download_episode(client, series_id, episode, folder)
         if path is None:
             if on_progress:
-                on_progress(f"{episode.number}번 회차 받기 실패 — 대여권으로 이미 열렸으니 대여 기간 안에 다음 실행에서 다시 받습니다")
+                on_progress(f"{episode.number}번 회차 받기 실패 — 대여권으로 이미 열렸으니 대여 기간 안에 다음 실행에서 다시 받습니다" + _failure_note(client))
             return used, remaining, episode.number
         downloaded.append(episode.number)
         items.append((episode.number, episode.subtitle))
@@ -865,7 +910,8 @@ async def download_selected(
     result.title = title or series_item.get("title") or str(series_id)
     folder = series_folder(download_root, result.title)
     plan = plan_by_folder_rules(
-        episodes, scan_existing_files(folder), series_item.get("title") or "", repository.get_kakao_downloaded_numbers(series_id)
+        episodes, scan_existing_files(folder), series_item.get("title") or "", repository.get_kakao_downloaded_numbers(series_id),
+        repository.get_kakao_pending_numbers(series_id),
     )
     rows = {row.episode.number: row for row in plan.rows}
     ticket = None  # 잠긴 회차를 고른 경우에만 조회한다

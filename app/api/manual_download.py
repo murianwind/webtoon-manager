@@ -30,6 +30,7 @@ class ManualAnalyzeEpisodeOut(BaseModel):
     subtitle: str
     owned: bool
     is_locked: bool
+    recorded: bool = False  # 폴더에는 없고 "받은 회차 기록"으로만 받은 것으로 보이는 회차(구독 중인 작품)
 
 
 class ManualAnalyzeOut(BaseModel):
@@ -78,10 +79,11 @@ async def manual_download_analyze(title_id: str):
     if not title_id.strip().isdigit():
         raise HTTPException(status_code=400, detail="titleId는 숫자만 입력할 수 있습니다.")
     settings = get_settings()
-    info, rows = await manual_download.analyze(title_id, settings)
+    tracked = await asyncio.to_thread(repository.get, title_id)
+    recorded_up_to = tracked.last_downloaded_no if tracked and tracked.status == repository.STATUS_ACTIVE else 0   # 구독 중인 작품만 "여기까지 받음" 기록을 반영한다
+    info, rows = await manual_download.analyze(title_id, settings, recorded_up_to)
     if info is None:
         raise HTTPException(status_code=400, detail="해당 titleId 정보를 네이버에서 찾지 못했습니다.")
-    tracked = await asyncio.to_thread(repository.get, title_id)
     return ManualAnalyzeOut(
         title_id=title_id,
         title=info.title_name,
@@ -89,7 +91,7 @@ async def manual_download_analyze(title_id: str):
         subscription=tracked.status if tracked else None,
         episodes=[
             ManualAnalyzeEpisodeOut(
-                episode_no=r.episode_no, subtitle=r.subtitle, owned=r.owned, is_locked=r.is_locked
+                episode_no=r.episode_no, subtitle=r.subtitle, owned=r.owned, is_locked=r.is_locked, recorded=r.recorded
             )
             for r in rows
         ],
@@ -101,6 +103,25 @@ async def manual_download_run(payload: ManualDownloadIn):
     settings = get_settings()
     asyncio.create_task(manual_download.download_selected(payload.title_id, payload.episode_nos, settings))
     return {"status": "started"}
+
+
+class ManualRecordIn(BaseModel):
+    title_id: str
+    episode_nos: list[int]
+    downloaded: bool  # True = 받은 것으로 기록, False = 받지 않은 것으로 기록
+
+
+@router.post("/manual-download/record")
+async def manual_download_record(payload: ManualRecordIn):
+    """수동 다운로드에서 고른 회차를 "받은 것으로" 또는 "받지 않은 것으로" 기록한다 — 구독 중인 네이버 웹툰만. 네이버는 "여기까지 받음" 한 지점만 기억한다."""
+    if not payload.title_id.strip().isdigit():
+        raise HTTPException(status_code=400, detail="titleId는 숫자만 입력할 수 있습니다.")
+    if not any(n > 0 for n in payload.episode_nos):
+        raise HTTPException(status_code=400, detail="기록할 회차를 선택해주세요.")
+    try:
+        return await manual_download.mark_record(payload.title_id.strip(), payload.episode_nos, payload.downloaded, get_settings())
+    except manual_download.ManualRecordError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e)) from e
 
 
 @router.get("/manual-download/metadata-zip")

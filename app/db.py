@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS kakao_webtoons (
     finish_notified INTEGER NOT NULL DEFAULT 0,  -- 완결 확인 디스코드 메시지를 보냄
     finish_ack INTEGER NOT NULL DEFAULT 0,       -- "알람 제외"를 누름(구독은 유지)
     downloaded_numbers TEXT,                     -- JSON 배열: 이 앱이 받았거나 폴더에서 확인한 회차 번호(아카이빙으로 파일이 옮겨져도 남는다). NULL = 기록 없음
+    pending_numbers TEXT,                        -- JSON 배열: 사용자가 "받지 않은 것으로" 기록한 회차 번호 — 시작 지점(가장 앞 기록)보다 앞이어도 자동으로 받을 대상. 받으면 빠진다. NULL = 없음
     ticket_notified_no INTEGER,                  -- "대여권 충전이 필요합니다" 디스코드 알림을 보낸 회차 번호(같은 회차는 다시 알리지 않는다). NULL = 알린 적 없음
     caught_up_notified_no INTEGER,               -- "더 이상 받을 회차가 없습니다" 알림을 보낸 마지막 회차 번호(같은 마지막 회차는 다시 알리지 않는다). NULL = 아직 기준 없음
     new_episode_seen_no INTEGER,                 -- 구독해제 웹툰의 새 에피소드 알림용: 마지막으로 확인한 작품의 회차 수(on_sale_count). NULL = 아직 기준 없음
@@ -191,6 +192,7 @@ _MIGRATIONS = [
     ("kakao_webtoons", "finish_notified", "ALTER TABLE kakao_webtoons ADD COLUMN finish_notified INTEGER NOT NULL DEFAULT 0"),
     ("kakao_webtoons", "finish_ack", "ALTER TABLE kakao_webtoons ADD COLUMN finish_ack INTEGER NOT NULL DEFAULT 0"),
     ("kakao_webtoons", "downloaded_numbers", "ALTER TABLE kakao_webtoons ADD COLUMN downloaded_numbers TEXT"),
+    ("kakao_webtoons", "pending_numbers", "ALTER TABLE kakao_webtoons ADD COLUMN pending_numbers TEXT"),
     ("kakao_webtoons", "ticket_notified_no", "ALTER TABLE kakao_webtoons ADD COLUMN ticket_notified_no INTEGER"),
     ("kakao_webtoons", "caught_up_notified_no", "ALTER TABLE kakao_webtoons ADD COLUMN caught_up_notified_no INTEGER"),
     ("webtoons", "new_episode_seen_no", "ALTER TABLE webtoons ADD COLUMN new_episode_seen_no INTEGER"),
