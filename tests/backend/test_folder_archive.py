@@ -10,7 +10,7 @@ from fake_rclone import FakeRclone
 db.get_connection()
 st = get_settings(); A = Path(st.archive_root); A.mkdir(parents=True, exist_ok=True)
 fake = FakeRclone().install(); CFG = "fake.conf"
-archiver._get_effective_filename_template = lambda preset_id: TEMPLATE["v"]; TEMPLATE = {"v": ""}
+archiver.folder_archive._get_effective_filename_template = lambda preset_id: TEMPLATE["v"]; TEMPLATE = {"v": ""}
 
 def mk(rel, files):
     d = A / rel
@@ -92,12 +92,12 @@ print("F7) 설정 오류 OK")
 
 # 8. 파일 하나가 실패해도 나머지는 계속
 mk("원본8", {"0001_1화.zip": "a", "0002_2화.zip": "b", "0003_3화.zip": "c", "0004_4화.zip": "d"})
-orig_single = archiver._bulk_move_single_file
+orig_single = archiver.folder_archive._bulk_move_single_file
 def flaky(**kw):
     if kw["rel_path"].startswith("0002"): raise OSError("디스크 오류")
     return orig_single(**kw)
-archiver._bulk_move_single_file = flaky
-moved, prog, conf, fail = run(target("local", "원본8", "local", "대상8")); archiver._bulk_move_single_file = orig_single
+archiver.folder_archive._bulk_move_single_file = flaky
+moved, prog, conf, fail = run(target("local", "원본8", "local", "대상8")); archiver.folder_archive._bulk_move_single_file = orig_single
 assert moved == 2 and fail == [("원본8", "0002_2화.zip", "디스크 오류")] and "[원본8] 이동 실패: 0002_2화.zip — 디스크 오류" in prog and names(A / "대상8") == ["0001_1화.zip", "0003_3화.zip"]
 print("F8) 파일 실패 격리 OK")
 
@@ -114,7 +114,7 @@ print("F9) 파일명 템플릿 OK")
 fake.files.clear()
 for n, data in (("0001_1화.zip", b"a"), ("0002_2화.zip", b"b"), ("info.xml", b'<ComicInfo><Web>https://page.kakao.com/content/555</Web></ComicInfo>'), ("cover.png", b"OLD")): fake.files[("r", f"카카오원본/{n}")] = data
 tmp_cover = Path(tempfile.mkdtemp()) / "c.jpg"; tmp_cover.write_bytes(b"NEWCOVER")
-archiver._download_kakao_cover_to_temp_file = lambda sid: str(tmp_cover) if sid == "555" else None
+archiver.folder_archive._download_kakao_cover_to_temp_file = lambda sid: str(tmp_cover) if sid == "555" else None
 moved, prog, conf, fail = run(target("rclone", "r:카카오원본", "rclone", "r:완결/카카오"), keep_last=False)
 assert moved == 2 and fake.files[("r", "완결/카카오/cover.jpg")] == b"NEWCOVER" and "[카카오원본] 카카오 표지 갱신함" in prog and not tmp_cover.exists()      # 임시 파일 정리
 assert remote("카카오원본") == [] and ("r", "완결/카카오/0001_1화.zip") in fake.files and ("r", "완결/카카오/info.xml") in fake.files
@@ -132,10 +132,10 @@ print("F11) 표지 예외/빈 원본 OK")
 # 12. 정보 파일: 목적지에 커버가 이미 있으면 건너뜀(주기 이동), 복사가 실패해도 이동은 계속
 mk("원본12", {"0001_1화.zip": "a", "0002_2화.zip": "b", "info.xml": "<new/>", "cover.jpg": "NEW"}); mk("대상12", {"cover.jpg": "KEEP"})
 moved, prog, conf, fail = run(target("local", "원본12", "local", "대상12")); assert moved == 1 and (A / "대상12" / "cover.jpg").read_bytes() == b"KEEP" and (A / "대상12" / "info.xml").read_text() == "<new/>"
-orig_copy = archiver._generic_copy_file
+orig_copy = archiver.folder_archive._generic_copy_file
 def bad_copy(*a, **k): raise OSError("복사 오류")
-archiver._generic_copy_file = bad_copy; mk("원본12b", {"0001_1화.zip": "a", "0002_2화.zip": "b", "info.xml": "<x/>"})
-moved, prog, conf, fail = run(target("local", "원본12b", "local", "대상12b")); archiver._generic_copy_file = orig_copy
+archiver.folder_archive._generic_copy_file = bad_copy; mk("원본12b", {"0001_1화.zip": "a", "0002_2화.zip": "b", "info.xml": "<x/>"})
+moved, prog, conf, fail = run(target("local", "원본12b", "local", "대상12b")); archiver.folder_archive._generic_copy_file = orig_copy
 assert moved == 1 and fail == [] and names(A / "대상12b") == ["0001_1화.zip"]
 print("F12) 정보 파일 처리 OK")
 
@@ -143,10 +143,10 @@ print("F12) 정보 파일 처리 OK")
 def remote_kakao(name):
     fake.files.clear()
     for n, data in (("0001_1화.zip", b"a"), ("info.xml", b'<ComicInfo><Web>https://page.kakao.com/content/888</Web></ComicInfo>')): fake.files[("r", f"{name}/{n}")] = data
-tmp1 = Path(tempfile.mkdtemp()) / "c.jpg"; tmp1.write_bytes(b"NEW1"); archiver._download_kakao_cover_to_temp_file = lambda sid: str(tmp1)
+tmp1 = Path(tempfile.mkdtemp()) / "c.jpg"; tmp1.write_bytes(b"NEW1"); archiver.folder_archive._download_kakao_cover_to_temp_file = lambda sid: str(tmp1)
 remote_kakao("카카오13"); moved, prog, conf, fail = run(target("rclone", "r:카카오13", "local", "대상13"), keep_last=False)
 assert (A / "대상13" / "cover.jpg").read_bytes() == b"NEW1" and not tmp1.exists() and "[카카오13] 카카오 표지 갱신함" in prog
-tmp2 = Path(tempfile.mkdtemp()) / "c.jpg"; tmp2.write_bytes(b"NEW2"); archiver._download_kakao_cover_to_temp_file = lambda sid: str(tmp2)
+tmp2 = Path(tempfile.mkdtemp()) / "c.jpg"; tmp2.write_bytes(b"NEW2"); archiver.folder_archive._download_kakao_cover_to_temp_file = lambda sid: str(tmp2)
 remote_kakao("카카오13b"); orig_copyto = rclone_client.copyto
 def bad_copyto(cfg, src, dest):
     if str(src).endswith("c.jpg"): raise rclone_client.RcloneError("업로드 실패")
@@ -160,7 +160,7 @@ def bulk(src_type, src, dest_type, dest, **kw):
     prog = []
     moved = archiver.bulk_move_folder(st.archive_root, st.archive_root, CFG, src_type, src, dest_type, dest, prog.append, kw.get("template", ""), kw.get("regen", False))
     return moved, prog
-archiver.get_conflict_policy = lambda: POLICY["v"]; POLICY = {"v": "skip"}
+archiver.folder_archive.get_conflict_policy = lambda: POLICY["v"]; POLICY = {"v": "skip"}
 
 # B1. 로컬→로컬: 폴더 구조 유지, 파일 단위 이력(제목 "원본 → 대상", title_id "-"), 진행 메시지, 빈 폴더 정리
 src = mk("일괄원본", {"작품X/0001 1화.zip": "a", "작품X/info.xml": "<x/>", "loose.txt": "t"})
@@ -207,7 +207,7 @@ moved, prog = bulk("local", "일괄원본6", "local", "일괄대상6", regen=Tru
 kakao_cover.refresh_kakao_cover_if_applicable = lambda d, **k: False
 fake.files.clear()
 for n, data in (("info.xml", b'<ComicInfo><Web>https://page.kakao.com/content/777</Web></ComicInfo>'), ("cover.png", b"OLD"), ("0001_1화.zip", b"z")): fake.files[("r", f"카카오R/{n}")] = data
-tmp_cover = Path(tempfile.mkdtemp()) / "c.jpg"; tmp_cover.write_bytes(b"NEW"); archiver._download_kakao_cover_to_temp_file = lambda sid: str(tmp_cover) if sid == "777" else None
+tmp_cover = Path(tempfile.mkdtemp()) / "c.jpg"; tmp_cover.write_bytes(b"NEW"); archiver.folder_archive._download_kakao_cover_to_temp_file = lambda sid: str(tmp_cover) if sid == "777" else None
 moved, prog = bulk("rclone", "r:카카오R", "rclone", "r:보관/카카오R", regen=True)
 assert moved == 3 and fake.files[("r", "보관/카카오R/cover.jpg")] == b"NEW" and ("r", "보관/카카오R/cover.png") not in fake.files and remote("카카오R") == [] and not tmp_cover.exists()
 assert prog[0] == "카카오 표지 갱신함" and any("이동 완료(표지 갱신): cover.jpg" in p for p in prog)
@@ -218,7 +218,7 @@ mk("일괄원본7", {"a.zip": "a", "b.zip": "b", "c.zip": "c"})
 def flaky2(**kw):
     if kw["rel_path"] == "b.zip": raise OSError("권한 없음")
     return orig_single(**kw)
-archiver._bulk_move_single_file = flaky2; moved, prog = bulk("local", "일괄원본7", "local", "일괄대상7"); archiver._bulk_move_single_file = orig_single
+archiver.folder_archive._bulk_move_single_file = flaky2; moved, prog = bulk("local", "일괄원본7", "local", "일괄대상7"); archiver.folder_archive._bulk_move_single_file = orig_single
 assert moved == 2 and any("실패(건너뜀): b.zip — 권한 없음" in p for p in prog) and names(A / "일괄원본7") == ["b.zip"] and names(A / "일괄대상7") == ["a.zip", "c.zip"]
 print("B7) 일괄 실패 격리 OK")
 
@@ -229,11 +229,11 @@ assert moved == 2 and "카카오 표지 갱신함" not in prog
 # B9. 원격 원본에 cover 파일이 없으면 받아 둔 임시 표지는 쓰이지 않고 정리된다 / 원격→로컬에서 표지를 교체해서 옮김
 fake.files.clear()
 for n, data in (("info.xml", b'<ComicInfo><Web>https://page.kakao.com/content/999</Web></ComicInfo>'), ("0001_1화.zip", b"z")): fake.files[("r", f"카카오S/{n}")] = data
-tmp3 = Path(tempfile.mkdtemp()) / "c.jpg"; tmp3.write_bytes(b"NEW3"); archiver._download_kakao_cover_to_temp_file = lambda sid: str(tmp3)
+tmp3 = Path(tempfile.mkdtemp()) / "c.jpg"; tmp3.write_bytes(b"NEW3"); archiver.folder_archive._download_kakao_cover_to_temp_file = lambda sid: str(tmp3)
 moved, prog = bulk("rclone", "r:카카오S", "local", "일괄대상9", regen=True); assert moved == 2 and names(A / "일괄대상9") == ["0001_1화.zip", "info.xml"] and not tmp3.exists()
 fake.files.clear()
 for n, data in (("info.xml", b'<ComicInfo><Web>https://page.kakao.com/content/999</Web></ComicInfo>'), ("cover.png", b"OLD")): fake.files[("r", f"카카오T/{n}")] = data
-tmp4 = Path(tempfile.mkdtemp()) / "c.jpg"; tmp4.write_bytes(b"NEW4"); archiver._download_kakao_cover_to_temp_file = lambda sid: str(tmp4)
+tmp4 = Path(tempfile.mkdtemp()) / "c.jpg"; tmp4.write_bytes(b"NEW4"); archiver.folder_archive._download_kakao_cover_to_temp_file = lambda sid: str(tmp4)
 moved, prog = bulk("rclone", "r:카카오T", "local", "일괄대상9b", regen=True); assert (A / "일괄대상9b" / "cover.jpg").read_bytes() == b"NEW4" and names(A / "일괄대상9b") == ["cover.jpg", "info.xml"] and not tmp4.exists()
 print("B8~B9) 일괄 표지 예외/임시 파일 OK")
 print("\n전부 통과")

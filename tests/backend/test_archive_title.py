@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 
 from app import db, repository, archiver, kakao_cover
+from app.archiver.params import ProgressReport, TitleArchiveJob
 from app.config import get_settings
 from fake_rclone import FakeRclone   # tests/backend 안의 도우미
 
@@ -23,9 +24,10 @@ def make(title, nums, info="<ComicInfo>v1</ComicInfo>", cover=b"COVER"):
     return d
 def call(title, base_path, keep_last=True, policy="skip", dest_type="local", **kw):
     prog, conf, fail = [], [], []
-    moved = archiver._archive_title(st.archive_root, st.download_root, "77", title, base_path, policy, "manual" if keep_last else "manual_finish", keep_last,
-                                    dest_type=dest_type, rclone_config_path=str(cfg) if dest_type == "rclone" else "", progress_callback=prog.append,
-                                    conflict_log=conf, failure_log=fail, writer_names=kw.get("writers", ["글쓴이"]), **{k: v for k, v in kw.items() if k != "writers"})
+    job = TitleArchiveJob(archive_root=st.archive_root, download_root=st.download_root, title_id="77", title_name=title, base_path=base_path, policy=policy,
+                          trigger_type="manual" if keep_last else "manual_finish", keep_last=keep_last, dest_type=dest_type,
+                          rclone_config_path=str(cfg) if dest_type == "rclone" else "", writer_names=kw.get("writers", ["글쓴이"]), **{k: v for k, v in kw.items() if k != "writers"})
+    moved = archiver._archive_title(job, ProgressReport(progress_callback=prog.append, conflict_log=conf, failure_log=fail))
     return moved, prog, conf, fail
 def hist(): return sorted(r["file_name"] for r in repository.list_archive_history(1, 200)[0] if r["title_id"] == "77")
 def names(d): return sorted(p.name for p in Path(d).iterdir())
@@ -66,31 +68,33 @@ print("3) 완결 전체 이동 OK")
 
 # ── 4. 한 파일의 이동이 실패해도 나머지는 계속, 실패 기록 ──
 src = make("작품D", [1, 2, 3, 4], info=None, cover=None)
-orig = archiver._move_episode_file
+orig = archiver.title_archive._move_episode_file
 def flaky(dest_type, s, name, policy, *a):
     if s.name.startswith("0002"): raise OSError("디스크 오류")
     return orig(dest_type, s, name, policy, *a)
-archiver._move_episode_file = flaky
-moved, prog, conf, fail = call("작품D", "보관D"); archiver._move_episode_file = orig
+archiver.title_archive._move_episode_file = flaky
+moved, prog, conf, fail = call("작품D", "보관D"); archiver.title_archive._move_episode_file = orig
 assert moved == 2 and fail == [("작품D", "0002 2화.zip", "디스크 오류")] and "[작품D] 이동 실패: 0002 2화.zip — 디스크 오류" in prog and names(A / "보관D") == ["0001 1화.zip", "0003 3화.zip"]
 print("4) 실패 격리 OK")
 
 # ── 5. 파일명 템플릿 ──
 src = make("작품E", [], info=None, cover=None)
 for n in (1, 2, 3): (src / f"{n:04d} 작품E {n}화.zip").write_bytes(b"z")                                        # 실제 네이버 zip 이름: {번호} {제목} {부제목}
-archiver._get_effective_filename_template = lambda preset_id: "{title} {episode_no}화 - {author}"
+archiver.title_archive._get_effective_filename_template = lambda preset_id: "{title} {episode_no}화 - {author}"
 call("작품E", "보관E"); names_e = names(A / "보관E")
 assert names_e == ["작품E 0001화 - 글쓴이.zip", "작품E 0002화 - 글쓴이.zip"], names_e          # {title} {episode_no}(원래 자릿수 유지) {author}(글 작가)
-archiver._get_effective_filename_template = lambda preset_id: ""
+archiver.title_archive._get_effective_filename_template = lambda preset_id: ""
 print("5) 파일명 템플릿 OK")
 
 # ── 6. 설정이 없으면 아무것도 안 한다 ──
+def job_for(archive_root, base_path, title="작품F", **kw):
+    return TitleArchiveJob(archive_root=archive_root, download_root=st.download_root, title_id="77", title_name=title, base_path=base_path, policy="skip", trigger_type="manual", keep_last=True, **kw)
 src = make("작품F", [1, 2])
-moved = archiver._archive_title("", st.download_root, "77", "작품F", "보관F", "skip", "manual", True)                       # ARCHIVE_ROOT 없음
+moved = archiver._archive_title(job_for("", "보관F"))                       # ARCHIVE_ROOT 없음
 assert moved == 0 and len(names(src)) == 4                                                      # zip 2개 + info.xml + cover.jpg 그대로
-moved = archiver._archive_title(st.archive_root, st.download_root, "77", "작품F", "r:보관", "skip", "manual", True, dest_type="rclone", rclone_config_path="/없는/설정")   # rclone 설정 파일 없음
+moved = archiver._archive_title(job_for(st.archive_root, "r:보관", dest_type="rclone", rclone_config_path="/없는/설정"))   # rclone 설정 파일 없음
 assert moved == 0 and len(names(src)) == 4                                                      # zip 2개 + info.xml + cover.jpg 그대로
-assert archiver._archive_title(st.archive_root, st.download_root, "77", "없는작품", "보관", "skip", "manual", True) == 0                    # 폴더가 없으면 0
+assert archiver._archive_title(job_for(st.archive_root, "보관", title="없는작품")) == 0                    # 폴더가 없으면 0
 print("6) 설정 누락/폴더 없음 OK")
 
 # ── 7. rclone 목적지: 원격 폴더로 올리고(원본 삭제), 정보 파일은 복사/이동 ──

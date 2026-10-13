@@ -1,7 +1,7 @@
 """아카이버: 카카오페이지 새 파일명(페이지 수 없음)과 예전 이름(#페이지수)을 둘 다 인식한다."""
 import tempfile, zipfile
 from pathlib import Path
-from app import archiver as a
+from app.archiver import naming as a   # 이름 해석/렌더링은 naming 모듈
 
 p = a._parse_kakao_style_filename
 assert p("0384_384화 복국 (2)#48") == ("0384", "384화 복국 (2)", 48)          # 예전 이름
