@@ -12,11 +12,12 @@ import httpx
 
 from app import db, kakao_records, repository
 from app import kakao_page_download as kp
+from app import kakao_cover
 from fake_kakao_rental_site import JPG, Site, item
 db.get_connection()
 import app.main as m
 
-kp.kakao_cover.fetch_official_cover_bytes = lambda sid, **k: JPG
+kakao_cover.fetch_official_cover_bytes = lambda sid, **k: JPG
 SID = 69500409
 
 

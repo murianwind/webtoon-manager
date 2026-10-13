@@ -9,7 +9,7 @@ sent = []
 async def fake_send(session, settings, message): sent.append(message)
 discord_notify.send_webhook_notification = fake_send
 async def none(session, settings): return []
-scheduler._collect_unregistered_new_episodes = none; scheduler._collect_kakao_new_episodes = none
+scheduler.report_job._collect_unregistered_new_episodes = none; scheduler.report_job._collect_kakao_new_episodes = none
 
 async def report(force=False):
     sent.clear(); job_status.start("report"); await scheduler._run_report_job_impl(force_test=force); return list(sent)

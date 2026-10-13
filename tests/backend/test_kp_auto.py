@@ -8,6 +8,7 @@ from pathlib import Path
 import aiohttp
 
 from app import db, repository, kakao_page_auth as auth, kakao_page_download as kp, job_status, scheduler
+from app import kakao_cover
 from app.config import get_settings
 db.get_connection()
 
@@ -47,12 +48,12 @@ class FakeSession:
 aiohttp.ClientSession = FakeSession
 _orig = asyncio.sleep
 async def _nosleep(x): await _orig(0)
-kp.asyncio.sleep = _nosleep; scheduler.asyncio.sleep = _nosleep
+asyncio.sleep = _nosleep; asyncio.sleep = _nosleep
 alerts = []
 async def fake_send(session, settings, message): alerts.append(message)
 auth.discord_notify.send_webhook_notification = fake_send
 auth.discord_config.set_webhook_url("https://discord.com/api/webhooks/1/test")   # 실제처럼 웹훅이 있어야 쿠키 알림이 나간다(없으면 보내지도 기록하지도 않음)
-kp.kakao_cover.fetch_official_cover_bytes = lambda sid, **k: b"\xff\xd8\xffcover"
+kakao_cover.fetch_official_cover_bytes = lambda sid, **k: b"\xff\xd8\xffcover"
 settings = get_settings()
 KROOT = Path(tempfile.mkdtemp())
 def export(): return json.dumps([{"domain": ".kakao.com", "name": n, "value": "v", "path": "/", "expirationDate": time.time() + 25 * 86400} for n in auth.REQUIRED_COOKIES])

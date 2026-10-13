@@ -8,6 +8,7 @@ from pathlib import Path
 from app import db
 db.get_connection()
 from app import kakao_page_download as kp, comicinfo
+from app import kakao_cover
 from app import kakao_authors
 
 class R:
@@ -20,8 +21,8 @@ class R:
 JPG = b"\xff\xd8\xff\xe0jpg"
 _orig = asyncio.sleep
 async def _ns(x): await _orig(0)
-kp.asyncio.sleep = _ns
-kp.kakao_cover.fetch_official_cover_bytes = lambda sid, **k: JPG
+asyncio.sleep = _ns
+kakao_cover.fetch_official_cover_bytes = lambda sid, **k: JPG
 
 def item(order, title, **k):
     d = {"product_id": 5000 + order, "title": title, "is_free": k.get("free", False), "order_value": order, "page_count": 2, "hidden": False,

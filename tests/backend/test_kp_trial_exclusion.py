@@ -32,7 +32,7 @@ class Site:
 
 _orig_sleep = asyncio.sleep
 async def _no_sleep(x): await _orig_sleep(0)
-kp.asyncio.sleep = _no_sleep
+asyncio.sleep = _no_sleep
 
 
 async def listing(items):

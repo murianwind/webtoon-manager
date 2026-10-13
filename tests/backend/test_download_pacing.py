@@ -18,7 +18,7 @@ import app.main as m
 DEFAULTS = NS(max_new_episodes_per_title=10, batch_rest_minutes=5.0)
 sleeps = []
 async def fake_sleep(x): sleeps.append(x)
-scheduler.asyncio.sleep = fake_sleep
+asyncio.sleep = fake_sleep
 
 
 def limits_rules():
@@ -104,8 +104,8 @@ async def naver_uses_saved_values():
     # Scenario 10: 네이버 자동 다운로드도 같은 값을 쓴다(상한마다 쉬었다가 이어받기)
     done = []
     async def fake_single(**k): done.append(k["episode"].episode_no); return True, None
-    scheduler.download_single_episode = fake_single
-    scheduler.zip_episode_folders = lambda d: None
+    scheduler.naver_download.download_single_episode = fake_single
+    scheduler.naver_download.zip_episode_folders = lambda d: None
     download_roots.naver_root = lambda s: DL
     repository.upsert_new("1", "네이버 작품")
     plan = NS(info=NS(title_name="네이버 작품", webtoon_type="webtoon"), pending=[NS(episode_no=n, subtitle=f"{n}화") for n in range(1, 8)], cookies={}, webtoon_dir=Path(DL))

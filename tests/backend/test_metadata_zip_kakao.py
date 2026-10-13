@@ -11,13 +11,14 @@ import httpx
 
 from app import comicinfo, db, repository
 from app import kakao_page_download as kp
+from app import kakao_cover
 from fake_kakao_rental_site import JPG, SITE, FakeSession, Site, item
 db.get_connection()
 import app.main as m
 
 aiohttp.ClientSession = FakeSession
 COVER = {"value": JPG}
-kp.kakao_cover.fetch_official_cover_bytes = lambda sid, **k: COVER["value"]
+kakao_cover.fetch_official_cover_bytes = lambda sid, **k: COVER["value"]
 
 
 async def main():

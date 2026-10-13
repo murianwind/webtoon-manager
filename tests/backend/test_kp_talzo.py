@@ -5,6 +5,7 @@ from pathlib import Path
 import httpx
 
 from app import db, repository, kakao_page_download as kp, kakao_page_auth as auth
+from app import kakao_cover
 db.get_connection()
 import app.main as m
 
@@ -88,10 +89,10 @@ class Sess:
     def get(self, url, params=None, headers=None, timeout=None): return handler(str(url), dict(params or {}))
     def post(self, url, data=None, headers=None, timeout=None): return handler(str(url), dict(data or {}))
 import aiohttp; aiohttp.ClientSession = Sess
-kp.kakao_cover.fetch_official_cover_bytes = lambda sid, **k: b"\xff\xd8\xffcover"
+kakao_cover.fetch_official_cover_bytes = lambda sid, **k: b"\xff\xd8\xffcover"
 _o = asyncio.sleep
 async def _ns(x): await _o(0)
-kp.asyncio.sleep = _ns
+asyncio.sleep = _ns
 
 async def main():
     kroot = Path(tempfile.mkdtemp()); repository.set_setting(kp.DOWNLOAD_ROOT_SETTING_KEY, str(kroot))

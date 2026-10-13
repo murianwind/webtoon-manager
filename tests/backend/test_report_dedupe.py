@@ -13,7 +13,7 @@ discord_notify.send_webhook_notification = fake_send
 NAVER = []; KAKAO = []
 async def fake_naver(session, settings): return list(NAVER)
 async def fake_kakao(session, settings): return list(KAKAO)
-scheduler._collect_unregistered_new_episodes = fake_naver; scheduler._collect_kakao_new_episodes = fake_kakao
+scheduler.report_job._collect_unregistered_new_episodes = fake_naver; scheduler.report_job._collect_kakao_new_episodes = fake_kakao
 
 async def report(force=False):
     job_status.start("report"); before = len(sent)

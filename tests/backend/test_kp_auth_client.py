@@ -30,7 +30,7 @@ class FakeSession:
         self.calls.append(("POST", url, dict(data or {}), dict(headers or {}))); return self.handler("POST", url, {}, dict(data or {}))
 
 async def _nosleep(x): return None
-kp.asyncio.sleep = _nosleep  # 재시도 대기 생략
+asyncio.sleep = _nosleep  # 재시도 대기 생략
 
 REQ = auth.REQUIRED_COOKIES
 def cookie_export(names=REQ, expires=None, extra=()):

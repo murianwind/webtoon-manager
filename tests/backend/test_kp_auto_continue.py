@@ -10,7 +10,7 @@ DL = tempfile.mkdtemp()   # 실제로 폴더가 만들어지는 경로 — 시�
 S = NS(request_timeout_seconds=5, delay_seconds=0, max_new_episodes_per_title=10, batch_rest_minutes=5.0, download_root=DL)
 sleeps = []; calls = []; persisted = []; STATE = {}
 async def fake_sleep(x): sleeps.append(x)
-scheduler.asyncio.sleep = fake_sleep
+asyncio.sleep = fake_sleep
 
 class FakeClient:
     cookies = {"x": "y"}

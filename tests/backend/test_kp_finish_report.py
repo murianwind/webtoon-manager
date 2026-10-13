@@ -5,6 +5,7 @@ from pathlib import Path
 import aiohttp
 
 from app import db, repository, kakao_page_auth as auth, kakao_page_download as kp, job_status, scheduler, discord_bot
+from app import kakao_cover
 from app.config import get_settings
 db.get_connection()
 
@@ -41,14 +42,14 @@ class FakeSession:
 aiohttp.ClientSession = FakeSession
 _o = asyncio.sleep
 async def _ns(x): await _o(0)
-kp.asyncio.sleep = _ns; scheduler.asyncio.sleep = _ns
-kp.kakao_cover.fetch_official_cover_bytes = lambda sid, **k: b"\xff\xd8\xffcover"
+asyncio.sleep = _ns; asyncio.sleep = _ns
+kakao_cover.fetch_official_cover_bytes = lambda sid, **k: b"\xff\xd8\xffcover"
 FREE = lambda n: [(i, f"{i}화", True) for i in range(1, n + 1)]
 sent = []; BOT = {"ready": True}
 async def fake_prompt(title_id, title, platform="naver"):
     if not BOT["ready"]: return False
     sent.append((title_id, title, platform)); return True
-scheduler.discord_bot.send_completion_prompt = fake_prompt
+discord_bot.send_completion_prompt = fake_prompt
 
 async def main():
     settings = get_settings(); root = Path(tempfile.mkdtemp())

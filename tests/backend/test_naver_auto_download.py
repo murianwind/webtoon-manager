@@ -20,12 +20,12 @@ async def fake_cover(session, d, info, t): state["cover"] += 1
 sleeps = []
 async def fake_sleep(x): sleeps.append(x)
 naver_api.fetch_title_info = fake_info; naver_api.fetch_all_episodes = fake_all; naver_api.free_episodes_only = lambda eps: list(eps)
-scheduler.download_single_episode = fake_single; scheduler.zip_episode_folders = lambda d: state["zips"].append(str(d))
-scheduler.find_last_downloaded_episode_no = lambda d, eps: state["folder_last"]
-scheduler.get_adult_cookies = lambda path: state["adult_cookies"]
+scheduler.naver_download.download_single_episode = fake_single; scheduler.naver_download.zip_episode_folders = lambda d: state["zips"].append(str(d))
+scheduler.naver_download.find_last_downloaded_episode_no = lambda d, eps: state["folder_last"]
+scheduler.naver_download.get_adult_cookies = lambda path: state["adult_cookies"]
 comicinfo.write_comicinfo_file = lambda d, info: state["xml"].append(info.title_name)
 comicinfo.needs_comicinfo = lambda d: True; comicinfo.download_cover_image = fake_cover
-scheduler.asyncio.sleep = fake_sleep
+asyncio.sleep = fake_sleep
 
 def reset(**kw):
     state.update(info=NS(title_name="작품", is_adult=False, webtoon_type="WEBTOON"), episodes=[], fail=set(), attempts=[], zips=[], xml=[], cover=0, folder_last=0, adult_cookies={}, cookies_used=None, download_kw=None)

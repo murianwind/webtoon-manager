@@ -71,7 +71,7 @@ async def main():
         ran = []; gate = asyncio.Event(); started = asyncio.Event()
         async def fake_impl(platforms):
             ran.append(sorted(platforms)); started.set(); await gate.wait()
-        sch._run_download_job_impl = fake_impl
+        sch.download_job._run_download_job_impl = fake_impl     # run_download_job이 있는 download_job 모듈이 부르는 이름
         t1 = asyncio.create_task(sch.run_download_job("naver")); await started.wait()              # 네이버 실행 중
         t4 = asyncio.create_task(sch.run_download_job("both"))                                       # naver는 이미 맡겨짐 → 남은 kakao만 순서를 기다린다
         t2 = asyncio.create_task(sch.run_download_job("kakao"))                                      # kakao도 이미 맡겨짐 → 건너뜀
@@ -80,7 +80,7 @@ async def main():
         assert ran == [["naver"]]                                                                     # 아직 kakao는 대기 중(동시에 돌지 않는다)
         gate.set(); await asyncio.gather(t1, t4)
         assert ran == [["naver"], ["kakao"]], ran                                                     # 끝나면 대기하던 kakao가 실행됨(중복 실행은 없음)
-        assert sch._download_claimed_platforms == set()                                                # 끝나면 맡은 플랫폼이 비워진다
+        assert sch.download_job._download_claimed_platforms == set()                                                # 끝나면 맡은 플랫폼이 비워진다
         ran.clear(); gate.set(); await sch.run_download_job("both"); assert ran == [["kakao", "naver"]]
         started_targets = []
         async def rec(target="naver"): started_targets.append(target)

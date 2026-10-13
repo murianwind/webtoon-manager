@@ -1,6 +1,7 @@
 import os
 import asyncio, copy, json
 from app import db, repository, scheduler, kakao_api
+from app import webtoon_server_client
 db.get_connection()
 kakao_api._REQUEST_INTERVAL_SECONDS = 0
 kakao_api._catalog_cache.update(at=0.0, items=None)
@@ -45,7 +46,7 @@ async def main():
     s = Sess()
     looked_up = []
     async def fake_reader(session, base, name, timeout): looked_up.append(name); return 'http://viewer/x'
-    scheduler.webtoon_server_client.fetch_reader_url = fake_reader                  # 뷰어 서버가 설정돼 있어도 쓰이지 않아야 한다
+    webtoon_server_client.fetch_reader_url = fake_reader                  # 뷰어 서버가 설정돼 있어도 쓰이지 않아야 한다
     repository.set_setting('webtoon_server_url', 'http://viewer')
     results = await scheduler._collect_kakao_new_episodes(s, Settings())
     got = {r[0]: r for r in results}

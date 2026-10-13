@@ -5,6 +5,7 @@ from pathlib import Path
 import aiohttp
 
 from app import db, discord_config, discord_notify, repository, kakao_page_auth as auth, kakao_page_download as kp, job_status, scheduler
+from app import kakao_cover
 from app.config import get_settings
 db.get_connection()
 
@@ -40,8 +41,8 @@ class FakeSession:
 aiohttp.ClientSession = FakeSession
 _o = asyncio.sleep
 async def _ns(x): await _o(0)
-kp.asyncio.sleep = _ns; scheduler.asyncio.sleep = _ns
-kp.kakao_cover.fetch_official_cover_bytes = lambda sid, **k: b"\xff\xd8\xffcover"
+asyncio.sleep = _ns; asyncio.sleep = _ns
+kakao_cover.fetch_official_cover_bytes = lambda sid, **k: b"\xff\xd8\xffcover"
 
 sent = []
 async def fake_send(session, settings, message):

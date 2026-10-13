@@ -14,6 +14,7 @@ import httpx
 from app import db, repository
 from app import kakao_page_auth as auth
 from app import kakao_page_download as kp
+from app import kakao_cover
 from fake_kakao_rental_site import JPG, SITE, FakeSession, Site, item
 db.get_connection()
 import app.main as m
@@ -21,8 +22,8 @@ import app.main as m
 aiohttp.ClientSession = FakeSession
 _o = asyncio.sleep
 async def _ns(x): await _o(0)
-kp.asyncio.sleep = _ns
-kp.kakao_cover.fetch_official_cover_bytes = lambda sid, **k: JPG
+asyncio.sleep = _ns
+kakao_cover.fetch_official_cover_bytes = lambda sid, **k: JPG
 use_posts = lambda site: [p for p in site.posts if p[0].endswith("ticket/use")]
 
 

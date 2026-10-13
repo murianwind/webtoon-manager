@@ -75,7 +75,7 @@ class FakeClient:
     async def use_waitfree_ticket(self, product_id): self.used.append(product_id); return True, ""
     async def fetch_about(self, series_id): return None
 async def no_metadata(*a, **k): return None
-kp.write_series_metadata = no_metadata
+kp.runner.write_series_metadata = no_metadata   # run_download가 같은 모듈(runner)에서 부르므로 거기를 바꾼다
 FOLDER = kp.series_folder(str(KROOT), "기다무작품")
 def put(*numbers):
     FOLDER.mkdir(parents=True, exist_ok=True)

@@ -11,12 +11,13 @@ from pathlib import Path
 from app import db
 db.get_connection()
 from app import kakao_page_download as kp
+from app import kakao_cover
 from fake_kakao_rental_site import JPG, Site, item
 
 _orig = asyncio.sleep
 async def _ns(x): await _orig(0)
-kp.asyncio.sleep = _ns
-kp.kakao_cover.fetch_official_cover_bytes = lambda sid, **k: JPG
+asyncio.sleep = _ns
+kakao_cover.fetch_official_cover_bytes = lambda sid, **k: JPG
 client = lambda site: kp.KakaoPageClient(site, {}, 10)
 use_posts = lambda site: [p for p in site.posts if p[0].endswith("ticket/use")]
 

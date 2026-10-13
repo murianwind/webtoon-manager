@@ -129,8 +129,8 @@ print("8) 예전 형식 백업 OK")
 # ═══ 9. 실행 이력(job_history)은 백업/복원 대상이 아니라 그대로 남는다 ═══
 populate()
 with db.write_transaction() as cx: cx.execute("INSERT INTO job_history (job_name, started_at, finished_at, status, log) VALUES ('download', 'x', 'x', 'success', '[]')")
-jh_before = repository.fetchall("SELECT COUNT(*) AS c FROM job_history")[0]["c"]; assert jh_before >= 1
-backup_restore.restore_backup(json.loads(json.dumps(repository.export_all())), ST); assert repository.fetchall("SELECT COUNT(*) AS c FROM job_history")[0]["c"] == jh_before
+jh_before = db.fetchall("SELECT COUNT(*) AS c FROM job_history")[0]["c"]; assert jh_before >= 1
+backup_restore.restore_backup(json.loads(json.dumps(repository.export_all())), ST); assert db.fetchall("SELECT COUNT(*) AS c FROM job_history")[0]["c"] == jh_before
 print("9) 실행 이력 유지 OK")
 
 # ═══ 10. API: 복원하면 스케줄을 다시 적용하고, 카카오가 켜져 있으면 목록을 새로 채운다 + 결과(경고/다시 입력)를 돌려준다 ═══

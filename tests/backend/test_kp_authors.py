@@ -36,9 +36,9 @@ async def t2():
     assert {a.author_id: a.enabled for a in repository.list_watched_authors()} == {"3": True}                     # 원작자만 등록, 글작가는 등록 안 됨
     ok, msg = await tracker.enrich_one(None, "101", get_settings(), register_authors_enabled=False)
     assert msg == "작가 등록: 글작가" and {a.author_id: a.enabled for a in repository.list_watched_authors()} == {"3": True, "1": False}   # 원작자 없는 작품은 작가, 끈 채로 등록
-    row = repository.fetchone("SELECT writer_ids, writer_names, origin_ids, origin_names FROM webtoons WHERE title_id = '100'")
+    row = db.fetchone("SELECT writer_ids, writer_names, origin_ids, origin_names FROM webtoons WHERE title_id = '100'")
     assert json.loads(row["writer_names"]) == ["글작가"] and json.loads(row["origin_ids"]) == ["3"] and json.loads(row["origin_names"]) == ["원작자"]   # 카드에 보이는 작가 정보는 그대로
-    row = repository.fetchone("SELECT origin_ids FROM webtoons WHERE title_id = '101'"); assert json.loads(row["origin_ids"]) == []
+    row = db.fetchone("SELECT origin_ids FROM webtoons WHERE title_id = '101'"); assert json.loads(row["origin_ids"]) == []
     print("2) 구독 시 등록 OK (원작자 있으면 원작자만, 없으면 작가, 작가 표시 정보는 유지)")
 asyncio.run(t2())
 

@@ -9,6 +9,7 @@ from pathlib import Path
 from app import db
 db.get_connection()
 from app import kakao_page_download as kp
+from app import kakao_cover
 
 real = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fixtures", "kakao_webtoon_files.json"), encoding='utf-8'))
 
@@ -27,7 +28,7 @@ class FakeSession:
     def post(self, url, data=None, headers=None, timeout=None): return self.handler("POST", url, {})
 _orig_sleep = asyncio.sleep
 async def _nosleep(x): await _orig_sleep(0)
-kp.asyncio.sleep = _nosleep
+asyncio.sleep = _nosleep
 
 E = lambda n, sub=None, acc=True, free=None, hidden=False, expire=None: kp.Episode(
     product_id=9000 + n, title=f"작품 {sub or f'{n}화'}", number=n, subtitle=sub or f"{n}화", is_free=(acc if free is None else free),
@@ -121,7 +122,7 @@ SERIES_ITEM = {"id": 1, "title": "작품", "authors": "연상호,최규석", "de
 cover_calls = []
 def fake_cover(series_id, **k):
     cover_calls.append(series_id); return b"\xff\xd8\xffcover"
-kp.kakao_cover.fetch_official_cover_bytes = fake_cover
+kakao_cover.fetch_official_cover_bytes = fake_cover
 def site(eps_list):
     def h(m, u, p):
         if "product/list" in u:
@@ -209,7 +210,7 @@ async def t8():
     assert cover_calls == ["1"]                                                    # 표지가 이미 있으면 다시 받지 않는다
     (root / "작품" / "info.xml").write_text("손으로 고침"); await kp.download_selected(cl, series_id=1, title=None, numbers=[2], download_root=str(root))
     assert "<ComicInfo" in (root / "작품" / "info.xml").read_text(encoding="utf-8")   # info.xml은 받을 때마다 최신 정보로 덮어쓴다(네이버와 같음)
-    kp.kakao_cover.fetch_official_cover_bytes = lambda sid, **k: None                # 표지를 못 받아도 다운로드는 성공
+    kakao_cover.fetch_official_cover_bytes = lambda sid, **k: None                # 표지를 못 받아도 다운로드는 성공
     root2 = Path(tempfile.mkdtemp()); r = await kp.run_download(cl, series_id=1, title=None, download_root=str(root2), max_episodes=10)
     assert r.downloaded == [1, 2] and not (root2 / "작품" / "cover.jpg").exists() and (root2 / "작품" / "info.xml").exists()
     print("7) info.xml/표지 OK (연령 표기, 이스케이프, 표지는 없을 때만, 실패해도 다운로드 성공)")

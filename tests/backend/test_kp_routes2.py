@@ -6,6 +6,7 @@ import aiohttp, httpx
 
 from app import db, repository
 from app import kakao_page_auth as auth, kakao_page_download as kp
+from app import kakao_cover
 from app.config import get_settings
 db.get_connection()
 import app.main as m
@@ -50,10 +51,10 @@ class FakeSession:
         url = str(url); return handler("GET", url, dict(params or {}), None)
     def post(self, url, data=None, headers=None, timeout=None): return handler("POST", url, {}, data)
 aiohttp.ClientSession = FakeSession
-kp.kakao_cover.fetch_official_cover_bytes = lambda sid, **k: b"\xff\xd8\xffcover"
+kakao_cover.fetch_official_cover_bytes = lambda sid, **k: b"\xff\xd8\xffcover"
 _orig_sleep = asyncio.sleep
 async def _nosleep(x): await _orig_sleep(0)
-kp.asyncio.sleep = _nosleep
+asyncio.sleep = _nosleep
 alerts = []
 async def fake_send(session, settings, message): alerts.append(message)
 auth.discord_notify.send_webhook_notification = fake_send

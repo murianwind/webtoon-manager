@@ -109,8 +109,8 @@ async def main():
     for name in ("backfill_missing_thumbnails", "scan_subscriptions_for_updates", "discover_titles_for_unlinked_watched_authors",
                  "scan_curation_tags", "refresh_inactive_metadata", "scan_kakao_authors_for_new_titles"):
         setattr(tracker, name, noop)
-    scheduler._notify_newly_finished = noop
-    scheduler.new_episode_watch.run = fake_run
+    scheduler.discovery_job._notify_newly_finished = noop
+    watch.run = fake_run
     await scheduler._run_discovery_job_impl()
     assert calls == ["watch"], calls
     print("7) 신작 스캔에 연결 OK")

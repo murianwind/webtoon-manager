@@ -6,8 +6,9 @@ from pathlib import Path
 import httpx
 
 from app import db, repository, archiver, download_roots, kakao_page_download as kp
+from app import kakao_cover
 db.get_connection()
-kp.kakao_cover.fetch_official_cover_bytes = lambda sid, **k: b"\xff\xd8\xffcover"   # 표지는 외부 요청 없이
+kakao_cover.fetch_official_cover_bytes = lambda sid, **k: b"\xff\xd8\xffcover"   # 표지는 외부 요청 없이
 import app.main as m
 from app.config import get_settings
 

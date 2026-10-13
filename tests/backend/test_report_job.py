@@ -10,7 +10,7 @@ async def fake_send(session, settings, message): sent.append(message)
 discord_notify.send_webhook_notification = fake_send
 async def fake_naver(session, settings): collected.append("naver"); return []
 async def fake_kakao(session, settings): collected.append("kakao"); return []
-scheduler._collect_unregistered_new_episodes = fake_naver; scheduler._collect_kakao_new_episodes = fake_kakao
+scheduler.report_job._collect_unregistered_new_episodes = fake_naver; scheduler.report_job._collect_kakao_new_episodes = fake_kakao
 VIEWER = {}
 async def fake_reader(session, base, name, timeout): lookups.append(name); return VIEWER.get(name)
 webtoon_server_client.fetch_reader_url = fake_reader

@@ -6,6 +6,8 @@
 import asyncio
 
 from app import daily_plus, db, naver_api, repository, scheduler, tracker
+from app import new_episode_watch
+from app import cookie_health
 from app.config import get_settings
 db.get_connection()
 
@@ -93,9 +95,9 @@ async def jobs():
     HIDDEN.add("852777")
     downloaded = []
     async def fake_download(session, settings_, title_id, adult_tracker, failures): downloaded.append(title_id)
-    scheduler._download_new_episodes_for_one = fake_download
+    scheduler.download_job._download_new_episodes_for_one = fake_download   # _run_download_job_impl이 있는 download_job 모듈이 이 이름을 가져다 쓴다
     async def no_finalize(session, settings_, tracker_): return None
-    scheduler.cookie_health.finalize_and_notify = no_finalize
+    cookie_health.finalize_and_notify = no_finalize
     await scheduler._run_download_job_impl({"naver"})
     assert "852777" not in downloaded and state("852777") == repository.STATUS_EXCLUDED, (downloaded, state("852777"))
     assert "111" in downloaded and "852602" in downloaded          # 일반 작품과 직접 구독한 매일+는 그대로 받는다
@@ -107,9 +109,9 @@ async def jobs():
                  "scan_curation_tags", "refresh_inactive_metadata", "scan_kakao_authors_for_new_titles"):
         setattr(tracker, name, noop)
     tracker.exclude_auto_added_daily_plus = fake_cleanup
-    scheduler._notify_newly_finished = noop
+    scheduler.discovery_job._notify_newly_finished = noop
     async def fake_watch(session, settings_): return 0
-    scheduler.new_episode_watch.run = fake_watch
+    new_episode_watch.run = fake_watch
     await scheduler._run_discovery_job_impl()
     assert calls == ["cleanup"], calls
     print("7~8) 다운로드/신작 스캔 작업의 정리 연결 OK")
