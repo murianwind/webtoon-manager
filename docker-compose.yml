@@ -5,6 +5,22 @@
 # 자동 업데이트: 아래 labels에 있는 com.centurylinklabs.watchtower.enable=true 는
 # Watchtower용 표시입니다. 이미 Watchtower를 쓰고 계시면(--label-enable 옵션이 켜져
 # 있는 경우) 새 이미지가 올라올 때마다 자동으로 갱신됩니다.
+#
+# ── 이 파일이 쓰는 변수(스택의 Environment variables, 이 파일 옆 .env, 셸 환경변수로 채웁니다) ──
+#   WEBTOON_DOWNLOAD_HOST_PATH  필수          웹툰이 저장될 호스트 폴더
+#   WEBTOON_ARCHIVE_HOST_PATH   아카이빙 시   아카이빙 보관용 호스트 폴더
+#   APP_DATA_HOST_PATH          필수          설정/구독 기록(DB)을 저장할 호스트 폴더
+#   COOKIE_DIR_HOST_PATH        필수          네이버 로그인 쿠키 파일이 있는 호스트 폴더
+#   COOKIE_FILE_NAME            선택          쿠키 파일 이름 (기본 cookies.json)
+#   RCLONE_CONFIG_HOST_PATH     rclone 사용 시 rclone.conf가 있는 호스트 폴더
+#   WEB_PORT                    선택          접속 포트 (기본 8000)
+#
+# ── 앱이 읽는 환경변수는 아래 environment의 6개가 전부입니다 ──
+#   DOWNLOAD_ROOT, WEBTOON_DOWNLOAD_HOST_PATH, ARCHIVE_ROOT, RCLONE_CONFIG_PATH, DATABASE_PATH, COOKIE_FILE_PATH
+#   그 밖의 값(다운로드 속도, 요청 간격, 타임아웃 등)은 환경변수로 바꿀 수 없습니다 — 다운로드 속도는 설정 화면의 "다운로드 속도 조절"에서,
+#   나머지는 고정값입니다. 예전 환경변수(MAX_NEW_EPISODES_PER_TITLE, BATCH_REST_MINUTES, DELAY_SECONDS, REQUEST_TIMEOUT_SECONDS,
+#   MAX_CONCURRENT_DOWNLOADS, ARTIST_SCAN_CONCURRENCY, FOLDER_ZERO_FILL, IMAGE_ZERO_FILL)를 지정해 두면 무시되고 시작할 때 경고가 남습니다.
+#   모든 옵션의 자세한 설명은 README의 "모든 설정 옵션"을 보세요.
 
 services:
   webtoon-manager:

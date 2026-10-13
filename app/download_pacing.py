@@ -1,6 +1,6 @@
 """자동 다운로드의 속도 조절 — 작품당 한 번에 받을 회차 상한과, 상한에 걸렸을 때 이어받기 전에 쉬는 시간.
 
-기본값은 환경변수(Settings.max_new_episodes_per_title=10, batch_rest_minutes=5)이고, 설정 화면에서 바꾼 값(DB settings)이 있으면 그 값을 쓴다.
+기본값은 코드의 고정값(Settings.max_new_episodes_per_title=10, batch_rest_minutes=5 — 환경변수로는 바꿀 수 없다)이고, 설정 화면에서 바꾼 값(DB settings)이 있으면 그 값을 쓴다.
 읽을 때마다 DB를 보므로 재시작 없이 다음 배치부터 바로 적용된다. DB에 범위 밖이거나 숫자가 아닌 값이 들어 있으면 그 항목만 기본값으로 돌아간다 —
 이상한 값으로 다운로드가 돌지 않게 하려는 것이다(기본값 자체는 검사하지 않는다).
 """
@@ -38,7 +38,7 @@ def _saved_rest() -> float | None:
 
 
 def limits(settings) -> tuple[int, float]:
-    """(작품당 한 번에 받을 회차 상한(0=제한 없음), 배치 사이 쉬는 시간(분)) — 설정 화면에서 저장한 값이 있으면 그 값, 없으면 환경변수 기본값."""
+    """(작품당 한 번에 받을 회차 상한(0=제한 없음), 배치 사이 쉬는 시간(분)) — 설정 화면에서 저장한 값이 있으면 그 값, 없으면 코드 기본값."""
     cap, rest = _saved_cap(), _saved_rest()
     return (settings.max_new_episodes_per_title if cap is None else cap, settings.batch_rest_minutes if rest is None else rest)
 

@@ -20,7 +20,7 @@ from app.api.routes import router as api_router
 from app.discord_bot import start_bot, stop_bot
 from app.log_redaction import RedactingFilter
 from app import kakao_catalog, kakao_records, repository
-from app.config import get_settings
+from app.config import get_settings, warn_removed_env_variables
 from app.scheduler import create_scheduler
 from app.tracker import ensure_default_tags_seeded
 
@@ -36,6 +36,7 @@ def _configure_logging() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _configure_logging()
+    warn_removed_env_variables(logging.getLogger(__name__))  # 예전 환경변수가 남아 있으면 조용히 무시되지 않게 알린다
     ensure_default_tags_seeded()
     await start_bot()
     # rclone 최신화는 이제 컨테이너 시작 시점이 아니라, 아카이빙 잡이 실행될 때마다
