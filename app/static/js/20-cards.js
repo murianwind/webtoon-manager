@@ -73,6 +73,17 @@ function reconcileGrid(grid, rows, context, allRows) {
   return built;
 }
 
+// 구독하지 않은 카드에도 보이지 않는 뷰어 자리를 둔다(뷰어 서버가 있을 때만) — 같은 전체목록의 구독 중 카드(구독해제/제외됨으로/뷰어 아이콘 3줄)와 버튼 줄이 맞는다.
+// 구독 중 카드의 뷰어 아이콘과 같은 버튼이라 높이가 같고, 뷰어에 없는 작품의 아이콘을 숨길 때와 같은 방식(hideViewerIcon)으로 숨긴다. 뷰어 확인 대상(data-viewer-check-title)은 아니다.
+function appendViewerSlotPlaceholder(actions) {
+  if (!webtoonServerConfigured) return;
+  const slot = makeIconButton(READER_ICON_SVG, "", () => {});
+  slot.removeAttribute("title");
+  slot.removeAttribute("aria-label");
+  hideViewerIcon(slot);
+  actions.appendChild(slot);
+}
+
 function buildWebtoonCard(w, context) {
   const card = document.createElement("div");
   card.className = "webtoon-card";
@@ -138,6 +149,7 @@ function buildWebtoonCard(w, context) {
       } else {
         actions.appendChild(makeButton("구독", () => webtoonListAction(w, "subscribe", "kakao", context)));
         actions.appendChild(makeButton("목록제외", () => webtoonListAction(w, "exclude", "kakao", context)));
+        appendViewerSlotPlaceholder(actions);
       }
     } else if (w.status === "active") {
       actions.appendChild(makeButton("구독해제", () => webtoonListAction(w, "unsubscribe", "naver", context)));
@@ -151,6 +163,7 @@ function buildWebtoonCard(w, context) {
     } else {
       actions.appendChild(makeButton("구독", () => webtoonListAction(w, "subscribe", "naver", context)));
       actions.appendChild(makeButton("목록제외", () => webtoonListAction(w, "exclude", "naver", context)));
+      appendViewerSlotPlaceholder(actions);
     }
   } else if (platform === "kakao") {
     // "구독해제"/"제외됨" 탭에 들어온 카카오 항목 — 네이버와 동일한 워크플로.

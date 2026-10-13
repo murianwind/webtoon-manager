@@ -231,7 +231,7 @@ function refreshKakaoManualSubscribeButton() {
   const a = kakaoManualAnalysis;
   const btn = document.getElementById("btn-kakao-manual-subscribe");
   btn.classList.toggle("hidden", !a);
-  document.getElementById("kakao-manual-record-actions").classList.toggle("hidden", !a || a.subscription !== "active");  // 받은 기록 고치기는 구독 중인 작품만
+  refreshKakaoManualSelectionActions();  // 받은 기록 고치기는 구독 중인 작품만 — 툴바가 구독 상태에도 따른다
   if (!a) return;
   applySubscribeButton(btn, a.subscription === "active");
 }
@@ -296,6 +296,7 @@ function renderKakaoManualTable() {
   // "미보유만 선택"은 이미 받았거나 시작 지점 이전인 회차가 있어서 "전체선택"과 결과가 다를 때만 보여준다
   const missingDiffers = a.episodes.some((e) => e.selectable && (e.downloaded || e.before_start));
   document.getElementById("btn-kakao-manual-select-missing").classList.toggle("hidden", !missingDiffers);
+  setHiddenById("kakao-hint-select-missing", !missingDiffers);
   const recordable = a.subscription === "active";  // 구독 중이면 잠긴 회차도 체크할 수 있다(받은 기록을 고치기 위해) — 다운로드/전체선택은 받을 수 있는 회차만 쓴다
   for (const e of a.episodes) {
     const [badgeClass, badgeLabel] = KAKAO_STATE_BADGE[e.state] || ["kp-locked", e.state];
@@ -322,6 +323,33 @@ function renderKakaoManualTable() {
     tbody.appendChild(tr);
   }
   fitScrollWrapperToViewport("kakao-manual-table-wrapper", 240);
+  refreshKakaoManualSelectionActions();  // 새 표에는 선택이 없으니 선택 뒤에 나타나는 버튼은 숨는다
+}
+
+// 툴바: 처음에는 전체선택/미보유만 선택(구독 중이면 기록용 전체선택)만 보이고, 회차를 고르면 선택해제/선택 다운로드(구독 중이면 받은 것으로/받지 않은 것으로 기록)가 같은 줄에 나타난다.
+function setHiddenById(id, hidden) {
+  document.getElementById(id).classList.toggle("hidden", hidden);
+}
+
+function refreshKakaoManualSelectionActions() {
+  const a = kakaoManualAnalysis;
+  const hasSelection = document.querySelectorAll(".kakao-manual-ep-checkbox:checked").length > 0;
+  const subscribed = !!a && a.subscription === "active";
+  setHiddenById("btn-kakao-manual-record-select-all", !subscribed);
+  setHiddenById("kakao-hint-record-select-all", !subscribed);
+  setHiddenById("btn-kakao-manual-select-none", !hasSelection);
+  setHiddenById("btn-kakao-manual-download", !hasSelection);
+  setHiddenById("btn-kakao-manual-record-done", !(hasSelection && subscribed));
+  setHiddenById("btn-kakao-manual-record-undone", !(hasSelection && subscribed));
+}
+
+function refreshManualSelectionActions() {
+  const hasSelection = document.querySelectorAll(".manual-ep-checkbox:checked").length > 0;
+  const subscribed = !!manualAnalyzeResult && manualAnalyzeResult.subscription === "active";
+  setHiddenById("btn-manual-select-none", !hasSelection);
+  setHiddenById("btn-manual-download", !hasSelection);
+  setHiddenById("btn-manual-record-done", !(hasSelection && subscribed));
+  setHiddenById("btn-manual-record-undone", !(hasSelection && subscribed));
 }
 
 function kakaoManualCheckboxes() {
@@ -346,6 +374,7 @@ function selectKakaoManual(wanted) {
     }
     cb.checked = on;
   }
+  refreshKakaoManualSelectionActions();
 }
 
 // 고른 대여권 회차를 열려고 쓸 대여권 확인 창 문구(되돌릴 수 없는 사용이라 장수와 남는 장수, 대여 기간을 알려 준다). 쓸 게 없으면 null.
@@ -361,10 +390,13 @@ document.getElementById("btn-kakao-manual-select-all").addEventListener("click",
 document.getElementById("btn-kakao-manual-select-missing").addEventListener("click", () => selectKakaoManual((cb) => cb.dataset.missing === "1"));
 document.getElementById("btn-kakao-manual-select-none").addEventListener("click", () => {
   document.querySelectorAll(".kakao-manual-ep-checkbox").forEach((cb) => (cb.checked = false));
+  refreshKakaoManualSelectionActions();
 });
+document.getElementById("kakao-manual-tbody").addEventListener("change", refreshKakaoManualSelectionActions);  // 체크박스를 직접 누른 경우
 // ── 받은 기록 고치기(구독 중인 작품만): 고른 회차를 "받은 것으로"/"받지 않은 것으로" 기록한다. 기존 기록을 사용자가 정한 대로 다시 쓰는 것이라 확인을 받는다 ──
 document.getElementById("btn-kakao-manual-record-select-all").addEventListener("click", () => {
   document.querySelectorAll(".kakao-manual-ep-checkbox:not(:disabled)").forEach((cb) => (cb.checked = true));
+  refreshKakaoManualSelectionActions();
 });
 
 async function recordKakaoManual(downloaded) {
@@ -488,7 +520,7 @@ bindMetadataZipButton("btn-manual-metadata", () => manualAnalyzeResult && `/api/
 function refreshManualSubscribeButton() {
   const btn = document.getElementById("btn-manual-subscribe");
   btn.classList.remove("hidden");
-  document.getElementById("manual-record-actions").classList.toggle("hidden", manualAnalyzeResult.subscription !== "active");  // 받은 기록 고치기는 구독 중인 작품만
+  refreshManualSelectionActions();  // 받은 기록 고치기는 구독 중인 작품만 — 툴바가 구독 상태에도 따른다
   applySubscribeButton(btn, manualAnalyzeResult.subscription === "active");
 }
 
@@ -529,13 +561,16 @@ function renderManualTable() {
   // 검색결과 영역이 숨겨지면서 레이아웃이 바뀐 다음(다음 페인트 이후) 계산해야
   // 정확한 남은 높이가 나온다.
   requestAnimationFrame(() => fitScrollWrapperToViewport("manual-table-wrapper", 240));
+  refreshManualSelectionActions();  // 새 표에는 선택이 없으니 선택 뒤에 나타나는 버튼은 숨는다
 }
 
 document.getElementById("btn-manual-select-all").addEventListener("click", () => {
   document.querySelectorAll(".manual-ep-checkbox:not(:disabled)").forEach((cb) => (cb.checked = true));
+  refreshManualSelectionActions();
 });
 document.getElementById("btn-manual-select-none").addEventListener("click", () => {
   document.querySelectorAll(".manual-ep-checkbox").forEach((cb) => (cb.checked = false));
+  refreshManualSelectionActions();
 });
 document.getElementById("btn-manual-select-missing").addEventListener("click", () => {
   document.querySelectorAll(".manual-ep-checkbox").forEach((cb) => {
@@ -543,7 +578,9 @@ document.getElementById("btn-manual-select-missing").addEventListener("click", (
     const ep = manualAnalyzeResult.episodes.find((e) => e.episode_no === no);
     cb.checked = !cb.disabled && ep && !ep.owned;
   });
+  refreshManualSelectionActions();
 });
+document.getElementById("manual-tbody").addEventListener("change", refreshManualSelectionActions);  // 체크박스를 직접 누른 경우
 
 async function recordNaverManual(downloaded) {
   const a = manualAnalyzeResult;

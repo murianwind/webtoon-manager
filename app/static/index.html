@@ -107,16 +107,17 @@
         <button id="btn-manual-reanalyze">다시 분석</button>
         <button id="btn-manual-metadata" title="표지(cover)와 info.xml을 zip 하나로 내 PC에 받습니다">표지·정보 받기</button>
       </div>
-      <div class="manual-actions">
+      <div class="manual-actions" id="manual-actions">
         <button id="btn-manual-select-all">전체선택</button>
         <button id="btn-manual-select-missing">미보유만 선택</button>
-        <button id="btn-manual-select-none">선택해제</button>
-        <button id="btn-manual-download">선택 다운로드</button>
+        <button id="btn-manual-select-none" class="hidden">선택해제</button>
+        <button id="btn-manual-download" class="hidden">선택 다운로드</button>
+        <button id="btn-manual-record-done" class="hidden" title="네이버는 '여기까지 받음' 한 지점만 기억합니다 — 고른 가장 큰 번호까지 받은 것으로 기록">받은 것으로 기록</button>
+        <button id="btn-manual-record-undone" class="hidden" title="고른 가장 작은 번호부터 모두 받을 대상으로 기록">받지 않은 것으로 기록</button>
       </div>
-      <div class="manual-actions hidden" id="manual-record-actions">
-        <span class="hint-inline">받은 기록(구독 중인 작품만):</span>
-        <button id="btn-manual-record-done" title="네이버는 '여기까지 받음' 한 지점만 기억합니다 — 고른 가장 큰 번호까지 받은 것으로 기록">받은 것으로 기록</button>
-        <button id="btn-manual-record-undone" title="고른 가장 작은 번호부터 모두 받을 대상으로 기록">받지 않은 것으로 기록</button>
+      <div class="manual-actions-hint">
+        <div><b>전체선택</b> 받을 수 있는 회차(유료/잠김 제외)를 모두 고릅니다.</div>
+        <div><b>미보유만 선택</b> 이미 받은 회차를 뺀 나머지만 고릅니다.</div>
       </div>
       <div class="scroll-table-wrapper" id="manual-table-wrapper">
         <table id="manual-table">
@@ -135,17 +136,19 @@
         <button id="btn-kakao-manual-metadata" title="표지(cover.jpg)와 info.xml을 zip 하나로 내 PC에 받습니다">표지·정보 받기</button>
       </div>
       <div id="kakao-manual-summary" class="kakao-manual-summary"></div>
-      <div class="manual-actions">
+      <div class="manual-actions" id="kakao-manual-actions">
         <button id="btn-kakao-manual-select-all">전체선택</button>
         <button id="btn-kakao-manual-select-missing">미보유만 선택</button>
-        <button id="btn-kakao-manual-select-none">선택해제</button>
-        <button id="btn-kakao-manual-download">선택 다운로드</button>
+        <button id="btn-kakao-manual-record-select-all" class="hidden" title="잠긴 회차까지 모두 선택(받은 기록을 고칠 때)">기록용 전체선택</button>
+        <button id="btn-kakao-manual-select-none" class="hidden">선택해제</button>
+        <button id="btn-kakao-manual-download" class="hidden">선택 다운로드</button>
+        <button id="btn-kakao-manual-record-done" class="hidden" title="앱의 받은 회차 기록만 바꿉니다(폴더의 파일은 그대로)">받은 것으로 기록</button>
+        <button id="btn-kakao-manual-record-undone" class="hidden" title="자동으로 받는 대상으로 기록(폴더에 파일이 있는 회차는 바꿀 수 없음)">받지 않은 것으로 기록</button>
       </div>
-      <div class="manual-actions hidden" id="kakao-manual-record-actions">
-        <span class="hint-inline">받은 기록(구독 중인 작품만):</span>
-        <button id="btn-kakao-manual-record-select-all" title="잠긴 회차까지 모두 선택">기록용 전체선택</button>
-        <button id="btn-kakao-manual-record-done" title="앱의 받은 회차 기록만 바꿉니다(폴더의 파일은 그대로)">받은 것으로 기록</button>
-        <button id="btn-kakao-manual-record-undone" title="자동으로 받는 대상으로 기록(폴더에 파일이 있는 회차는 바꿀 수 없음)">받지 않은 것으로 기록</button>
+      <div class="manual-actions-hint">
+        <div><b>전체선택</b> 받을 수 있는 회차(잠긴 회차 제외)를 모두 고릅니다.</div>
+        <div id="kakao-hint-select-missing"><b>미보유만 선택</b> 이미 받은 회차를 뺀 나머지만 고릅니다.</div>
+        <div id="kakao-hint-record-select-all" class="hidden"><b>기록용 전체선택</b> 잠긴 회차까지 모두 고릅니다 — 받은 기록을 고칠 때 씁니다(구독 중인 작품).</div>
       </div>
       <div class="scroll-table-wrapper" id="kakao-manual-table-wrapper">
         <table id="kakao-manual-table">

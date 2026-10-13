@@ -557,6 +557,9 @@ select {
   flex-wrap: wrap;
 }
 .manual-actions button { font-size: 12px; padding: 6px 10px; }
+/* 툴바 바로 아래의 짧은 안내 — 처음 세 버튼(전체선택/미보유만 선택/기록용 전체선택)이 무엇을 고르는지 */
+.manual-actions-hint { font-size: 12px; color: var(--muted); margin: -6px 0 12px; line-height: 1.6; }
+.manual-actions-hint b { font-weight: 600; color: var(--text, inherit); margin-right: 4px; }
 #manual-table, #kakao-manual-table {
   width: 100%;
   border-collapse: collapse;

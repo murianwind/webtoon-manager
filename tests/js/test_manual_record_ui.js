@@ -26,13 +26,15 @@ const { makeApp, sleep, ok, done } = require("./harness");
   const setPlatform = (p) => { $("manual-platform").value = p; $("manual-platform").dispatchEvent(new w.Event("change")); };
   const analyze = async (q) => { $("manual-query").value = q; $("btn-manual-analyze").click(); await sleep(60); };
   const box = (cls, n) => w.document.querySelector(`.${cls}[data-no="${n}"]`);
+  const setChecked = (cls, n, on = true) => { const cb = box(cls, n); cb.checked = on; cb.dispatchEvent(new w.Event("change", { bubbles: true })); };   // 사용자가 체크박스를 누른 것과 같게(툴바가 이 이벤트로 갱신된다)
+  const shown = (id) => !$(id).classList.contains("hidden");
 
   // ── 카카오페이지 ──
   setPlatform("kakao"); await analyze("69500409");
   // Scenario 1: 구독 중이면 기록 영역이 보이고, 구독하지 않으면(구독해제/미구독) 숨는다
-  ok(!$("kakao-manual-record-actions").classList.contains("hidden"), "구독 중: 기록 영역이 보인다");
+  ok(shown("btn-kakao-manual-record-select-all") && !shown("btn-kakao-manual-record-done"), "구독 중: 기록용 전체선택이 보이고(선택 전이라 기록 버튼은 아직 숨김)");
   kakao = { ...kakaoBase, subscription: null }; await analyze("69500409");
-  ok($("kakao-manual-record-actions").classList.contains("hidden"), "구독 안 함: 기록 영역이 숨는다");
+  ok(!shown("btn-kakao-manual-record-select-all") && !shown("btn-kakao-manual-record-done"), "구독 안 함: 기록 버튼이 없다");
   ok(box("kakao-manual-ep-checkbox", 4).disabled && box("kakao-manual-ep-checkbox", 5).disabled, "구독 안 함: 잠긴 회차는 예전처럼 선택 불가");
   kakao = { ...kakaoBase, subscription: "active" }; await analyze("69500409");
 
@@ -52,7 +54,8 @@ const { makeApp, sleep, ok, done } = require("./harness");
   alerts.length = 0;
 
   // Scenario 4: 받은 것으로 기록 — 확인 창(개수 + 폴더 파일은 안 건드림)을 거쳐 요청하고, 결과 안내 뒤 분석을 다시 읽는다. 취소하면 요청 없음
-  box("kakao-manual-ep-checkbox", 2).checked = true; box("kakao-manual-ep-checkbox", 4).checked = true;       // 4번은 잠긴 회차
+  setChecked("kakao-manual-ep-checkbox", 2); setChecked("kakao-manual-ep-checkbox", 4);       // 4번은 잠긴 회차
+  ok(shown("btn-kakao-manual-record-done") && shown("btn-kakao-manual-record-undone"), "선택하면 기록 버튼이 나타난다")
   answer = false; $("btn-kakao-manual-record-done").click(); await sleep(30);
   ok(posts.length === 0 && confirms.length === 1 && /2개/.test(confirms[0]) && /받은 것으로/.test(confirms[0]) && /폴더의 파일은 건드리지 않/.test(confirms[0]), "확인 창: " + confirms[0]);
   answer = true; const before = analyzeCalls.kakao; $("btn-kakao-manual-record-done").click(); await sleep(80);
@@ -62,7 +65,7 @@ const { makeApp, sleep, ok, done } = require("./harness");
 
   // Scenario 5: 받지 않은 것으로 기록 — 자동으로 받는 대상이 됨을 알리고, 폴더에 파일이 있어 못 바꾼 회차를 결과에 알려 준다
   kakaoRecordResponse = { marked: [3], ignored_in_folder: [1], recorded_count: 1, pending_count: 1 };
-  box("kakao-manual-ep-checkbox", 1).checked = true; box("kakao-manual-ep-checkbox", 3).checked = true;
+  setChecked("kakao-manual-ep-checkbox", 1); setChecked("kakao-manual-ep-checkbox", 3);
   $("btn-kakao-manual-record-undone").click(); await sleep(80);
   ok(/받지 않은 것으로/.test(confirms[confirms.length - 1]) && /자동으로 받는 대상/.test(confirms[confirms.length - 1]) && /폴더에 파일이 있는 회차는 바꿀 수 없/.test(confirms[confirms.length - 1]), "확인 창: " + confirms[confirms.length - 1]);
   ok(posts.length === 2 && posts[1][1].downloaded === false && JSON.stringify(posts[1][1].numbers) === JSON.stringify([1, 3]), "받지 않은 것으로 요청: " + JSON.stringify(posts[1]));
@@ -71,7 +74,7 @@ const { makeApp, sleep, ok, done } = require("./harness");
 
   // Scenario 6: 선택 다운로드에는 받을 수 없는 회차(잠긴 회차)가 섞여 들어가지 않는다
   $("btn-kakao-manual-select-none").click();
-  box("kakao-manual-ep-checkbox", 2).checked = true; box("kakao-manual-ep-checkbox", 4).checked = true;
+  setChecked("kakao-manual-ep-checkbox", 2); setChecked("kakao-manual-ep-checkbox", 4);
   const runPosts = []; const realFetch = w.fetch;
   w.fetch = async (url, opts = {}) => { if (String(url).includes("/api/kakao-manual/run")) { runPosts.push(JSON.parse(opts.body)); return { ok: true, status: 200, json: async () => ({ status: "started" }) }; } return realFetch(url, opts); };
   $("btn-kakao-manual-download").click(); await sleep(60); w.fetch = realFetch;
@@ -80,11 +83,12 @@ const { makeApp, sleep, ok, done } = require("./harness");
   // ── 네이버 ──
   posts.length = 0; confirms.length = 0; alerts.length = 0;
   setPlatform("naver"); await analyze("333");
-  ok(!$("manual-record-actions").classList.contains("hidden"), "네이버 구독 중: 기록 영역이 보인다");
+  ok(!shown("btn-manual-record-done") && shown("btn-manual-select-all"), "네이버 구독 중: 선택 전에는 기록 버튼이 숨어 있다");
   ok(w.document.querySelector('.manual-ep-checkbox[data-no="4"]').disabled, "네이버: 잠긴 회차는 기록할 수 없어 선택 불가");
   ok(w.document.querySelector("#manual-tbody tr:nth-child(2)").textContent.includes("기록"), "기록으로만 받은 회차는 구분해서 보인다: " + w.document.querySelector("#manual-tbody tr:nth-child(2)").textContent.replace(/\s+/g, " "));
   // 받은 것으로
-  w.document.querySelector('.manual-ep-checkbox[data-no="3"]').checked = true;
+  setChecked("manual-ep-checkbox", 3);
+  ok(shown("btn-manual-record-done") && shown("btn-manual-record-undone"), "네이버 선택하면 기록 버튼이 나타난다");
   const nBefore = analyzeCalls.naver; $("btn-manual-record-done").click(); await sleep(80);
   ok(/3화/.test(confirms[0]) && /여기까지 받음/.test(confirms[0]) && /받은 것으로/.test(confirms[0]), "네이버 확인 창: " + confirms[0]);
   ok(posts.length === 1 && JSON.stringify(posts[0][1]) === JSON.stringify({ title_id: "333", episode_nos: [3], downloaded: true }), "네이버 받은 것으로 요청: " + JSON.stringify(posts[0]));
@@ -92,12 +96,12 @@ const { makeApp, sleep, ok, done } = require("./harness");
   alerts.length = 0;
   // 받지 않은 것으로 + 폴더 경고
   naverRecordResponse = { previous: 3, last_downloaded_no: 0, marked: [1], ignored_locked: [], folder_last_no: 2, warning: "폴더에 2화까지 파일이 있어서 다음 실행에서 다시 2화까지 받은 것으로 인식됩니다(파일을 지우면 반영됩니다)." };
-  w.document.querySelectorAll(".manual-ep-checkbox").forEach((cb) => (cb.checked = false)); w.document.querySelector('.manual-ep-checkbox[data-no="1"]').checked = true;
+  w.document.querySelectorAll(".manual-ep-checkbox").forEach((cb) => (cb.checked = false)); setChecked("manual-ep-checkbox", 1);
   $("btn-manual-record-undone").click(); await sleep(80);
   ok(/1화부터/.test(confirms[1]) && /받을 대상/.test(confirms[1]), "네이버 확인 창(받지 않은 것으로): " + confirms[1]);
   ok(posts[1][1].downloaded === false && alerts.some((m) => /다시 2화까지/.test(m)), "네이버 경고 표시: " + alerts.join("|"));
   // 구독 안 함이면 기록 영역이 숨는다
   naver = { ...naver, subscription: null }; await analyze("333");
-  ok($("manual-record-actions").classList.contains("hidden"), "네이버 구독 안 함: 숨는다");
+  setChecked("manual-ep-checkbox", 1); ok(!shown("btn-manual-record-done") && !shown("btn-manual-record-undone"), "네이버 구독 안 함: 기록 버튼이 없다");
   done();
 })();
