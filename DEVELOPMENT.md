@@ -191,7 +191,7 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 ## 수동 다운로드 툴바와 전체목록 카드 버튼 정렬
 
 - **툴바(한 줄)**: 카카오는 `btn-kakao-manual-select-all` · `select-missing` · `record-select-all` · `select-none` · `download` · `record-done` · `record-undone` 일곱 개, 네이버는 `btn-manual-select-all` · `select-missing` · `select-none` · `download` · `record-done` · `record-undone` 여섯 개가 한 컨테이너(`.manual-actions`)에 이 순서로 있습니다. 처음에는 앞의 두세 개만 보이고(`refreshKakaoManualSelectionActions`/`refreshManualSelectionActions`가 `hidden`을 토글), **체크박스가 하나라도 켜지면**(표 `change` 이벤트, 또는 선택 버튼이 값을 바꾼 뒤 직접 호출) 나머지가 나타납니다. 기록 버튼과 `기록용 전체선택`은 구독 중(`subscription === "active"`)일 때만 보입니다. 버튼 줄 바로 아래의 `.manual-actions-hint`가 처음 버튼들의 안내이고, 숨겨진 버튼의 안내(`kakao-hint-select-missing`, `kakao-hint-record-select-all`)는 같이 숨깁니다. 네이버에는 "전체선택"이 이미 기록할 수 있는 회차를 모두 고르므로 `기록용 전체선택`이 없습니다. 테스트: `tests/js/test_manual_toolbar_layout.js`.
-- **전체목록 카드 정렬**: 같은 목록에 구독 중 카드(구독해제 / 제외됨으로 / 뷰어 아이콘 3줄)와 구독하지 않은 카드(구독 / 목록제외 2줄)가 섞여 있어서 카드 아래쪽 정렬에서 버튼이 한 줄씩 어긋났습니다. 뷰어 서버를 설정했으면 구독하지 않은 카드에도 `appendViewerSlotPlaceholder`가 보이지 않는 뷰어 자리(같은 `icon-btn`을 `hideViewerIcon`으로 숨김)를 붙여 모두 3줄로 맞춥니다(뷰어 서버가 없으면 모두 2줄). 자리는 `data-viewer-check-title`이 없어서 뷰어 확인 대상이 아닙니다. 테스트: `tests/js/test_card_action_alignment.js`.
+- **전체목록 카드 정렬**: 같은 목록에 구독 중 카드(구독해제 / 제외됨으로 / 뷰어 아이콘 3줄)와 구독하지 않은 카드(구독 / 목록제외 2줄)가 섞여 있어서 카드 아래쪽 정렬에서 버튼이 한 줄씩 어긋났습니다. **지금 보이는 목록 기준**으로 `syncViewerRows(grid)`가 맞춥니다: 뷰어 버튼이 실제로 보이는 카드가 하나라도 있으면 모든 카드를 3줄로 맞추고(아이콘이 없는 카드에는 `makeViewerSlotPlaceholder`의 보이지 않는 자리, 뷰어에 없는 작품의 숨긴 아이콘은 그대로 자리), 하나도 없으면 모두 2줄로 둡니다(자리를 지우고 숨긴 아이콘은 `display:none`) — "아직 미등록만"처럼 뷰어 버튼이 필요 없는 목록이나 뷰어 서버가 없을 때 쓸데없는 빈 줄이 생기지 않게 하려는 것입니다. 카드를 그린 직후(`renderNaverList`, 필터를 바꿀 때마다)와 뷰어 확인(`pruneMissingViewerIcons`)이 끝난 뒤에 다시 맞춥니다. 자리는 `data-viewer-slot`만 있고 `data-viewer-check-title`이 없어서 뷰어 확인 대상이 아닙니다. 테스트: `tests/js/test_card_action_alignment.js`.
 
 ## 의존성 업데이트 (코드 정리 2단계)
 
@@ -201,4 +201,13 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - **알려진 경고**: `discord.py`가 Python 3.12에서 `audioop` 지원 중단 경고를 냅니다. 기본 이미지(`python:3.12-slim`)를 3.13 이상으로 올릴 때만 문제이고(그때는 `audioop-lts` 필요), 지금은 영향이 없습니다.
 - **되돌리기**: 문제가 생기면 `requirements.txt`를 이전 고정 버전(위 "→" 왼쪽 값, starlette 줄 삭제)으로 되돌려 다시 빌드합니다.
 - **다시 점검하는 법**: 새 가상환경에 설치한 뒤 `pip freeze > freeze.txt; pip-audit -r freeze.txt`. 주기적으로(분기마다 등) 돌려서 새 공지가 있으면 같은 순서(가상환경 설치 → 전체 테스트 → 서버 시작 확인)로 올립니다.
+
+## 모듈 구조 (코드 정리 3단계)
+
+너무 커진 세 모듈(`kakao_page_download.py` 1042줄, `repository.py` 1312줄, `scheduler.py` 1121줄)을 같은 이름의 **패키지**로 바꿔서 역할별로 나눴습니다. `from app import repository`, `repository.get(...)`, `scheduler.create_scheduler()`처럼 **부르는 쪽은 그대로**입니다(`__init__.py`가 바깥에서 쓰는 이름을 다시 내보냅니다). 정의는 소스 그대로 옮겼고(동작 변경 없음) import는 도구로 만든 뒤 `pyflakes`로 확인했습니다. 의존 방향은 아래쪽이 위쪽을 모릅니다(순환 import 없음).
+
+- **`app/kakao_page_download/`**: `models.py`(상수, 데이터 모양, 폴더 규칙으로 받을 회차 정하기, 이름·만료 판정, 기다무/대여권 대상 판정 — 서버 통신과 실행이 없는 부분) → `client.py`(`KakaoPageClient`: 쿠키, 재시도, 회차 목록, 이용권, 이미지) → `runner.py`(회차 받기, 자동 번호순/수동 다운로드, 기다무·대여권, info.xml/표지 쓰기). 순수한 판정 함수(`rental_eligible`, `free_date_of`, `waitfree_supported`)는 `runner`가 아니라 `models`에 있습니다(`models`가 `runner`를 가져오면 순환 import).
+- **`app/repository/`**: `common.py`(상태/출처 상수, 현재 시각) · `naver_webtoons.py` · `settings.py` · `watchlist.py`(관심 작가/태그) · `kakao_webtoons.py` · `archive.py`(대상, 파일 이름 틀 프리셋, 이력, 완결 후 대기) · `history.py`(실행 이력, 회차 이력) · `backup.py`. DB 접근 도우미(`fetchone` 등)는 `app.db`에서 직접 가져옵니다 — `repository.fetchone`은 더 이상 없습니다.
+- **`app/scheduler/`**: `common.py`(작업별 기본 스케줄) · `naver_download.py` · `kakao_download.py` · `download_job.py`(네이버+카카오를 한 번에 돌리고 이력 정리/실패 알림) · `archive_job.py` · `report_job.py` · `discovery_job.py`(신작 스캔, 카카오 목록 갱신, 새로 완결된 작품 알림) · `schedule.py`(트리거 만들기, `create_scheduler`, `reschedule_all`).
+- **테스트에서 내부 이름을 바꿔치기할 때(monkeypatch)**: 함수를 **실제로 부르는 모듈**의 이름을 바꿔야 합니다. 패키지(`scheduler`, `repository`, `kakao_page_download`)의 이름을 바꾸면 그 이름을 패키지를 거쳐 부르는 다른 모듈(API, 스케줄러 등)에는 효과가 있지만, **같은 하위 모듈 안에서 부르는 함수에는 효과가 없습니다**(예: `scheduler.download_job._run_download_job_impl`, `scheduler.naver_download.download_single_episode`, `kakao_page_download.runner.write_series_metadata`). 효과 없는 바꿔치기는 조용히 지나가서 테스트가 실제 코드를 돌리다 멈출 수 있으니(`test_kp_schedule`이 그랬습니다), 바꿔치기가 먹혔는지는 결과 단언으로 확인합니다. 전역 모듈의 속성(`asyncio.sleep`, `kakao_cover.fetch_official_cover_bytes`, `cookie_health.finalize_and_notify` 등)은 그 모듈을 직접 바꿉니다.
 

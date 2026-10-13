@@ -73,15 +73,39 @@ function reconcileGrid(grid, rows, context, allRows) {
   return built;
 }
 
-// 구독하지 않은 카드에도 보이지 않는 뷰어 자리를 둔다(뷰어 서버가 있을 때만) — 같은 전체목록의 구독 중 카드(구독해제/제외됨으로/뷰어 아이콘 3줄)와 버튼 줄이 맞는다.
-// 구독 중 카드의 뷰어 아이콘과 같은 버튼이라 높이가 같고, 뷰어에 없는 작품의 아이콘을 숨길 때와 같은 방식(hideViewerIcon)으로 숨긴다. 뷰어 확인 대상(data-viewer-check-title)은 아니다.
-function appendViewerSlotPlaceholder(actions) {
-  if (!webtoonServerConfigured) return;
+// 전체목록의 버튼 줄 맞춤(지금 보이는 목록 기준) — 구독 중 카드는 "구독해제 / 제외됨으로 / 뷰어 아이콘" 3줄이고 구독하지 않은 카드는 "구독 / 목록제외" 2줄이라
+// 카드 아래쪽 정렬에서 버튼이 한 줄씩 어긋난다. 뷰어 버튼이 실제로 보이는 카드가 하나라도 있으면 모든 카드를 3줄로 맞추고(뷰어 버튼이 없는 카드에는 보이지 않는 자리),
+// 하나도 없으면 모든 카드를 2줄로 둔다("아직 미등록만" 목록이나 뷰어에 있는 작품이 없을 때 쓸데없는 빈 줄이 생기지 않게). 카드를 그리거나 뷰어 확인이 끝날 때마다 다시 맞춘다.
+function makeViewerSlotPlaceholder() {
+  // 구독 중 카드의 뷰어 아이콘과 같은 버튼이라 높이가 같고, 뷰어에 없는 작품의 아이콘을 숨길 때와 같은 방식(hideViewerIcon)으로 숨긴다. 뷰어 확인 대상(data-viewer-check-title)은 아니다.
   const slot = makeIconButton(READER_ICON_SVG, "", () => {});
   slot.removeAttribute("title");
   slot.removeAttribute("aria-label");
+  slot.dataset.viewerSlot = "placeholder";
   hideViewerIcon(slot);
-  actions.appendChild(slot);
+  return slot;
+}
+
+function syncViewerRows(grid) {
+  const actionsOf = (card) => card.querySelector(".webtoon-card-actions");
+  const isShown = (button) => button.style.visibility !== "hidden";
+  const cards = [...grid.querySelectorAll(":scope > .webtoon-card")];
+  const needRow = webtoonServerConfigured && cards.some((card) => {
+    const icon = actionsOf(card).querySelector("[data-viewer-check-title]");
+    return icon && isShown(icon);
+  });
+  for (const card of cards) {
+    const actions = actionsOf(card);
+    const icon = actions.querySelector("[data-viewer-check-title]");
+    const slot = actions.querySelector("[data-viewer-slot]");
+    if (icon) {
+      icon.style.display = needRow || isShown(icon) ? "" : "none"; // 숨겨진(뷰어에 없는) 아이콘은 빈 줄이 필요할 때만 자리를 차지한다
+    } else if (needRow && !slot) {
+      actions.appendChild(makeViewerSlotPlaceholder());
+    } else if (!needRow && slot) {
+      slot.remove();
+    }
+  }
 }
 
 function buildWebtoonCard(w, context) {
@@ -149,7 +173,6 @@ function buildWebtoonCard(w, context) {
       } else {
         actions.appendChild(makeButton("구독", () => webtoonListAction(w, "subscribe", "kakao", context)));
         actions.appendChild(makeButton("목록제외", () => webtoonListAction(w, "exclude", "kakao", context)));
-        appendViewerSlotPlaceholder(actions);
       }
     } else if (w.status === "active") {
       actions.appendChild(makeButton("구독해제", () => webtoonListAction(w, "unsubscribe", "naver", context)));
@@ -163,7 +186,6 @@ function buildWebtoonCard(w, context) {
     } else {
       actions.appendChild(makeButton("구독", () => webtoonListAction(w, "subscribe", "naver", context)));
       actions.appendChild(makeButton("목록제외", () => webtoonListAction(w, "exclude", "naver", context)));
-      appendViewerSlotPlaceholder(actions);
     }
   } else if (platform === "kakao") {
     // "구독해제"/"제외됨" 탭에 들어온 카카오 항목 — 네이버와 동일한 워크플로.

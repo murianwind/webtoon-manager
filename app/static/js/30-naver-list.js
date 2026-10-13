@@ -173,6 +173,7 @@ function renderNaverList() {
 
   emptyMsg.classList.toggle("hidden", rows.length > 0);
   const built = reconcileGrid(grid, rows, "naver-list", naverListCache);
+  syncViewerRows(grid); // 지금 보이는 목록 기준으로 버튼 줄 수를 맞춘다(필터를 바꿀 때마다)
   updateNaverListBulkBar(); // 남아 있는 카드의 체크 상태는 유지되므로, 선택 수만 다시 센다
   if (built > 0) {
     naverListBulkSelectStartScrollY = null; // 카드 구성이 바뀌었으니 "선택을 시작한 위치"도 다시 잡아야 함
@@ -224,6 +225,7 @@ async function pruneMissingViewerIcons() {
       }
     })
   );
+  syncViewerRows(document.getElementById("naver-list-grid")); // 뷰어에 있는 작품이 하나도 없으면 줄이 접힌다
 }
 
 function updateNaverListBulkBar() {
