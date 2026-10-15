@@ -243,6 +243,73 @@ class FilenamePresetIn(BaseModel):
         return v
 
 
+class FolderFavoriteIn(BaseModel):
+    dest_type: str  # local | rclone
+    root: str  # local이면 로컬 루트 이름(archive/download/kakao_download), rclone이면 원격 이름
+    path: str = ""
+    label: str = ""
+
+    @field_validator("dest_type")
+    @classmethod
+    def valid_dest_type(cls, v: str) -> str:
+        if v not in ("local", "rclone"):
+            raise ValueError("dest_type은 local 또는 rclone이어야 합니다.")
+        return v
+
+    @field_validator("root")
+    @classmethod
+    def valid_root(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("루트(원격 이름)가 비어 있습니다.")
+        return v
+
+    @field_validator("path")
+    @classmethod
+    def valid_path(cls, v: str) -> str:
+        parts = [p for p in v.replace("\\", "/").split("/") if p.strip()]
+        if ".." in parts:
+            raise ValueError("경로에 '..'를 쓸 수 없습니다.")
+        return "/".join(parts)  # 앞뒤 슬래시와 겹친 슬래시를 정리해서 같은 폴더는 같은 표기로
+
+    @field_validator("label")
+    @classmethod
+    def valid_label(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) > 60:
+            raise ValueError("이름은 60자 이하로 입력하세요.")
+        return v
+
+
+class FolderFavoriteOut(BaseModel):
+    id: str
+    label: str
+    dest_type: str
+    root: str
+    path: str
+
+
+@router.get("/archive/favorites", response_model=list[FolderFavoriteOut])
+async def list_folder_favorites():
+    return await asyncio.to_thread(repository.list_folder_favorites)
+
+
+@router.post("/archive/favorites", response_model=FolderFavoriteOut)
+async def add_folder_favorite(payload: FolderFavoriteIn):
+    """폴더 선택기의 "현재 폴더를 즐겨찾기에 추가". 같은 폴더면 기존 것을 돌려준다."""
+    try:
+        return await asyncio.to_thread(repository.add_folder_favorite, payload.dest_type, payload.root, payload.path, payload.label)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.delete("/archive/favorites/{favorite_id}")
+async def delete_folder_favorite(favorite_id: str):
+    if not await asyncio.to_thread(repository.delete_folder_favorite, favorite_id):
+        raise HTTPException(status_code=404, detail="그 즐겨찾기를 찾을 수 없습니다.")
+    return {"status": "ok"}
+
+
 @router.get("/archive/presets", response_model=list[FilenamePresetOut])
 async def list_filename_presets():
     presets = await asyncio.to_thread(repository.list_filename_template_presets)

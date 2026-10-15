@@ -175,6 +175,18 @@ select {
 .archive-option-card:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 .archive-option-title { font-weight: 600; font-size: 13px; }
 .archive-option-desc { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+/* 보관할 폴더 즐겨찾기(폴더 선택기) */
+.folder-favorites-row { margin-bottom: 10px; }
+.folder-favorites-title { margin: 0 0 6px; }
+.folder-favorites-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.folder-favorite-chip { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 999px; background: var(--card); overflow: hidden; }
+.folder-favorite-chip button { border: 0; background: transparent; border-radius: 0; font-size: 12px; padding: 4px 10px; }
+.folder-favorite-chip .folder-favorite-remove { padding: 4px 8px 4px 2px; color: var(--muted); }
+.folder-favorite-chip .folder-favorite-remove:hover { color: var(--danger); }
+.folder-favorite-chip-active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.folder-picker-path-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.folder-picker-path-row .folder-picker-path { flex: 1 1 auto; }
+.folder-favorite-star { font-size: 12px; white-space: nowrap; }
 .token-button-row {
   display: flex;
   flex-wrap: wrap;

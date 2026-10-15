@@ -1,3 +1,4 @@
+import json
 """아카이빙 대상, 파일 이름 틀 프리셋, 아카이빙 이력, 완결 후 대기 목록.
 """
 
@@ -9,6 +10,7 @@ from app.models import ArchiveTarget, FilenameTemplatePreset
 from app.repository.common import (
     _now,
 )
+from app.repository.settings import get_setting, set_setting
 
 def list_archive_file_names(title_id: str) -> list[str]:
     """이 아카이빙 대상(웹툰은 title_id, 카카오는 "kakao_<번호>")으로 옮긴 파일 이름들 — 이력 한 줄이 파일 하나다."""
@@ -229,3 +231,50 @@ def delete_archive_history_older_than(days: int) -> int:
     with write_transaction() as conn:
         cursor = conn.execute("DELETE FROM archive_history WHERE archived_at < ?", (cutoff,))
         return cursor.rowcount
+
+
+# ── 보관할 폴더 즐겨찾기 — 폴더 선택기에서 자주 쓰는 폴더를 버튼으로 바로 여는 기능(설정 테이블에 JSON으로 저장되어 백업/복원에 함께 들어간다) ──
+FOLDER_FAVORITES_KEY = "archive_folder_favorites"
+MAX_FOLDER_FAVORITES = 30
+
+
+def list_folder_favorites() -> list[dict]:
+    """등록한 즐겨찾기를 추가한 순서대로. 저장된 값이 깨져 있으면(수동 편집 등) 빈 목록."""
+    raw = get_setting(FOLDER_FAVORITES_KEY)
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return []
+    return [f for f in data if isinstance(f, dict) and f.get("id")] if isinstance(data, list) else []
+
+
+def _default_favorite_label(dest_type: str, root: str, path: str) -> str:
+    name = path.split("/")[-1] if path else "최상위"
+    return f"{'로컬' if dest_type == 'local' else root} · {name}"
+
+
+def add_folder_favorite(dest_type: str, root: str, path: str, label: str = "") -> dict:
+    """즐겨찾기를 추가하고 돌려준다. 같은 폴더(종류+루트+경로)가 이미 있으면 새로 만들지 않고 기존 것을 돌려준다. 최대 개수를 넘으면 ValueError."""
+    import uuid
+
+    favorites = list_folder_favorites()
+    for existing in favorites:
+        if (existing.get("dest_type"), existing.get("root"), existing.get("path")) == (dest_type, root, path):
+            return existing
+    if len(favorites) >= MAX_FOLDER_FAVORITES:
+        raise ValueError(f"즐겨찾기는 최대 {MAX_FOLDER_FAVORITES}개까지 등록할 수 있습니다. 안 쓰는 것을 지우고 다시 추가하세요.")
+    favorite = {"id": uuid.uuid4().hex[:12], "label": label or _default_favorite_label(dest_type, root, path), "dest_type": dest_type, "root": root, "path": path}
+    set_setting(FOLDER_FAVORITES_KEY, json.dumps(favorites + [favorite], ensure_ascii=False))
+    return favorite
+
+
+def delete_folder_favorite(favorite_id: str) -> bool:
+    """즐겨찾기 하나를 지운다(나머지 순서 유지). 없는 번호면 False."""
+    favorites = list_folder_favorites()
+    kept = [f for f in favorites if f.get("id") != favorite_id]
+    if len(kept) == len(favorites):
+        return False
+    set_setting(FOLDER_FAVORITES_KEY, json.dumps(kept, ensure_ascii=False))
+    return True

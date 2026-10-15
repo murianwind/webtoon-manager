@@ -24,6 +24,108 @@ async function getArchiveSettingsCached() {
   return _archiveSettingsCache;
 }
 
+// 보관할 폴더 즐겨찾기 — 보관(목적지) 쪽 선택기에만 보인다(원본/미리보기 선택기는 "보관할 폴더"가 아니라서 제외).
+const FAVORITE_PICKER_IDS = new Set(["archive-target-folder-picker", "archive-folder-target-dest-picker", "archive-default-folder-picker", "bulk-move-dest-picker"]);
+const FAVORITE_LOCAL_ROOT_LABELS = { archive: "보관 폴더", download: "다운로드 폴더", kakao_download: "카카오 다운로드 폴더" };
+let _archiveFavoritesCache = null;
+
+async function getArchiveFavoritesCached() {
+  if (!_archiveFavoritesCache) {
+    _archiveFavoritesCache = apiCall("/api/archive/favorites").catch((e) => {
+      _archiveFavoritesCache = null; // 실패는 기억하지 않는다(다음에 다시 시도)
+      throw e;
+    });
+  }
+  return _archiveFavoritesCache;
+}
+
+function invalidateArchiveFavorites() {
+  _archiveFavoritesCache = null;
+}
+
+function favoriteFullPath(fav) {
+  return fav.dest_type === "rclone" ? `${fav.root}:/${fav.path}` : `${FAVORITE_LOCAL_ROOT_LABELS[fav.root] || fav.root} /${fav.path}`;
+}
+
+// 선택기 위쪽의 즐겨찾기 버튼 줄. 누르면 원격/루트 고르기를 건너뛰고 그 폴더의 목록이 바로 열린다. 지금 환경에서 못 여는 것(로컬이 없거나 이 선택기가 쓰지 않는 루트)은 뺀다.
+// 목록 화면의 "현재 폴더를 즐겨찾기에 추가" 버튼 — 이미 즐겨찾기한 폴더면 "즐겨찾기됨"(다시 누르면 삭제)
+async function makeFolderFavoriteStar(containerId, state, isRclone, currentPath, onSelect) {
+  const destType = isRclone ? "rclone" : "local";
+  const root = isRclone ? state.remote : state.localRoot;
+  let existing = null;
+  try {
+    existing = (await getArchiveFavoritesCached()).find((f) => f.dest_type === destType && f.root === root && f.path === currentPath) || null;
+  } catch (e) {
+    // 못 불러와도 추가는 시도할 수 있게 둔다
+  }
+  const star = makeButton(existing ? "★ 즐겨찾기됨" : "☆ 현재 폴더를 즐겨찾기에 추가", async () => {
+    try {
+      if (existing) {
+        await apiCall(`/api/archive/favorites/${encodeURIComponent(existing.id)}`, { method: "DELETE" });
+      } else {
+        await apiCall("/api/archive/favorites", { method: "POST", body: JSON.stringify({ dest_type: destType, root, path: currentPath }) });
+      }
+      invalidateArchiveFavorites();
+      renderFolderPickerContents(containerId, onSelect);
+    } catch (e) {
+      alert(e.message);
+    }
+  });
+  star.className = "folder-favorite-star";
+  return star;
+}
+
+async function renderFolderFavoritesRow(container, containerId, state, archiveSettings, onSelect) {
+  let favorites = [];
+  try {
+    favorites = await getArchiveFavoritesCached();
+  } catch (e) {
+    return; // 즐겨찾기를 못 불러와도 선택기 자체는 그대로 쓸 수 있다
+  }
+  favorites = favorites.filter((f) => (f.dest_type === "rclone" ? archiveSettings.rclone_available : archiveSettings.local_available && state.localRoots.includes(f.root)));
+  if (favorites.length === 0) return;
+  const row = document.createElement("div");
+  row.className = "folder-favorites-row";
+  const title = document.createElement("p");
+  title.className = "hint-inline folder-favorites-title";
+  title.textContent = "★ 즐겨찾기 — 누르면 그 폴더의 목록이 바로 열립니다";
+  row.appendChild(title);
+  const chips = document.createElement("div");
+  chips.className = "folder-favorites-chips";
+  for (const fav of favorites) {
+    const chip = document.createElement("span");
+    chip.className = "folder-favorite-chip";
+    chip.title = favoriteFullPath(fav);
+    const here = state.modeConfirmed && state.mode === fav.dest_type && (fav.dest_type === "rclone" ? state.remote === fav.root : state.localRoot === fav.root) && (state.path || "") === fav.path;
+    if (here) chip.classList.add("folder-favorite-chip-active");
+    const nameBtn = makeButton(fav.label, () => {
+      archiveFolderPickerState[containerId] = {
+        ...state, mode: fav.dest_type, remote: fav.dest_type === "rclone" ? fav.root : "", localRoot: fav.dest_type === "local" ? fav.root : state.localRoot,
+        path: fav.path, expanded: true, modeConfirmed: true, rootConfirmed: true,
+      };
+      renderFolderPickerContents(containerId, onSelect);
+    });
+    nameBtn.className = "folder-favorite-name";
+    const removeBtn = makeButton("✕", async () => {
+      try {
+        await apiCall(`/api/archive/favorites/${encodeURIComponent(fav.id)}`, { method: "DELETE" });
+        invalidateArchiveFavorites();
+        renderFolderPickerContents(containerId, onSelect);
+      } catch (e) {
+        alert(e.message);
+      }
+    });
+    removeBtn.className = "folder-favorite-remove";
+    removeBtn.title = "즐겨찾기에서 삭제";
+    removeBtn.setAttribute("aria-label", "즐겨찾기에서 삭제");
+    chip.appendChild(nameBtn);
+    chip.appendChild(removeBtn);
+    chips.appendChild(chip);
+  }
+  row.appendChild(chips);
+  container.appendChild(row);
+}
+
 // 같은 이름 파일 처리(라디오) 값 읽고 쓰기
 function getArchiveConflictPolicy() {
   const checked = document.querySelector('input[name="archive-conflict-policy"]:checked');
@@ -91,6 +193,8 @@ async function renderFolderPicker(containerId, onSelect, initialPath, options) {
   // 어느 루트(ARCHIVE_ROOT/DOWNLOAD_ROOT) 기준으로 찾아볼지 전환 버튼이 뜬다.
   // 안 주면(기존 모든 선택기) 항상 ARCHIVE_ROOT 하나만 쓰는 예전 동작 그대로다.
   const localRoots = (options && options.localRoots) || ["archive"];
+  // options.favorites: 즐겨찾기 버튼 줄과 별 버튼을 쓸지. 안 주면 보관(목적지) 선택기만 켠다(FAVORITE_PICKER_IDS).
+  const favorites = options && options.favorites !== undefined ? !!options.favorites : FAVORITE_PICKER_IDS.has(containerId);
 
   // sessionStorage는 이 브라우저 탭 안에서만 살아있고, 탭을 닫으면(다른 브라우저
   // 탭으로 이동하는 것과는 다름) 자동으로 사라진다 — 그래서 같은 탭 안에서 다른
@@ -102,6 +206,7 @@ async function renderFolderPicker(containerId, onSelect, initialPath, options) {
     // 어떻게 동작해야 하는지"를 정하는 호출자 쪽 설정이므로, 저장된 탐색 상태를
     // 복원하더라도 매번 호출 시점 값으로 다시 맞춘다(상태 저장/복원 대상이 아님).
     saved.skipExistingCheck = skipExistingCheck;
+    saved.favorites = favorites;
     saved.localRoots = localRoots;
     if (!saved.localRoot) saved.localRoot = localRoots[0];
     // 아직 고른 게 없으면 펼친 채로 시작해서 로컬/rclone부터 바로 보이게 한다 —
@@ -127,7 +232,7 @@ async function renderFolderPicker(containerId, onSelect, initialPath, options) {
     // 조용히 무시하고 기본값(local)으로 진행 — 아래에서 다시 확인하고 에러 표시함
   }
   archiveFolderPickerState[containerId] = {
-    mode: startMode, path: initialPath || "", remote: "", skipExistingCheck, localRoots, localRoot: localRoots[0],
+    mode: startMode, path: initialPath || "", remote: "", skipExistingCheck, favorites, localRoots, localRoot: localRoots[0],
     expanded: true, modeConfirmed: false, rootConfirmed: false,
   };
   renderFolderPickerContents(containerId, onSelect);
@@ -194,6 +299,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
     return;
   }
   container.innerHTML = "";
+  if (state.favorites) await renderFolderFavoritesRow(container, containerId, state, archiveSettings, onSelect);
 
   // 모드 전환 버튼은 이 함수 안에서 무슨 일이 있어도(목록 조회가 실패하더라도)
   // 항상 살아있어야 한다 — 로컬이 미설정이라 목록 조회가 실패해도, 최소한
@@ -216,7 +322,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
         return;
       }
       archiveFolderPickerState[containerId] = {
-        mode: "local", path: "", remote: "", skipExistingCheck: state.skipExistingCheck,
+        mode: "local", path: "", remote: "", skipExistingCheck: state.skipExistingCheck, favorites: state.favorites,
         localRoots: state.localRoots, localRoot: state.localRoots[0], expanded: true,
         modeConfirmed: true, rootConfirmed: false,
       };
@@ -229,7 +335,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
         return;
       }
       archiveFolderPickerState[containerId] = {
-        mode: "rclone", path: "", remote: "", skipExistingCheck: state.skipExistingCheck,
+        mode: "rclone", path: "", remote: "", skipExistingCheck: state.skipExistingCheck, favorites: state.favorites,
         localRoots: state.localRoots, localRoot: state.localRoots[0], expanded: true,
         modeConfirmed: true, rootConfirmed: false,
       };
@@ -289,7 +395,7 @@ async function renderFolderPickerContents(containerId, onSelect) {
   const backToStartBtn = () =>
     makeButton("⬅ 처음으로 돌아가기", () => {
       archiveFolderPickerState[containerId] = {
-        mode: state.mode, path: "", remote: "", skipExistingCheck: state.skipExistingCheck,
+        mode: state.mode, path: "", remote: "", skipExistingCheck: state.skipExistingCheck, favorites: state.favorites,
         localRoots: state.localRoots, localRoot: state.localRoot, expanded: true,
         modeConfirmed: state.modeConfirmed, rootConfirmed: state.rootConfirmed,
       };
@@ -348,7 +454,15 @@ async function renderFolderPickerContents(containerId, onSelect) {
     const pathRow = document.createElement("div");
     pathRow.className = "folder-picker-path";
     pathRow.textContent = isRclone ? `현재 위치: ${state.remote}:/${currentPath}` : `현재 위치: /${currentPath}`;
-    listArea.appendChild(pathRow);
+    if (state.favorites) {
+      const pathWrap = document.createElement("div");
+      pathWrap.className = "folder-picker-path-row";
+      pathWrap.appendChild(pathRow);
+      pathWrap.appendChild(await makeFolderFavoriteStar(containerId, state, isRclone, currentPath, onSelect));
+      listArea.appendChild(pathWrap);
+    } else {
+      listArea.appendChild(pathRow);
+    }
 
     const listBox = document.createElement("div");
     listBox.className = "folder-picker-list";
