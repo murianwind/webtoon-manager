@@ -554,60 +554,6 @@
     </div>
     <div id="archive-main-content">
     <div class="settings-card">
-      <h2>아카이빙 공통 설정</h2>
-      <p class="hint">같은 이름 파일 처리는 주기 이동, 수동 이동, 완결 자동이동, 폴더 일괄 이동 전부에 공통으로 적용됩니다.
-      (단, 완결 자동이동에서 info.xml/커버 이미지는 이 설정과 무관하게 항상 덮어씁니다.)</p>
-      <div class="field-group">
-        <label for="archive-conflict-policy">같은 이름 파일이 이미 있으면</label>
-        <select id="archive-conflict-policy">
-          <option value="skip">건너뛰기</option>
-          <option value="overwrite">덮어쓰기</option>
-          <option value="rename">이름 바꿔서 저장</option>
-        </select>
-      </div>
-      <button id="btn-save-archive-settings">저장</button>
-      <span id="archive-settings-save-result" class="hint-inline"></span>
-
-      <div class="field-group">
-        <label>파일명 변경 프리셋</label>
-        <p class="hint">여러 스타일을 저장해두고, 아래 "아카이빙 대상"에서 웹툰/폴더마다 골라 적용할 수 있습니다.
-        폴더 일괄 이동에서는 프리셋을 선택했을 때만 적용됩니다(아래 "폴더 일괄 이동" 카드에서 고를 수 있습니다). info.xml/커버 이미지에는 적용되지 않습니다(회차 개념이 없어서).</p>
-        <div class="registry-add-row">
-          <select id="archive-preset-select"></select>
-          <button id="btn-new-preset" type="button">새 프리셋</button>
-          <button id="btn-delete-preset" type="button">삭제</button>
-        </div>
-      </div>
-
-      <div class="field-group">
-        <label>선택한 프리셋 편집 (회차 zip 파일에만 적용, 비워두면 원본 파일명 그대로)</label>
-        <p class="hint">아래 토큰 버튼을 눌러 원하는 순서로 자유롭게 조합하세요. 토큰 사이에 원하는 글자(구분자 등)를 직접 입력할 수 있습니다.
-        확장자(.zip)는 자동으로 붙습니다. 파일명 구조를 알아볼 수 없는 파일(수동으로 넣은 파일 등)은 이 설정과 무관하게 원본 파일명 그대로 이동됩니다.</p>
-        <div id="archive-filename-template-tokens" class="token-button-row">
-          <button type="button" class="token-btn" data-token="{title}">웹툰명</button>
-          <button type="button" class="token-btn" data-token="{episode_no}">회차</button>
-          <button type="button" class="token-btn" data-token="{subtitle}">부제목</button>
-          <button type="button" class="token-btn" data-token="{page_count}">페이지수</button>
-          <button type="button" class="token-btn" data-token="{author}">작가</button>
-        </div>
-        <input id="archive-filename-template" type="text" class="text-input-full" placeholder="예: {title} {episode_no}화 - {subtitle}#{page_count}" />
-        <button id="btn-save-preset" style="margin-top: 10px;">이 프리셋 저장</button>
-        <span id="archive-preset-save-result" class="hint-inline"></span>
-      </div>
-
-      <div class="field-group">
-        <label>실제 파일로 미리보기</label>
-        <div class="archive-target-type-tabs" style="margin-bottom: 8px;">
-          <button type="button" class="archive-preview-type-tab active" data-type="webtoon">웹툰 (다운로드 폴더)</button>
-          <button type="button" class="archive-preview-type-tab" data-type="folder">폴더 (보관 폴더)</button>
-        </div>
-        <select id="archive-filename-template-preview-title"></select>
-        <div id="archive-filename-template-preview-folder-picker" class="hidden"></div>
-        <p id="archive-filename-template-preview" class="hint-inline"></p>
-      </div>
-    </div>
-
-    <div class="settings-card">
       <h2>아카이빙 대상</h2>
       <p class="hint">지정한 대상은 정해진 주기마다(마지막 회차는 남기고) 아래 그릇 폴더로 옮겨집니다. 웹툰은 다운로드 폴더에서,
       폴더는 지정한 원본 경로에서 가져옵니다. 여러 대상이 같은 그릇 폴더를 고르면 자동으로 대상별 폴더로 나뉘고,
@@ -657,12 +603,75 @@
       <div id="archive-target-list" class="job-history-list job-history-list-compact" style="margin-top: 14px;"></div>
     </div>
 
+
+    <div class="settings-card">
+      <h2>아카이빙 공통 설정</h2>
+      <p class="hint">정기 이동, 수동 이동, 완결 자동이동, 폴더 일괄 이동 <strong>모두에 똑같이 적용</strong>되는 규칙입니다. 대상마다 따로 정하는 것(보관할 폴더, 파일명 프리셋)은 위의 "아카이빙 대상"에서 합니다.</p>
+
+      <div class="archive-common-section">
+        <h3>같은 이름 파일 처리</h3>
+        <p class="hint">보관할 폴더에 같은 이름의 파일이 이미 있을 때 어떻게 할지 고르세요.</p>
+        <div class="archive-option-row" role="radiogroup" aria-label="같은 이름 파일 처리">
+          <label class="archive-option-card"><input type="radio" name="archive-conflict-policy" value="skip" /><span class="archive-option-title">건너뛰기</span><span class="archive-option-desc">기존 파일을 그대로 두고 새 파일은 옮기지 않습니다(새 파일은 다운로드 폴더에 남습니다).</span></label>
+          <label class="archive-option-card"><input type="radio" name="archive-conflict-policy" value="overwrite" /><span class="archive-option-title">덮어쓰기</span><span class="archive-option-desc">기존 파일을 새 파일로 교체합니다.</span></label>
+          <label class="archive-option-card"><input type="radio" name="archive-conflict-policy" value="rename" /><span class="archive-option-title">이름 바꿔서 저장</span><span class="archive-option-desc">기존 파일은 두고 새 파일은 이름 뒤에 번호를 붙여(예: 0001_1화 (2).zip) 함께 보관합니다.</span></label>
+        </div>
+        <button id="btn-save-archive-conflict">저장</button>
+        <span id="archive-conflict-save-result" class="hint-inline"></span>
+        <p class="hint">완결 자동이동에서 info.xml과 표지 이미지는 이 설정과 상관없이 항상 덮어씁니다.</p>
+      </div>
+
+      <div class="archive-common-section">
+        <h3>파일명 변경 설정</h3>
+        <p class="hint">보관할 때 회차 zip 파일의 이름을 원하는 모양으로 바꿉니다. 여러 모양(프리셋)을 만들어 두고 "아카이빙 대상"에서 웹툰/폴더마다 골라 적용합니다.</p>
+      <div class="field-group">
+        <label>파일명 변경 프리셋</label>
+        <p class="hint">여러 스타일을 저장해두고, 아래 "아카이빙 대상"에서 웹툰/폴더마다 골라 적용할 수 있습니다.
+        폴더 일괄 이동에서는 프리셋을 선택했을 때만 적용됩니다(아래 "폴더 일괄 이동" 카드에서 고를 수 있습니다). info.xml/커버 이미지에는 적용되지 않습니다(회차 개념이 없어서).</p>
+        <div class="registry-add-row">
+          <select id="archive-preset-select"></select>
+          <button id="btn-new-preset" type="button">새 프리셋</button>
+          <button id="btn-delete-preset" type="button">삭제</button>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <label>선택한 프리셋 편집 (회차 zip 파일에만 적용, 비워두면 원본 파일명 그대로)</label>
+        <p class="hint">아래 토큰 버튼을 눌러 원하는 순서로 자유롭게 조합하세요. 토큰 사이에 원하는 글자(구분자 등)를 직접 입력할 수 있습니다.
+        확장자(.zip)는 자동으로 붙습니다. 파일명 구조를 알아볼 수 없는 파일(수동으로 넣은 파일 등)은 이 설정과 무관하게 원본 파일명 그대로 이동됩니다.</p>
+        <div id="archive-filename-template-tokens" class="token-button-row">
+          <button type="button" class="token-btn" data-token="{title}">웹툰명</button>
+          <button type="button" class="token-btn" data-token="{episode_no}">회차</button>
+          <button type="button" class="token-btn" data-token="{subtitle}">부제목</button>
+          <button type="button" class="token-btn" data-token="{page_count}">페이지수</button>
+          <button type="button" class="token-btn" data-token="{author}">작가</button>
+        </div>
+        <input id="archive-filename-template" type="text" class="text-input-full" placeholder="예: {title} {episode_no}화 - {subtitle}#{page_count}" />
+        <button id="btn-save-preset" style="margin-top: 10px;">이 프리셋 저장</button>
+        <span id="archive-preset-save-result" class="hint-inline"></span>
+      </div>
+
+      <div class="field-group">
+        <label>실제 파일로 미리보기</label>
+        <div class="archive-target-type-tabs" style="margin-bottom: 8px;">
+          <button type="button" class="archive-preview-type-tab active" data-type="webtoon">웹툰 (다운로드 폴더)</button>
+          <button type="button" class="archive-preview-type-tab" data-type="folder">폴더 (보관 폴더)</button>
+        </div>
+        <select id="archive-filename-template-preview-title"></select>
+        <div id="archive-filename-template-preview-folder-picker" class="hidden"></div>
+        <p id="archive-filename-template-preview" class="hint-inline"></p>
+      </div>
+      </div>
+    </div>
+
     <div class="settings-card">
       <h2>완결 자동이동 설정</h2>
       <label class="checkbox-label"><input type="checkbox" id="archive-on-finish-toggle" /> 완결된 웹툰을 구독해제하면 자동으로 전체 이동</label>
-      <p class="hint">구독해제하는 즉시가 아니라, "설정" 탭의 "실행 스케줄"이 돌 때 함께 처리됩니다. 지정 안 된 웹툰이 이 조건으로 트리거되면 "기본 그릇 폴더"를 씁니다 (지정된 웹툰은 자기 폴더로).</p>
+      <p class="hint">구독해제하는 즉시가 아니라, "설정" 탭의 "실행 스케줄"이 돌 때 함께 처리됩니다. 마지막 회차까지 전부 옮기고, <strong>이동이 끝나면 그 웹툰의 아카이빙 설정은 "아카이빙 대상"에서 삭제</strong>됩니다(일부 실패하면 다시 시도할 수 있게 남겨 둡니다). 대상으로 지정하지 않은 웹툰은 아래 "기본 그릇 폴더"로 옮겨집니다(지정된 웹툰은 자기 폴더로).</p>
       <label class="field-label">지정 안 된 웹툰이 쓸 기본 그릇 폴더</label>
       <div id="archive-default-folder-picker"></div>
+      <button id="btn-save-archive-finish" style="margin-top: 10px;">저장</button>
+      <span id="archive-finish-save-result" class="hint-inline"></span>
     </div>
 
     <div class="settings-card">

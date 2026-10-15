@@ -74,7 +74,9 @@ async def main():
         moved = archiver.manual_archive_now(st.archive_root, str(naver_root), ["kakao_61641075"], "", None, True, str(kakao_root))
         assert moved >= 1 and not list(kfolder.glob("*.zip"))                                                        # 3화까지 전부
         assert not kfolder.exists() or all(p.name in ("info.xml", "cover.jpg") for p in kfolder.iterdir()), sorted(p.name for p in kfolder.iterdir())   # 폴더에는 zip이 남지 않는다
-        print("6) 수동 완결 처리 OK (마지막 회차까지 이동)")
+        assert repository.get_archive_target("kakao_61641075") is None            # 문제없이 끝났으니 이 작품의 아카이빙 대상 설정은 삭제된다
+        r = await c.post("/api/archive/targets", json={"title_id": "kakao_61641075", "dest_base_path": dest, "dest_type": "local"}); assert r.status_code == 200    # 아래 7번을 위해 다시 등록
+        print("6) 수동 완결 처리 OK (마지막 회차까지 이동, 끝나면 대상 설정 삭제)")
 
         # ── 7. API 수동 실행 경로에서도 카카오 폴더를 쓴다 ──
         zipfile_(kfolder, "0004_4화.zip"); zipfile_(kfolder, "0005_5화.zip")

@@ -222,28 +222,43 @@ def manual_archive_now(
         if target is None:
             continue
         if target.source_type == "folder":
+            folder_failures: list = []
             total += _archive_folder_target(
                 target, policy, rclone_config_path, archive_root, keep_last=not full_move,
-                progress_callback=progress_callback,
+                progress_callback=progress_callback, failure_log=folder_failures,
             )
+            if full_move:
+                _delete_target_after_full_move(title_id, target.display_name or title_id, not folder_failures, ProgressReport(progress_callback))
             continue
         source = resolve_webtoon_source(title_id)
         if source is None:
             continue
         root = (kakao_download_root or download_root) if source.kakao else download_root
+        own_failures: list = []
+        report = ProgressReport(progress_callback, None, own_failures)
         total += _archive_title(
             TitleArchiveJob(
                 archive_root=archive_root, download_root=root, title_id=title_id, title_name=source.title, base_path=target.dest_base_path,
                 policy=policy, trigger_type=trigger_type, keep_last=not full_move, dest_type=target.dest_type, rclone_config_path=rclone_config_path,
                 writer_names=source.writer_names, filename_template_preset_id=target.filename_template_preset_id, kakao=source.kakao,
             ),
-            ProgressReport(progress_callback),
+            report,
         )
         if full_move:
-            _cleanup_empty_dirs(_title_folder(root, source.title, source.kakao))
-            if progress_callback:
-                progress_callback(f"[{source.title}] 완결 처리 — 다운로드 폴더 정리 확인")
+            title_dir = _title_folder(root, source.title, source.kakao)
+            _cleanup_empty_dirs(title_dir)
+            report.progress(f"[{source.title}] 완결 처리 — 다운로드 폴더 정리 확인")
+            _delete_target_after_full_move(title_id, source.title, not own_failures and not title_dir.exists(), report)
     return total
+
+
+def _delete_target_after_full_move(title_id: str, title_name: str, completed: bool, report: ProgressReport) -> None:
+    """완결 전체 이동이 문제없이 끝났으면(실패가 없고 원본 쪽이 정리됨) 그 대상의 아카이빙 설정을 삭제한다 — 더 옮길 게 없는 설정이 대상 목록과
+    아카이빙 수동 실행 목록에 남지 않게. 일부 실패했거나 파일이 남았거나 보관 위치가 모자라 못 옮겼으면 설정을 남겨서 다시 시도할 수 있게 한다."""
+    if not completed or repository.get_archive_target(title_id) is None:
+        return
+    repository.delete_archive_target(title_id)
+    report.progress(f"[{title_name}] 완결 처리 완료 — 아카이빙 대상에서 삭제했습니다")
 
 
 def process_pending_finish_archives(
@@ -276,17 +291,23 @@ def process_pending_finish_archives(
                 continue
 
         policy = get_conflict_policy()
+        own_failures: list = []  # 이번 작품의 이동 실패만 따로 모아서, 문제없이 끝났는지 판단하고 호출부 목록에도 그대로 전달한다
+        report = ProgressReport(progress_callback, conflict_log, own_failures)
         total += _archive_title(
             TitleArchiveJob(
                 archive_root=archive_root, download_root=root, title_id=title_id, title_name=source.title, base_path=base_path, policy=policy,
                 trigger_type="finish_unsubscribe", keep_last=False, dest_type=dest_type, rclone_config_path=rclone_config_path,
                 writer_names=source.writer_names, filename_template_preset_id=target.filename_template_preset_id if target else None, kakao=source.kakao,
             ),
-            ProgressReport(progress_callback, conflict_log, failure_log),
+            report,
         )
         # 완결 전체이동은 마지막 파일도 예외 없이 옮기므로, 다 옮기고 나면 다운로드
         # 쪽 웹툰 폴더엔 아무 것도 안 남는 게 정상이다 — 파일이 하나라도 남아있으면
         # (예: 이동 중 일부 실패) 안전하게 그대로 두고, 완전히 비었을 때만 지운다.
-        _cleanup_empty_dirs(_title_folder(root, source.title, source.kakao))
+        title_dir = _title_folder(root, source.title, source.kakao)
+        _cleanup_empty_dirs(title_dir)
+        if failure_log is not None:
+            failure_log.extend(own_failures)
+        _delete_target_after_full_move(title_id, source.title, not own_failures and not title_dir.exists(), report)
         repository.remove_pending_finish_archive(title_id)
     return total

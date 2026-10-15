@@ -166,6 +166,15 @@ select {
   color: var(--muted);
   margin: 6px 0 4px;
 }
+/* 아카이빙 공통 설정: 부분(같은 이름 파일 처리 / 파일명 변경 설정)과 설명이 붙은 선택지 */
+.archive-common-section { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+.archive-common-section h3 { margin: 0 0 4px; font-size: 14px; }
+.archive-option-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0 10px; }
+.archive-option-card { flex: 1 1 200px; display: block; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; background: var(--card); }
+.archive-option-card input { margin-right: 6px; }
+.archive-option-card:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.archive-option-title { font-weight: 600; font-size: 13px; }
+.archive-option-desc { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); line-height: 1.5; }
 .token-button-row {
   display: flex;
   flex-wrap: wrap;

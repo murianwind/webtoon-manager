@@ -89,18 +89,8 @@ document.getElementById("btn-save-preset").addEventListener("click", async () =>
       await apiCall(`/api/archive/presets/${presetId}`, { method: "POST", body: JSON.stringify({ name: preset.name, template }) });
     } else {
       // "기본(전역)" 편집 중 저장 -> 전역 설정에 반영 (기존 저장 방식 그대로)
-      await apiCall("/api/archive/settings", {
-        method: "POST",
-        body: JSON.stringify({
-          default_base_path: archiveSelectedDefaultPath || "",
-          default_dest_type: archiveSelectedDefaultDestType,
-          conflict_policy: document.getElementById("archive-conflict-policy").value,
-          on_finish_unsubscribe: document.getElementById("archive-on-finish-toggle").checked,
-          filename_template: template,
-        }),
-      });
+      await saveArchiveSettings({ filename_template: template });
       archiveGlobalFilenameTemplate = template;
-      invalidateArchiveCaches();
     }
     await loadFilenamePresets();
     document.getElementById("archive-preset-select").value = presetId;

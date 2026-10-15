@@ -181,7 +181,7 @@ async function loadArchiveSettings() {
   try {
     const data = await getArchiveSettingsCached();
     document.getElementById("archive-on-finish-toggle").checked = data.on_finish_unsubscribe;
-    document.getElementById("archive-conflict-policy").value = data.conflict_policy;
+    setArchiveConflictPolicy(data.conflict_policy);
     archiveGlobalFilenameTemplate = data.filename_template || "";
     document.getElementById("archive-filename-template").value = archiveGlobalFilenameTemplate;
     await loadArchiveTemplatePreviewTitleList();
@@ -299,21 +299,29 @@ document.querySelectorAll("#archive-filename-template-tokens .token-btn").forEac
   });
 });
 
-document.getElementById("btn-save-archive-settings").addEventListener("click", async () => {
-  const resultEl = document.getElementById("archive-settings-save-result");
+// 같은 이름 파일 처리 저장(이 항목만)
+document.getElementById("btn-save-archive-conflict").addEventListener("click", async () => {
+  const resultEl = document.getElementById("archive-conflict-save-result");
   resultEl.textContent = "";
   try {
-    await apiCall("/api/archive/settings", {
-      method: "POST",
-      body: JSON.stringify({
-        default_base_path: archiveSelectedDefaultPath || "",
-        default_dest_type: archiveSelectedDefaultDestType,
-        conflict_policy: document.getElementById("archive-conflict-policy").value,
-        on_finish_unsubscribe: document.getElementById("archive-on-finish-toggle").checked,
-        filename_template: archiveGlobalFilenameTemplate,
-      }),
+    await saveArchiveSettings({ conflict_policy: getArchiveConflictPolicy() });
+    resultEl.style.color = "";
+    resultEl.textContent = "저장했습니다.";
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+});
+
+// 완결 자동이동 설정 저장(켜고 끄기 + 기본 그릇 폴더만)
+document.getElementById("btn-save-archive-finish").addEventListener("click", async () => {
+  const resultEl = document.getElementById("archive-finish-save-result");
+  resultEl.textContent = "";
+  try {
+    await saveArchiveSettings({
+      on_finish_unsubscribe: document.getElementById("archive-on-finish-toggle").checked,
+      default_base_path: archiveSelectedDefaultPath || "",
+      default_dest_type: archiveSelectedDefaultDestType,
     });
-    invalidateArchiveCaches();
     resultEl.style.color = "";
     resultEl.textContent = "저장했습니다.";
   } catch (e) {
@@ -357,7 +365,7 @@ document.getElementById("btn-run-archive-now").addEventListener("click", async (
     // 체크박스 자체가 1차 경고이고, 이 확인창이 실행 직전 마지막 재확인이다 —
     // 되돌릴 수 없는 작업(폴더 삭제까지 포함)이라 두 단계로 막는다.
     const proceed = confirm(
-      `선택한 웹툰 ${checked.length}개를 완결 처리로 이동합니다.\n마지막 파일까지 전부 옮기고, 다운로드 폴더가 비면 삭제됩니다.\n되돌릴 수 없습니다. 계속할까요?`
+      `선택한 웹툰 ${checked.length}개를 완결 처리로 이동합니다.\n마지막 파일까지 전부 옮기고, 다운로드 폴더가 비면 삭제됩니다.\n문제없이 끝나면 이 웹툰의 아카이빙 대상에서도 삭제됩니다.\n되돌릴 수 없습니다. 계속할까요?`
     );
     if (!proceed) return;
   }

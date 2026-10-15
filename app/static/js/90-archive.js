@@ -24,6 +24,34 @@ async function getArchiveSettingsCached() {
   return _archiveSettingsCache;
 }
 
+// 같은 이름 파일 처리(라디오) 값 읽고 쓰기
+function getArchiveConflictPolicy() {
+  const checked = document.querySelector('input[name="archive-conflict-policy"]:checked');
+  return checked ? checked.value : "skip";
+}
+
+function setArchiveConflictPolicy(value) {
+  document.querySelectorAll('input[name="archive-conflict-policy"]').forEach((r) => (r.checked = r.value === value));
+}
+
+// 공통 설정 저장 — 서버에 저장된 현재 값 위에 이번에 바꾼 항목(overrides)만 덮어써서 보낸다.
+// 카드마다 저장 버튼이 있어도 다른 카드에서 바꾸고 아직 저장하지 않은 값이 같이 저장되지 않게 하려는 것이다.
+async function saveArchiveSettings(overrides) {
+  const current = await apiCall("/api/archive/settings");
+  await apiCall("/api/archive/settings", {
+    method: "POST",
+    body: JSON.stringify({
+      default_base_path: current.default_base_path || "",
+      default_dest_type: current.default_dest_type || "local",
+      conflict_policy: current.conflict_policy || "skip",
+      on_finish_unsubscribe: !!current.on_finish_unsubscribe,
+      filename_template: current.filename_template || "",
+      ...overrides,
+    }),
+  });
+  invalidateArchiveCaches();
+}
+
 async function getRcloneRemotesCached() {
   if (!_rcloneRemotesCache) {
     _rcloneRemotesCache = await apiCall("/api/archive/rclone/remotes");
