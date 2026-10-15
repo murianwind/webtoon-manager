@@ -168,7 +168,11 @@ select {
 }
 /* 아카이빙 공통 설정: 부분(같은 이름 파일 처리 / 파일명 변경 설정)과 설명이 붙은 선택지 */
 .archive-common-section { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
-.archive-common-section h3 { margin: 0 0 4px; font-size: 14px; }
+.archive-common-section h3 { margin: 0 0 8px; font-size: 14px; }
+/* 전역 .hint는 제목(h2) 바로 밑에 끼우는 용도라 위쪽 여백이 -8px다 — h3/버튼 밑에서는 그대로 쓰면 겹치므로 이 구역 안에서는 되돌린다 */
+.archive-common-section .hint { margin: 0 0 12px; }
+.archive-save-row { display: flex; align-items: center; gap: 10px; margin: 10px 0 0; }
+.archive-save-row + .hint { margin-top: 12px; }
 .archive-option-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0 10px; }
 .archive-option-card { flex: 1 1 200px; display: block; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; background: var(--card); }
 .archive-option-card input { margin-right: 6px; }
@@ -176,17 +180,19 @@ select {
 .archive-option-title { font-weight: 600; font-size: 13px; }
 .archive-option-desc { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); line-height: 1.5; }
 /* 보관할 폴더 즐겨찾기(폴더 선택기) */
-.folder-favorites-row { margin-bottom: 10px; }
+.folder-favorites-row { margin-bottom: 16px; }
 .folder-favorites-title { margin: 0 0 6px; }
 .folder-favorites-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.folder-favorite-chip { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 999px; background: var(--card); overflow: hidden; }
-.folder-favorite-chip button { border: 0; background: transparent; border-radius: 0; font-size: 12px; padding: 4px 10px; }
-.folder-favorite-chip .folder-favorite-remove { padding: 4px 8px 4px 2px; color: var(--muted); }
+.folder-favorite-chip { display: inline-flex; align-items: center; border: 1px solid #b6e4c9; border-radius: 999px; background: #eaf8f0; overflow: hidden; }
+.folder-favorite-chip button { border: 0; background: transparent; border-radius: 0; font-size: 12px; padding: 4px 10px; color: #0b6b36; }
+.folder-favorite-chip .folder-favorite-name:hover { background: #d3f0e0; }
+.folder-favorite-chip .folder-favorite-remove { padding: 4px 8px 4px 2px; color: #4f8f6b; }
 .folder-favorite-chip .folder-favorite-remove:hover { color: var(--danger); }
-.folder-favorite-chip-active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-.folder-picker-path-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.folder-favorite-chip-active { border-color: var(--accent); background: #d3f0e0; box-shadow: 0 0 0 1px var(--accent) inset; }
+.folder-picker-path-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .folder-picker-path-row .folder-picker-path { flex: 1 1 auto; }
-.folder-favorite-star { font-size: 12px; white-space: nowrap; }
+.folder-favorite-star { font-size: 12px; white-space: nowrap; background: #fff7df; border-color: #f0d98c; color: #7a5800; }
+.folder-favorite-star:hover { background: #ffefbf; }
 .token-button-row {
   display: flex;
   flex-wrap: wrap;

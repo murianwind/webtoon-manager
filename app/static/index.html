@@ -616,8 +616,10 @@
           <label class="archive-option-card"><input type="radio" name="archive-conflict-policy" value="overwrite" /><span class="archive-option-title">덮어쓰기</span><span class="archive-option-desc">기존 파일을 새 파일로 교체합니다.</span></label>
           <label class="archive-option-card"><input type="radio" name="archive-conflict-policy" value="rename" /><span class="archive-option-title">이름 바꿔서 저장</span><span class="archive-option-desc">기존 파일은 두고 새 파일은 이름 뒤에 번호를 붙여(예: 0001_1화 (2).zip) 함께 보관합니다.</span></label>
         </div>
-        <button id="btn-save-archive-conflict">저장</button>
-        <span id="archive-conflict-save-result" class="hint-inline"></span>
+        <div class="archive-save-row">
+          <button id="btn-save-archive-conflict">저장</button>
+          <span id="archive-conflict-save-result" class="hint-inline"></span>
+        </div>
         <p class="hint">완결 자동이동에서 info.xml과 표지 이미지는 이 설정과 상관없이 항상 덮어씁니다.</p>
       </div>
 
@@ -670,8 +672,10 @@
       <p class="hint">구독해제하는 즉시가 아니라, "설정" 탭의 "실행 스케줄"이 돌 때 함께 처리됩니다. 마지막 회차까지 전부 옮기고, <strong>이동이 끝나면 그 웹툰의 아카이빙 설정은 "아카이빙 대상"에서 삭제</strong>됩니다(일부 실패하면 다시 시도할 수 있게 남겨 둡니다). 대상으로 지정하지 않은 웹툰은 아래 "기본 그릇 폴더"로 옮겨집니다(지정된 웹툰은 자기 폴더로).</p>
       <label class="field-label">지정 안 된 웹툰이 쓸 기본 그릇 폴더</label>
       <div id="archive-default-folder-picker"></div>
-      <button id="btn-save-archive-finish" style="margin-top: 10px;">저장</button>
-      <span id="archive-finish-save-result" class="hint-inline"></span>
+      <div class="archive-save-row">
+        <button id="btn-save-archive-finish">저장</button>
+        <span id="archive-finish-save-result" class="hint-inline"></span>
+      </div>
     </div>
 
     <div class="settings-card">

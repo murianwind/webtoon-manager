@@ -329,8 +329,10 @@ document.getElementById("btn-save-archive-finish").addEventListener("click", asy
   }
 });
 
-async function loadArchiveManualSelectList() {
+async function loadArchiveManualSelectList(preserveChecked = false) {
   const container = document.getElementById("archive-manual-select-list");
+  // 목록을 다시 그려도 지금 체크해 둔 것(남아 있는 웹툰)은 그대로 체크해 둔다 — 완결 처리가 끝난 뒤 갱신할 때 쓴다
+  const previouslyChecked = preserveChecked ? new Set(Array.from(container.querySelectorAll("input:checked")).map((el) => el.value)) : null;
   try {
     const targets = await apiCall("/api/archive/targets");
     container.innerHTML = "";
@@ -343,6 +345,7 @@ async function loadArchiveManualSelectList() {
       const label = document.createElement("label");
       label.className = "chip chip-available";
       label.innerHTML = `<input type="checkbox" value="${escapeHtml(t.title_id)}" style="margin-right:6px;" />${escapeHtml(t.title_name)}`;
+      if (previouslyChecked && previouslyChecked.has(t.title_id)) label.querySelector("input").checked = true;
       container.appendChild(label);
     }
   } catch (e) {
@@ -373,6 +376,8 @@ document.getElementById("btn-run-archive-now").addEventListener("click", async (
   btn.disabled = true;
   try {
     await apiCall("/api/archive/run", { method: "POST", body: JSON.stringify({ title_ids: checked, full_move: fullMove }) });
+    archiveRunFullMove = fullMove;
+    archiveWasRunning = true;
     startArchiveJobPolling();
   } catch (e) {
     btn.disabled = false;
@@ -392,7 +397,31 @@ async function refreshArchiveJobStatus() {
   document.getElementById("archive-status-badge").textContent = s.status;
   renderJobLog("archive", s.log || []);
   document.getElementById("btn-run-archive-now").disabled = s.status === "running";
-  if (s.status !== "running") stopArchiveJobPolling();
+  if (s.status === "running") {
+    archiveWasRunning = true;
+  } else {
+    stopArchiveJobPolling();
+    if (archiveWasRunning) {
+      archiveWasRunning = false;
+      await onArchiveJobFinished(s.status);
+    }
+  }
+}
+
+// 실행 중이던 아카이빙이 끝난 직후 한 번만 부른다.
+// 완결 처리로 이동한 웹툰은 문제없이 끝나면 아카이빙 대상 설정이 삭제된다 — 새로고침하면 사라지지만 그러면 진행 로그도 같이 사라져서
+// "성공했다는데 목록엔 그대로"라 헷갈렸다. 로그는 그대로 두고 목록만 서버 기준으로 다시 그린다(남은 항목의 체크는 유지).
+// 성공으로 끝났으면 "완결 처리로 이동" 체크도 풀어서 다음 실행에 실수로 이어지지 않게 한다(실패로 끝나면 다시 시도하기 쉽게 그대로 둔다).
+// archiveRunFullMove: true/false = 이 화면에서 시작한 실행의 종류, null = 화면을 다시 열어 이어서 본 실행(종류를 모르니 목록만 갱신).
+async function onArchiveJobFinished(status) {
+  const kind = archiveRunFullMove;
+  archiveRunFullMove = false;
+  if (kind === false) return; // 일반 수동 이동은 대상이 그대로라 다시 읽을 필요가 없다
+  if (kind === true && status === "success") {
+    document.getElementById("archive-manual-full-move-toggle").checked = false;
+    document.getElementById("archive-manual-full-move-warning").classList.add("hidden");
+  }
+  await Promise.all([loadArchiveManualSelectList(true), loadArchiveTargetList(), loadArchiveTargetWebtoonOptions()]);
 }
 
 // 탭을 새로 열었을 때는, 마침 실행 중인 게 있으면 그 진행 상황을 이어서 보여주고
@@ -412,6 +441,8 @@ async function resumeArchiveJobStatusIfRunning() {
     document.getElementById("archive-status-badge").textContent = s.status;
     renderJobLog("archive", s.log || []);
     document.getElementById("btn-run-archive-now").disabled = true;
+    archiveWasRunning = true;
+    archiveRunFullMove = null; // 이 화면이 시작한 실행이 아니라서 종류를 모른다 — 끝나면 목록만 갱신
     startArchiveJobPolling();
   } else {
     document.getElementById("archive-status-badge").textContent = "idle";
@@ -421,6 +452,8 @@ async function resumeArchiveJobStatusIfRunning() {
 }
 
 let archiveJobPollTimer = null;
+let archiveRunFullMove = false;
+let archiveWasRunning = false;
 
 function startArchiveJobPolling() {
   stopArchiveJobPolling();
