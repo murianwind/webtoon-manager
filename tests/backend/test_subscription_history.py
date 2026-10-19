@@ -8,7 +8,6 @@ from app import db, repository, naver_api, tracker, kakao_page_download as kpd
 db.get_connection()
 import app.main as m
 from app.api import webtoons as webtoons_api
-from app.config import get_settings
 from app.models import TitleInfo
 
 JOB = "subscription"
@@ -120,7 +119,6 @@ async def naver_scenarios():
     async def fake_fetch(session, title_id, timeout):
         return infos.get(title_id)
     naver_api.fetch_title_info = fake_fetch
-    S = get_settings()
     for tid in ("100", "101", "102", "103"):
         repository.upsert_new(title_id=tid, title=f"작품{tid}")
 

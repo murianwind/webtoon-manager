@@ -219,9 +219,7 @@ async def _kakao_about(series_id: int) -> dict | None:
 
 @router.post("/kakao-webtoons/{title_id}/subscribe", response_model=KakaoWebtoonOut)
 async def subscribe_kakao_webtoon(title_id: int, payload: KakaoWebtoonEntryIn):
-    """"웹툰 뷰어 서버 주소"가 설정돼 있을 때만 의미 있는 동작 — 다운로드를 뜻하는
-    게 아니라, 뷰어로 계속 챙겨보고 싶다는 표시일 뿐이다. 그 설정 여부는 프론트엔드가
-    버튼을 보여줄지 말지로 판단하고, 여기서는 굳이 다시 검사하지 않는다."""
+    """구독 — 자동 다운로드 대상이 된다(네이버와 같고 뷰어 서버 설정과는 무관). 작품 정보를 받아 작가를 관심 작가로 등록하고, 결과를 실행 이력에 남긴다."""
     if not await asyncio.to_thread(repository.kakao_webtoon_exists, title_id):
         await asyncio.to_thread(
             repository.upsert_new_kakao_webtoon, title_id, payload.title, payload.thumbnail_url,
