@@ -49,13 +49,21 @@ async def kakao_scenarios():
         assert all(" — " in line for line in e["log"])                                                              # 화면의 로그 표시 형식("시각 — 내용")
         print("1) 카카오 구독 이력 OK (구독 + 원작자 등록)")
 
-        # ── 2. 같은 작가를 또 구독하면 '이미 등록됨', 사용자가 꺼 둔 작가는 '꺼져 있어 켜지 않음' ──
+        # ── 2. 같은 작가를 또 구독하면 '이미 등록됨', 사용자가 직접 꺼 둔 작가는 '직접 꺼 둔 작가라 켜지 않음' ──
         await c.post("/api/kakao-webtoons/1/subscribe", json=KAKAO_BODY)
         assert "원작자 등록: 원작가(이미 등록됨)" in text(last()) and len(entries()) == 2
         repository.set_watched_author_enabled("원작가", False, "원작가", "kakao")
         await c.post("/api/kakao-webtoons/1/subscribe", json=KAKAO_BODY)
-        assert "원작가(꺼져 있어 켜지 않음)" in text(last()) and {a.author_id: a.enabled for a in repository.list_watched_authors("kakao")}["원작가"] is False
-        print("2) 이미 등록됨 / 꺼져 있어 켜지 않음 OK")
+        assert "원작가(직접 꺼 둔 작가라 켜지 않음)" in text(last()) and {a.author_id: a.enabled for a in repository.list_watched_authors("kakao")}["원작가"] is False
+        print("2) 이미 등록됨 / 직접 꺼 둔 작가라 켜지 않음 OK")
+
+        # ── 2-1. 앱이 후보로 채워 둔 꺼진 작가(구독 전에 이미 훑은 작품 등)는 구독하면 켜지고 '후보에서 등록'으로 남는다 ──
+        repository.upsert_watched_author("후보원작가", "후보원작가", False, "kakao")
+        ABOUT[2] = kakao_about(("후보원작가", "original_author"))
+        await c.post("/api/kakao-webtoons/2/subscribe", json={**KAKAO_BODY, "title": "후보 작품"})
+        assert "[카카오] 후보 작품 — 원작자 등록: 후보원작가(후보에서 등록)" in text(last()), text(last())
+        assert {a.author_id: a.enabled for a in repository.list_watched_authors("kakao")}["후보원작가"] is True
+        print("2-1) 카카오 후보 작가 구독 시 켜짐 OK")
 
         # ── 3. 원작자가 없으면 글 작가 (여러 명이면 모두) ──
         ABOUT[3] = kakao_about(("글A", "writer"), ("글B", "writer"), ("그린이", "illustrator"))
@@ -136,8 +144,17 @@ async def naver_scenarios():
     assert "원작자 등록: 원작자(이미 등록됨)" in text(last())
     repository.set_watched_author_enabled("3", False, "원작자")
     await webtoons_api._enrich_and_record("100", True)
-    assert "원작자(꺼져 있어 켜지 않음)" in text(last())
-    print("10) 네이버 이미 등록됨 / 꺼짐 OK")
+    assert "원작자(직접 꺼 둔 작가라 켜지 않음)" in text(last())
+    print("10) 네이버 이미 등록됨 / 직접 꺼 둔 작가 OK")
+
+    # ── 10-1. 네이버도 앱이 후보로 채워 둔 꺼진 작가는 구독하면 켜진다 ──
+    infos["101"] = title_info(writers=[("9", "후보글작가")])
+    await webtoons_api._enrich_and_record("101", False)                                                              # 목록/제외 상태에서 후보로 채움(꺼진 채)
+    assert {a.author_id: a.enabled for a in repository.list_watched_authors()}["9"] is False
+    await webtoons_api._enrich_and_record("101", True)                                                               # 이제 구독
+    assert "[네이버] 작품101 — 작가 등록: 후보글작가(후보에서 등록)" in text(last()), text(last())
+    assert {a.author_id: a.enabled for a in repository.list_watched_authors()}["9"] is True
+    print("10-1) 네이버 후보 작가 구독 시 켜짐 OK")
 
     # ── 11. 설정이 꺼져 있으면(register=False) 켜지 않고 전체 작가 목록에만 올렸다고 남긴다 ──
     infos["101"] = title_info(writers=[("5", "글작가5")])

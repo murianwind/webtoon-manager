@@ -181,6 +181,8 @@ _MIGRATIONS = [
     ("webtoons", "writer_names", "ALTER TABLE webtoons ADD COLUMN writer_names TEXT NOT NULL DEFAULT '[]'"),
     ("webtoons", "ever_subscribed", "ALTER TABLE webtoons ADD COLUMN ever_subscribed INTEGER NOT NULL DEFAULT 0"),
     ("watched_authors", "platform", "ALTER TABLE watched_authors ADD COLUMN platform TEXT NOT NULL DEFAULT 'naver'"),
+    # 1이면 사용자가 "작가/태그 관리"에서 직접 끈 작가 — 앱이 후보로 채워 둔 꺼진 작가(0)와 구분해서, 구독할 때 후보만 켠다
+    ("watched_authors", "user_disabled", "ALTER TABLE watched_authors ADD COLUMN user_disabled INTEGER NOT NULL DEFAULT 0"),
     ("archive_targets", "dest_type", "ALTER TABLE archive_targets ADD COLUMN dest_type TEXT NOT NULL DEFAULT 'local'"),
     ("archive_targets", "source_type", "ALTER TABLE archive_targets ADD COLUMN source_type TEXT NOT NULL DEFAULT 'webtoon'"),
     ("archive_targets", "source_dest_type", "ALTER TABLE archive_targets ADD COLUMN source_dest_type TEXT NOT NULL DEFAULT 'local'"),

@@ -33,7 +33,7 @@ def log_text(): return "\n".join(job_status.snapshot()["registry"]["log"])
 
 async def main():
     setup_rows(); settings = get_settings()
-    repository.upsert_watched_author("꺼둔작가", "꺼둔작가", enabled=False, platform="kakao")                          # 사용자가 꺼 둔 작가
+    repository.set_watched_author_enabled("꺼둔작가", False, "꺼둔작가", "kakao")                                  # 사용자가 직접 꺼 둔 작가
     repository.set_setting("auto_register_author_on_subscribe", "0")                                                # 구독 시 자동 등록 설정이 꺼져 있어도, 재동기화는 사용자가 직접 누른 것이라 등록한다
     job_status.start("registry")
 

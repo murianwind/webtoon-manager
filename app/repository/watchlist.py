@@ -22,18 +22,20 @@ def list_watched_authors(platform: str = "naver") -> list[WatchedAuthor]:
     return [_author_row_to_record(r) for r in rows]
 
 
-AUTHOR_ADDED = "added"
-AUTHOR_ALREADY_ON = "already_on"
-AUTHOR_ALREADY_OFF = "already_off"
+AUTHOR_ADDED = "added"  # 새로 넣었다
+AUTHOR_ENABLED = "enabled"  # 앱이 후보로 채워 둔 꺼진 작가를 켰다
+AUTHOR_ALREADY_ON = "already_on"  # 이미 켜져 있었다
+AUTHOR_ALREADY_OFF = "already_off"  # 후보로 꺼져 있고, 이번에도 꺼진 채로 둔다
+AUTHOR_USER_DISABLED = "user_disabled"  # 사용자가 직접 꺼 둔 작가라 그대로 둔다
 
 
 def upsert_watched_author(author_id: str, author_name: str, enabled: bool, platform: str = "naver") -> str:
-    """이미 있으면 이름만 최신화(있으면)하고 enabled는 건드리지 않는다 — 사용자가 끈 걸 자동으로 되돌리지 않기 위해.
-    새로 넣었는지(AUTHOR_ADDED), 이미 켜져 있었는지(AUTHOR_ALREADY_ON), 꺼져 있었는지(AUTHOR_ALREADY_OFF)를 돌려준다."""
+    """없으면 넣고, 있으면 이름만 최신화한다. enabled=True(구독 등 켜달라는 요청)면 앱이 후보로 채워 둔 꺼진 작가는 켠다.
+    **사용자가 직접 끈 작가는 켜지 않는다**(set_watched_author_enabled로 끈 것). 결과(AUTHOR_*)를 돌려준다."""
     now = _now()
     with write_transaction() as conn:
         existing = conn.execute(
-            "SELECT enabled FROM watched_authors WHERE author_id = ? AND platform = ?", (author_id, platform)
+            "SELECT enabled, user_disabled FROM watched_authors WHERE author_id = ? AND platform = ?", (author_id, platform)
         ).fetchone()
         if existing:
             if author_name:
@@ -41,7 +43,17 @@ def upsert_watched_author(author_id: str, author_name: str, enabled: bool, platf
                     "UPDATE watched_authors SET author_name = ?, updated_at = ? WHERE author_id = ? AND platform = ?",
                     (author_name, now, author_id, platform),
                 )
-            return AUTHOR_ALREADY_ON if existing["enabled"] else AUTHOR_ALREADY_OFF
+            if existing["enabled"]:
+                return AUTHOR_ALREADY_ON
+            if existing["user_disabled"]:
+                return AUTHOR_USER_DISABLED
+            if not enabled:
+                return AUTHOR_ALREADY_OFF
+            conn.execute(
+                "UPDATE watched_authors SET enabled = 1, updated_at = ? WHERE author_id = ? AND platform = ?",
+                (now, author_id, platform),
+            )
+            return AUTHOR_ENABLED
         conn.execute(
             "INSERT INTO watched_authors (author_id, author_name, enabled, platform, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
@@ -51,7 +63,8 @@ def upsert_watched_author(author_id: str, author_name: str, enabled: bool, platf
 
 
 def set_watched_author_enabled(author_id: str, enabled: bool, author_name: str = "", platform: str = "naver") -> None:
-    """행이 아직 없으면(구독으로 처음 발견되어 watched_authors에 등록된 적 없는 경우)
+    """사용자가 직접 켜고 끄는 동작("작가/태그 관리"의 칩, 직접 추가). 끄면 "직접 껐음"으로 기억해서 자동 등록이 다시 켜지 않게 하고,
+    켜면 그 기억을 지운다. 행이 아직 없으면(구독으로 처음 발견되어 watched_authors에 등록된 적 없는 경우)
     만들어서 저장한다 — UPDATE만 하면 없는 행은 조용히 아무 일도 안 일어나기 때문."""
     now = _now()
     with write_transaction() as conn:
@@ -60,14 +73,14 @@ def set_watched_author_enabled(author_id: str, enabled: bool, author_name: str =
         ).fetchone()
         if existing:
             conn.execute(
-                "UPDATE watched_authors SET enabled = ?, updated_at = ? WHERE author_id = ? AND platform = ?",
-                (int(enabled), now, author_id, platform),
+                "UPDATE watched_authors SET enabled = ?, user_disabled = ?, updated_at = ? WHERE author_id = ? AND platform = ?",
+                (int(enabled), int(not enabled), now, author_id, platform),
             )
         else:
             conn.execute(
-                "INSERT INTO watched_authors (author_id, author_name, enabled, platform, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (author_id, author_name, int(enabled), platform, now, now),
+                "INSERT INTO watched_authors (author_id, author_name, enabled, user_disabled, platform, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (author_id, author_name, int(enabled), int(not enabled), platform, now, now),
             )
 
 

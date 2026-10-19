@@ -107,7 +107,7 @@ async def list_watched_authors():
 
 @router.post("/watched-authors", response_model=WatchedAuthorOut)
 async def add_watched_author(payload: WatchedAuthorIn):
-    await asyncio.to_thread(repository.upsert_watched_author, payload.author_id, payload.author_name, True)
+    await asyncio.to_thread(repository.set_watched_author_enabled, payload.author_id, True, payload.author_name)
     rows = await asyncio.to_thread(repository.list_watched_authors)
     match = next(r for r in rows if r.author_id == payload.author_id)
     return WatchedAuthorOut(author_id=match.author_id, author_name=match.author_name, enabled=match.enabled)
@@ -177,7 +177,7 @@ async def add_kakao_watched_author(payload: KakaoWatchedAuthorIn):
     if not results:
         raise HTTPException(status_code=404, detail=f"'{payload.author_name}' 이름으로 카카오웹툰에서 작품을 찾지 못했습니다.")
 
-    await asyncio.to_thread(repository.upsert_watched_author, payload.author_name, payload.author_name, True, "kakao")
+    await asyncio.to_thread(repository.set_watched_author_enabled, payload.author_name, True, payload.author_name, "kakao")
     rows = await asyncio.to_thread(repository.list_watched_authors, "kakao")
     match = next(r for r in rows if r.author_id == payload.author_name)
     return WatchedAuthorOut(author_id=match.author_id, author_name=match.author_name, enabled=match.enabled)

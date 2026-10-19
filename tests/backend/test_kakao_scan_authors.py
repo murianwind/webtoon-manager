@@ -51,7 +51,7 @@ async def main():
     print("3) 정보 조회 실패 격리 OK")
 
     # ── 4. 사용자가 꺼 둔 작가는 다시 켜지 않는다 ──
-    repository.upsert_watched_author("꺼둔원작가", "꺼둔원작가", False, "kakao")
+    repository.set_watched_author_enabled("꺼둔원작가", False, "꺼둔원작가", "kakao")
     results["작가A"].append(card(105, "꺼둔작가의신작")); ABOUT[105] = about(["글C"], [], ["꺼둔원작가"])
     assert await scan() == 1 and watched()["꺼둔원작가"] is False and "글C" not in watched()
     print("4) 꺼 둔 작가 유지 OK")
