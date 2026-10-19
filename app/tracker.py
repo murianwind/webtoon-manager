@@ -23,7 +23,7 @@ from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
 from app.config import Settings
 from app.discord_notify import send_webhook_notification
 from app.models import TitleInfo
-from app import kakao_authors
+from app import kakao_authors, subscription_history
 
 log = logging.getLogger(__name__)
 
@@ -152,7 +152,8 @@ async def backfill_missing_thumbnails(session: aiohttp.ClientSession, settings: 
 
 
 async def enrich_one(
-    session: aiohttp.ClientSession, title_id: str, settings: Settings, register_authors_enabled: bool = True
+    session: aiohttp.ClientSession, title_id: str, settings: Settings, register_authors_enabled: bool = True,
+    report: list[str] | None = None,
 ) -> tuple[bool, str]:
     """
     구독(또는 목록제외) 직후, 혹은 재동기화 때 실행 — 정보(썸네일/장르/태그/휴재/작가)를
@@ -163,6 +164,8 @@ async def enrich_one(
     register_authors_enabled=False로 부르면 작가는 등록하되 "등록된 작가"(자동 신작추가
     대상)로는 올리지 않는다 — 목록제외한 웹툰이나, 아직 구독 안 한 웹툰의 저자를
     "전체 작가 목록" 채우기 용도로 알아낼 때 쓴다.
+
+    report를 넘기면 작가 등록 결과(작가별 신규/이미 등록됨/꺼져 있어 켜지 않음)를 설명하는 줄을 거기에 담는다 — 구독 실행 이력용.
     """
     try:
         info = await naver_api.fetch_title_info(session, title_id, settings.request_timeout_seconds)
@@ -182,34 +185,36 @@ async def enrich_one(
         repository.update_writer_ids_and_names(title_id, list(ids), list(names))
     _store_origin_authors(title_id, info)
 
-    registered_names = []
+    results = []
     for author_id, author_name in authors_to_register(info):
-        repository.upsert_watched_author(author_id, author_name, enabled=register_authors_enabled)
-        registered_names.append(author_name or author_id)
+        state = repository.upsert_watched_author(author_id, author_name, enabled=register_authors_enabled)
+        results.append((author_name or author_id, state))
 
-    if registered_names:
-        label = "원작자 등록" if info.origin_id_name_pairs else "작가 등록"
-        return True, f"{label}: {', '.join(registered_names)}"
+    if results:
+        role_label = "원작자" if info.origin_id_name_pairs else "작가"
+        if report is not None:
+            report.append(subscription_history.describe_registration(role_label, results, register_authors_enabled))
+        return True, f"{role_label} 등록: {', '.join(name for name, _ in results)}"
     return True, "작가 정보 없음 (API 응답에 작가 필드가 비어있음)"
 
 
 async def _record_kakao_title_authors(series_id: int, settings) -> None:
     """신작 스캔으로 자동 추가한 카카오 작품의 작가 정보(글/그림/원작 구분)를 작품 정보에서 받아 저장하고, 구독할 때와 같은 규칙(원작자가
     있으면 원작자, 없으면 글 작가)으로 관심 작가를 등록한다(구독 시 작가 자동 등록 설정이 켜져 있을 때). 사용자가 꺼 둔 작가는 다시 켜지
-    않는다. 작품 정보를 못 받으면 조용히 건너뛴다 — 작품 추가와 알림은 이미 끝났고, 작가 정보는 다음 다운로드/재동기화 때 채워진다."""
+    않는다. 작품 정보를 못 받으면 작가는 건드리지 않고 실행 이력에만 남긴다 — 작품 추가와 알림은 이미 끝났고, 작가 정보는 다음 다운로드/재동기화 때 채워진다."""
     try:
         async with kakao_page_download.new_session() as kakao_session:
             about = await kakao_page_download.client_or_anonymous(kakao_session, settings.request_timeout_seconds).fetch_about(series_id)
     except Exception as e:
         log.warning("카카오 신작 작품 정보(series_id=%s) 조회 실패 — 작가 정보는 나중에 채웁니다: %s", series_id, e)
-        return
-    if about is None:
-        return
-    writers, _, originals = kakao_authors.split_authors(about)
-    repository.set_kakao_authors(series_id, writers, originals)
-    if repository.is_author_auto_register_enabled():
-        for name in kakao_authors.authors_to_register(about):
-            repository.upsert_watched_author(name, name, True, "kakao")
+        about = None
+    if about is not None:
+        writers, _, originals = kakao_authors.split_authors(about)
+        repository.set_kakao_authors(series_id, writers, originals)
+    subscription_history.record_kakao_subscription(
+        (repository.get_kakao_webtoon(series_id) or {}).get("title") or str(series_id), about,
+        repository.is_author_auto_register_enabled(), action="신작 스캔으로 자동 구독",
+    )
 
 
 async def _notify_kakao_auto_add(session: aiohttp.ClientSession, author_name: str, title_text: str, title_id: int) -> None:

@@ -59,6 +59,18 @@ def log_line(job_name: str, line: str) -> None:
             st.log = st.log[-_MAX_LOG_LINES:]
 
 
+def record_event(job_name: str, lines: list[str], success: bool = True) -> None:
+    """한 번에 끝나는 일(구독 한 건 등)을 실시간 상태(start/finish)를 거치지 않고 바로 실행 이력 한 건으로 남긴다 —
+    같은 이름의 다른 실행이 진행 중이어도 그 로그를 건드리지 않는다."""
+    from app import repository  # 순환 import 방지용 지연 import
+
+    now = _now()
+    try:
+        repository.add_job_history(job_name, now, now, "success" if success else "error", [f"{now} — {line}" for line in lines])
+    except Exception as e:
+        log.warning("실행 이력 저장 실패 (%s): %s", job_name, e)
+
+
 def finish(job_name: str, success: bool) -> None:
     with _lock:
         st = _statuses[job_name]

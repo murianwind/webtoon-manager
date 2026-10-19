@@ -189,7 +189,6 @@ function buildWebtoonCard(w, context) {
     }
   } else if (platform === "kakao") {
     // "구독해제"/"제외됨" 탭에 들어온 카카오 항목 — 네이버와 동일한 워크플로.
-    // 구독은 뷰어 서버가 설정돼 있을 때만 의미가 있으니 그때만 버튼을 보여준다.
     actions.appendChild(makeButton("구독", () => webtoonListAction(w, "subscribe", "kakao", context)));
     actions.appendChild(makeButton("목록으로", () => moveToListTab(w.title_id, context, w.ever_subscribed, "kakao")));
   } else {

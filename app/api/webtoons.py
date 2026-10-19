@@ -13,6 +13,7 @@ from app import (
     daily_plus,
     naver_api,
     repository,
+    subscription_history,
     tracker,
 )
 from app import archiver
@@ -81,20 +82,40 @@ def _get_or_404(title_id: str):
     return wt
 
 
-def _trigger_enrich(title_id: str, register_authors_enabled: bool = True) -> None:
+def _trigger_enrich(title_id: str, register_authors_enabled: bool = True, record_history: bool = False) -> None:
     """
     백그라운드에서 정보/작가등록을 바로 채운다 (다음 정기 스캔까지 기다리지 않음).
     register_authors_enabled=False로 부르면(목록제외/구독해제 시) 이 웹툰의 정보는
     채우되, 그 저자를 "등록된 작가"(자동 신작추가 대상)로 올리지는 않는다 —
     제외한 웹툰의 저자가 엉뚱하게 관심작가로 등록되면 안 되기 때문이다.
+    record_history=True면(구독할 때) 그 결과를 실행 이력에 남긴다.
     """
     async def _run():
+        if record_history:
+            await _enrich_and_record(title_id, register_authors_enabled)
+            return
         async with aiohttp.ClientSession() as session:
             await tracker.enrich_one(
                 session, title_id, get_settings(), register_authors_enabled=register_authors_enabled
             )
 
     asyncio.create_task(_run())
+
+
+async def _enrich_and_record(title_id: str, register_authors_enabled: bool) -> None:
+    """구독 직후 정보/작가를 채우고, 구독했다는 사실과 작가 등록 결과를 실행 이력에 한 건으로 남긴다."""
+    row = await asyncio.to_thread(repository.get, title_id)
+    title = row.title if row else title_id
+    report: list[str] = []
+    try:
+        async with aiohttp.ClientSession() as session:
+            success, message = await tracker.enrich_one(
+                session, title_id, get_settings(), register_authors_enabled=register_authors_enabled, report=report
+            )
+    except Exception as e:
+        log.error("구독 후 정보/작가 등록 중 예외 (titleId=%s): %s", title_id, e)
+        success, message = False, f"작가 등록 중 오류: {e}"
+    await asyncio.to_thread(subscription_history.record, "네이버", title, report or [message], success)
 
 
 @router.get("/webtoons", response_model=list[WebtoonOut])
@@ -124,7 +145,9 @@ async def list_webtoons(status: str | None = None):
 async def subscribe(title_id: str):
     await asyncio.to_thread(_get_or_404, title_id)
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_ACTIVE)
-    _trigger_enrich(title_id, register_authors_enabled=await asyncio.to_thread(_is_author_auto_register_enabled))
+    _trigger_enrich(
+        title_id, register_authors_enabled=await asyncio.to_thread(_is_author_auto_register_enabled), record_history=True
+    )
     return _to_out(await asyncio.to_thread(repository.get, title_id))
 
 
@@ -312,7 +335,9 @@ async def naver_list_subscribe(title_id: str, payload: NaverListEntryIn):
             payload.thumbnail_url,
         )
     await asyncio.to_thread(repository.set_status, title_id, repository.STATUS_ACTIVE)
-    _trigger_enrich(title_id, register_authors_enabled=await asyncio.to_thread(_is_author_auto_register_enabled))
+    _trigger_enrich(
+        title_id, register_authors_enabled=await asyncio.to_thread(_is_author_auto_register_enabled), record_history=True
+    )
     return _to_out(await asyncio.to_thread(repository.get, title_id))
 
 

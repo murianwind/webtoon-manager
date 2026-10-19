@@ -49,6 +49,9 @@ from app.repository.settings import (
     set_setting,
 )
 from app.repository.watchlist import (
+    AUTHOR_ADDED,
+    AUTHOR_ALREADY_OFF,
+    AUTHOR_ALREADY_ON,
     delete_watched_author,
     delete_watched_tag,
     get_enabled_author_ids,
@@ -144,6 +147,9 @@ from app.repository.backup import (
 )
 
 __all__ = [
+    "AUTHOR_ADDED",
+    "AUTHOR_ALREADY_OFF",
+    "AUTHOR_ALREADY_ON",
     "BACKUP_FORMAT_VERSION",
     "FOLDER_FAVORITES_KEY",
     "KAKAO_RENTAL_AUTO_USE_KEY",

@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from app import (
     kakao_page_download,
     repository,
+    subscription_history,
 )
 from app import kakao_api
 from app import kakao_catalog
@@ -218,9 +219,7 @@ async def _kakao_about(series_id: int) -> dict | None:
 
 @router.post("/kakao-webtoons/{title_id}/subscribe", response_model=KakaoWebtoonOut)
 async def subscribe_kakao_webtoon(title_id: int, payload: KakaoWebtoonEntryIn):
-    """"웹툰 뷰어 서버 주소"가 설정돼 있을 때만 의미 있는 동작 — 다운로드를 뜻하는
-    게 아니라, 뷰어로 계속 챙겨보고 싶다는 표시일 뿐이다. 그 설정 여부는 프론트엔드가
-    버튼을 보여줄지 말지로 판단하고, 여기서는 굳이 다시 검사하지 않는다."""
+    """구독 — 자동 다운로드 대상이 된다(네이버와 같고 뷰어 서버 설정과는 무관). 작품 정보를 받아 작가를 관심 작가로 등록하고, 결과를 실행 이력에 남긴다."""
     if not await asyncio.to_thread(repository.kakao_webtoon_exists, title_id):
         await asyncio.to_thread(
             repository.upsert_new_kakao_webtoon, title_id, payload.title, payload.thumbnail_url,
@@ -233,12 +232,12 @@ async def subscribe_kakao_webtoon(title_id: int, payload: KakaoWebtoonEntryIn):
     # 둔다 — 작품 정보를 못 받으면 받을 때/메타 동기화 때 채워진다
     writers, _, originals = kakao_authors.split_authors(about)
     await asyncio.to_thread(repository.set_kakao_authors, title_id, writers, originals)
-    if await asyncio.to_thread(_is_author_auto_register_enabled):
-        # 구독하면 그 작품의 작가를 관심 작가로 자동 등록한다(네이버와 같은 설정, 같은 규칙): 작품 "정보" 탭의 글/그림/원작
-        # 구분으로 원작자가 있으면 원작자를, 없으면 글 작가를 등록한다. 정보 탭을 못 받으면 등록하지 않는다(그림 작가 등을
-        # 잘못 등록하지 않도록 이름 전부를 등록하는 대신 건너뛴다).
-        for author_name in kakao_authors.authors_to_register(about):
-            await asyncio.to_thread(repository.upsert_watched_author, author_name, author_name, True, "kakao")
+    # 구독하면 그 작품의 작가를 관심 작가로 자동 등록한다(네이버와 같은 설정, 같은 규칙): 작품 "정보" 탭의 글/그림/원작
+    # 구분으로 원작자가 있으면 원작자를, 없으면 글 작가를 등록한다. 정보 탭을 못 받으면 등록하지 않는다(그림 작가 등을
+    # 잘못 등록하지 않도록 이름 전부를 등록하는 대신 건너뛴다). 결과는 실행 이력에 남는다.
+    await asyncio.to_thread(
+        subscription_history.record_kakao_subscription, payload.title, about, await asyncio.to_thread(_is_author_auto_register_enabled)
+    )
     return KakaoWebtoonOut(**await asyncio.to_thread(repository.get_kakao_webtoon, title_id))
 
 

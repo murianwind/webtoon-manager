@@ -220,9 +220,9 @@
 
     <div class="settings-card">
       <h2>카카오웹툰 작가</h2>
-      <p class="hint">카카오웹툰은 작가에 고유 ID가 없어서 이름 자체로 다룹니다. "선택됨"은 구독중인
-      웹툰들의 저자가 자동으로 뜨는 네이버와 달리 전부 직접 등록해야 합니다. "사용 가능"은 요일별+신작+완결
-      전체 카탈로그에서 뽑은 이름 후보입니다(완결작 포함, 조회에 몇 초 걸릴 수 있음).</p>
+      <p class="hint">카카오웹툰은 작가에 고유 ID가 없어서 이름 자체로 다룹니다. 네이버와 같이 구독하면 그 작품의 작가가
+      "선택됨"에 자동으로 올라갑니다(원작자가 있으면 원작자, 없으면 글 작가 — "작가 자동 등록"이 켜져 있을 때). "사용 가능"은
+      요일별+신작+완결 전체 카탈로그에서 뽑은 이름 후보이고(완결작 포함, 조회에 몇 초 걸릴 수 있음), 클릭하면 직접 등록할 수 있습니다.</p>
       <div class="chip-section">
         <div class="chip-column">
           <h4>선택됨</h4>
@@ -267,7 +267,7 @@
 
     <div class="settings-card">
       <h2>실행 이력</h2>
-      <p class="hint">스케줄에 따라 자동으로(또는 수동으로) 실행된 작업이 실제로 돌았는지/성공했는지 확인할 수 있습니다.</p>
+      <p class="hint">스케줄에 따라 자동으로(또는 수동으로) 실행된 작업이 실제로 돌았는지/성공했는지 확인할 수 있습니다. 웹툰을 구독할 때마다 "구독/작가 등록" 항목이 한 건씩 남아서, 작가가 "작가/태그 관리"에 올라갔는지 볼 수 있습니다.</p>
       <div class="retention-row">
         <label for="job-history-retention-days">보관 기간(일)</label>
         <input id="job-history-retention-days" type="number" min="0" placeholder="0 = 자동삭제 끔" />
@@ -338,7 +338,7 @@
     <div class="settings-card" id="settings-card-kakao">
       <h2>카카오웹툰 관리</h2>
       <p id="kakao-no-webhook-hint" class="field-hint warn hidden">디스코드 웹훅이 설정되지 않아 로그인 풀림·신작·완결 알림은 받을 수 없습니다. 다운로드는 그대로 동작합니다(웹훅은 아래 "디스코드 설정"에서).</p>
-      <p class="hint">"웹툰 전체목록"/다운로드 리포트에 카카오웹툰을 같이 다룰지 정합니다. 카카오는 다운로드 기능이 없어서 "구독"이 다운로드를 뜻하지 않습니다 — 위 "웹툰 뷰어 서버 주소"가 설정돼 있어야 구독/구독해제가 가능해지고(뷰어 라이브러리에 있다는 표시), 설정 안 해두면 "목록제외"만 가능합니다.</p>
+      <p class="hint">"웹툰 전체목록"/다운로드 리포트에 카카오웹툰을 같이 다룰지 정합니다. 카카오페이지 작품도 네이버처럼 "구독"하면 자동 다운로드 대상이 됩니다(로그인 쿠키가 필요합니다). 끄면 구독/제외 기록은 그대로 남고, 다시 켜면 돌아옵니다.</p>
       <div class="field-group">
         <label class="checkbox-label">
           <input type="checkbox" id="kakao-webtoons-enabled-toggle" /> 카카오웹툰 관리하기
@@ -372,7 +372,7 @@
       </div>
       <div class="schedule-block" data-job="download_job">
         <h3>다운로드</h3>
-        <p class="hint">다운로드 스케줄은 여러 개 등록할 수 있고, 스케줄마다 받을 대상(네이버 / 카카오페이지 / 둘 다)을 고릅니다(카카오페이지 관리를 켜면 대상 선택이 나타납니다). 카카오페이지는 다운로드 폴더를 보고 아직 받지 않은 회차만 받습니다.</p>
+        <p class="hint">다운로드 스케줄은 여러 개 등록할 수 있고, 스케줄마다 받을 대상(네이버 / 카카오페이지 / 둘 다)을 고릅니다(카카오페이지 관리를 켜면 대상 선택이 나타납니다). 카카오페이지는 작품 폴더와 받은 회차 기록을 보고 아직 받지 않은 회차만 받습니다.</p>
         <div class="schedule-controls"></div>
       </div>
       <div class="schedule-block" data-job="archive_job">
@@ -443,7 +443,7 @@
     <div class="settings-card">
       <h2>작가 자동 등록</h2>
       <label class="checkbox-label"><input type="checkbox" id="author-auto-register-toggle" /> 웹툰 구독 시 그 작품 작가를 자동으로 "등록된 작가"로 추가</label>
-      <p class="hint">꺼두면 구독해도 작가/태그 관리 화면의 "선택됨"엔 자동으로 안 올라가고, "사용 가능"에서 원하면 직접 등록할 수 있습니다. 태그는 원래 구독 시 자동 등록되는 개념이 없어서 이 설정과 무관합니다.</p>
+      <p class="hint">꺼두면 구독해도 작가/태그 관리 화면의 "선택됨"엔 자동으로 안 올라가고, "사용 가능"에서 원하면 직접 등록할 수 있습니다. 직접 꺼 둔 작가는 이 설정이 켜져 있어도 구독할 때 다시 켜지지 않습니다. 태그는 원래 구독 시 자동 등록되는 개념이 없어서 이 설정과 무관합니다.</p>
       <button id="btn-save-author-auto-register">저장</button>
       <span id="author-auto-register-save-result" class="hint-inline"></span>
     </div>
@@ -550,7 +550,7 @@
       <code>WEBTOON_ARCHIVE_HOST_PATH</code>(실제 보관할 Windows 폴더)를 추가하고 재배포하세요.</p>
       <p><strong>2. rclone 원격(원드라이브 등) 사용</strong> — <code>rclone config</code>로 원격 연결을 설정한 뒤,
       그 결과로 생긴 <code>rclone.conf</code> 파일이 있는 폴더를 <code>RCLONE_CONFIG_HOST_PATH</code>로 지정하고 재배포하세요.</p>
-      <p class="hint">자세한 설정 방법은 저장소 README의 "아카이빙 자세히" 항목을 참고하세요.</p>
+      <p class="hint">자세한 설정 방법은 "도움말" 탭의 "아카이빙 사용하기"을 참고하세요.</p>
     </div>
     <div id="archive-main-content">
     <div class="settings-card">
