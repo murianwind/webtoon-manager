@@ -69,7 +69,7 @@ _WEBTOON_COLUMNS = (
 )
 
 
-_WATCHED_AUTHOR_COLUMNS = ("author_id", "author_name", "enabled", "platform", "created_at", "updated_at")
+_WATCHED_AUTHOR_COLUMNS = ("author_id", "author_name", "enabled", "user_disabled", "platform", "created_at", "updated_at")
 
 
 _WATCHED_TAG_COLUMNS = ("tag_id", "tag_name", "enabled", "created_at", "updated_at")

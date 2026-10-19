@@ -7,8 +7,9 @@ JOB_NAME = "subscription"
 
 _STATE_LABEL = {
     repository.AUTHOR_ADDED: "신규",
+    repository.AUTHOR_ENABLED: "후보에서 등록",
     repository.AUTHOR_ALREADY_ON: "이미 등록됨",
-    repository.AUTHOR_ALREADY_OFF: "꺼져 있어 켜지 않음",
+    repository.AUTHOR_USER_DISABLED: "직접 꺼 둔 작가라 켜지 않음",
 }
 
 
