@@ -70,7 +70,6 @@ for variable in sorted(set(re.findall(r"\$\{([A-Z_]+)", COMPOSE_TEXT))):
     assert variable in COMPOSE_TEXT.split("services:")[0], f"docker-compose.yml 머리말의 변수 목록에 {variable}가 없다"
 assert "모든 설정 옵션" in README
 for removed in config.REMOVED_ENV_VARIABLES:
-    assert removed in README, f"README의 '더 이상 쓰이지 않는 환경변수' 안내에 {removed}가 없다"
     assert removed not in environment, f"docker-compose.yml의 environment에 지운 옵션 {removed}가 남아 있다"
 print("5) README/docker-compose 옵션 빠짐없음 OK")
 print("ALL OK")

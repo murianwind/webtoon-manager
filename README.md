@@ -336,11 +336,7 @@ Windows에서 rclone으로 마운트한 드라이브는 Docker Desktop이 인식
 | `DATABASE_PATH` | `/data/webtoons.db` | 설정과 구독 기록을 저장하는 데이터 파일 |
 | `COOKIE_FILE_PATH` | `/cookies/${COOKIE_FILE_NAME:-cookies.json}` | 네이버 로그인 쿠키 파일 위치 |
 
-### ③ 예전 환경변수
-
-`MAX_NEW_EPISODES_PER_TITLE`, `BATCH_REST_MINUTES`, `DELAY_SECONDS`, `REQUEST_TIMEOUT_SECONDS`, `MAX_CONCURRENT_DOWNLOADS`, `ARTIST_SCAN_CONCURRENCY`, `FOLDER_ZERO_FILL`, `IMAGE_ZERO_FILL`는 **지금은 무시됩니다.** 지정해 두었다면 시작할 때 로그에 경고가 남으니 지워 주세요. 다운로드 속도(작품당 회차 수, 쉬는 시간)는 설정 화면의 **다운로드 속도 조절**에서 바꿉니다.
-
-### ④ 설정 화면의 옵션 (화면에서 바꾸고, 재시작 없이 적용)
+### ③ 설정 화면의 옵션 (화면에서 바꾸고, 재시작 없이 적용)
 
 | 위치 | 옵션 | 기본값 | 설명 |
 |---|---|---|---|
