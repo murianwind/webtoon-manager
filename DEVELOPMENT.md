@@ -88,6 +88,7 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 
 **아카이빙과 표지/info.xml**
 - 주기/수동 실행은 마지막 회차 파일을 남기고 옮기며, info.xml은 복사해 매번 덮어쓰고 커버는 목적지에 없을 때만 복사합니다. 완결 처리는 전부 옮기고 info.xml/커버도 덮어씁니다.
+- **뷰어에서 읽지 않은 회차 건너뛰기(정기 아카이빙만)**: 뷰어 서버 주소(`webtoon_server_url`)가 설정돼 있으면 `scheduler/archive_job.py`가 `_build_read_numbers_provider`로 만든 조회 함수를 `run_periodic_archive(read_numbers_provider=...)`에 넘기고, 웹툰 대상마다 `TitleArchiveJob.read_numbers`(읽은 회차 번호 집합)가 채워집니다. `_archive_title`은 마지막 회차 보존을 적용한 뒤 `read_filter.filter_read_files`로 읽은 회차만 남깁니다. 아카이빙은 별도 스레드의 동기 코드라 조회 함수가 `run_coroutine_threadsafe`로 잡의 이벤트 루프에서 `webtoon_server_client.fetch_read_numbers`를 실행합니다. 뷰어의 `GET /api/lookup/read-state?series=<폴더명>`을 호출하며(`{"read_numbers": [...]}`, '읽는 중' 회차는 뷰어가 이미 뺌), 이 경로는 `/api/lookup/latest`처럼 뷰어 관리자 게이트 예외 목록에 있어야 합니다. 조회 실패·미매칭·주소 미설정이면 `None`이라 거르지 않고 기존처럼 옮기며(빈 집합과 구분), 수동 실행·완결 전체 이동·완결 구독해제·폴더 대상은 적용하지 않습니다. 테스트: `tests/backend/test_archive_skip_unread.py`, `tests/backend/test_webtoon_server_read_numbers.py`.
 - 카카오페이지 공식 표지로 교체하는 것은 완결 처리일 때만, 폴더의 info.xml `<Web>`이 카카오페이지 주소일 때만 합니다(옛 카카오웹툰 주소면 안 함 — 메타 동기화로 info.xml을 새로 써야 합니다).
 - 아카이빙 대상 id는 내부적으로 네이버는 `title_id`, 카카오는 `kakao_<시리즈 번호>`입니다.
 - 메타 동기화는 네이버/카카오 모두 info.xml과 커버를 새로 교체합니다. 다운로드할 때는 커버가 없을 때만 받습니다.

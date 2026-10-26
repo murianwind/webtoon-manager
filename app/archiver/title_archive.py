@@ -4,6 +4,7 @@
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from app import kakao_cover, repository
 
@@ -15,6 +16,7 @@ from app.archiver.naming import (
     render_archive_filename,
 )
 from app.archiver.params import ProgressReport, TitleArchiveJob, TitleDestination
+from app.archiver.read_filter import filter_read_files
 from app.archiver.settings import (
     _get_effective_filename_template,
     get_conflict_policy,
@@ -37,6 +39,8 @@ from app.archiver.transfer import (
 log = logging.getLogger(__name__)
 
 KAKAO_TARGET_PREFIX = "kakao_"  # 카카오페이지 웹툰 대상의 id는 "kakao_<시리즈 번호>" — 네이버 title_id와 번호가 겹치지 않게
+
+ReadNumbersProvider = Callable[[str, bool], "frozenset[int] | None"]  # (작품 제목, 카카오 여부) -> 읽은 회차 번호(조회 실패면 None)
 
 
 @dataclass
@@ -146,6 +150,11 @@ def _archive_title(job: TitleArchiveJob, report: ProgressReport | None = None) -
     files = _list_episode_files_sorted(title_dir)
     if job.keep_last and len(files) > 0:
         files = files[:-1]  # 마지막(가장 큰 번호)은 보존
+    if job.read_numbers is not None:
+        candidates = len(files)
+        files = filter_read_files(files, job.read_numbers)
+        if candidates > len(files):
+            report.progress(f"[{job.title_name}] 뷰어에서 읽지 않은 {candidates - len(files)}개 회차는 건너뜀")
 
     if not job.keep_last:
         _refresh_kakao_cover_for_finish(title_dir, job.title_name, report.progress_callback)
@@ -174,9 +183,11 @@ def _archive_title(job: TitleArchiveJob, report: ProgressReport | None = None) -
 def run_periodic_archive(
     archive_root: str, download_root: str, rclone_config_path: str = "",
     progress_callback=None, conflict_log: list | None = None, failure_log: list | None = None,
-    kakao_download_root: str | None = None,
+    kakao_download_root: str | None = None, read_numbers_provider: ReadNumbersProvider | None = None,
 ) -> int:
-    """지정된(enabled) 웹툰/폴더 대상 전부, 마지막 파일 보존하며 이동. 반환값은 전체 이동 개수."""
+    """지정된(enabled) 웹툰/폴더 대상 전부, 마지막 파일 보존하며 이동. 반환값은 전체 이동 개수.
+    read_numbers_provider(선택): (작품 제목, 카카오 여부) -> 뷰어에서 읽은 회차 번호 집합(조회 실패면 None). 주면 웹툰 대상은
+    읽은 회차만 옮긴다(폴더 대상은 뷰어 작품과 짝지을 수 없어 그대로)."""
     policy = get_conflict_policy()
     total = 0
     for target in repository.list_archive_targets():
@@ -197,6 +208,7 @@ def run_periodic_archive(
                 title_id=target.title_id, title_name=source.title, base_path=target.dest_base_path, policy=policy, trigger_type="periodic", keep_last=True,
                 dest_type=target.dest_type, rclone_config_path=rclone_config_path, writer_names=source.writer_names,
                 filename_template_preset_id=target.filename_template_preset_id, kakao=source.kakao,
+                read_numbers=read_numbers_provider(source.title, source.kakao) if read_numbers_provider else None,
             ),
             ProgressReport(progress_callback, conflict_log, failure_log),
         )
