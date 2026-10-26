@@ -6,12 +6,29 @@ import logging
 
 import aiohttp
 
-from app import archiver, discord_notify, download_roots, job_status, rclone_updater, repository
+from app import archiver, discord_notify, download_roots, job_status, rclone_updater, repository, webtoon_server_client
+from app.archiver.title_archive import ReadNumbersProvider
 from app.config import get_settings
+from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
 
 log = logging.getLogger(__name__)
 
+_SETTING_KEY_WEBTOON_SERVER_URL = "webtoon_server_url"
 _archive_job_lock = asyncio.Lock()
+
+
+def _build_read_numbers_provider(
+    loop: asyncio.AbstractEventLoop, session: aiohttp.ClientSession, server_url: str, timeout_seconds: int
+) -> ReadNumbersProvider:
+    """아카이빙은 별도 스레드에서 도는 동기 코드라, 뷰어 조회(비동기)는 이 잡의 이벤트 루프에 맡겨 결과를 기다리는 동기 함수로 감싼다.
+    뷰어는 디스크 폴더명 기준으로 작품을 찾으므로 금지문자 치환은 폴더를 만들 때와 같은 규칙(네이버/카카오)을 쓴다."""
+    def provider(title_name: str, kakao: bool) -> frozenset[int] | None:
+        folder_name = (remove_forbidden_str_kakao if kakao else remove_forbidden_str)(title_name)
+        future = asyncio.run_coroutine_threadsafe(
+            webtoon_server_client.fetch_read_numbers(session, server_url, folder_name, timeout_seconds), loop
+        )
+        return future.result()
+    return provider
 
 
 def _cleanup_old_archive_history() -> None:
@@ -63,11 +80,18 @@ async def run_archive_job() -> None:
         conflicts: list[tuple[str, str, str]] = []
         failures: list[tuple[str, str, str]] = []
         try:
-            moved = await asyncio.to_thread(
-                archiver.run_periodic_archive, settings.archive_root, download_roots.naver_root(settings), settings.rclone_config_path,
-                lambda msg: job_status.log_line("archive", msg), conflicts, failures,
-                download_roots.kakao_root(settings),  # 카카오페이지 웹툰 대상은 카카오 다운로드 폴더에서 옮긴다
-            )
+            server_url = await asyncio.to_thread(repository.get_setting, _SETTING_KEY_WEBTOON_SERVER_URL)
+            async with aiohttp.ClientSession() as viewer_session:
+                provider = (  # 뷰어 서버가 설정돼 있을 때만 — 뷰어에서 읽지 않은 회차는 옮기지 않는다(조회 실패한 작품은 거르지 않음)
+                    _build_read_numbers_provider(asyncio.get_running_loop(), viewer_session, server_url, settings.request_timeout_seconds)
+                    if server_url else None
+                )
+                moved = await asyncio.to_thread(
+                    archiver.run_periodic_archive, settings.archive_root, download_roots.naver_root(settings), settings.rclone_config_path,
+                    lambda msg: job_status.log_line("archive", msg), conflicts, failures,
+                    download_roots.kakao_root(settings),  # 카카오페이지 웹툰 대상은 카카오 다운로드 폴더에서 옮긴다
+                    provider,
+                )
             job_status.log_line("archive", f"지정 웹툰 {moved}개 파일 이동 완료")
 
             pending_moved = await asyncio.to_thread(
