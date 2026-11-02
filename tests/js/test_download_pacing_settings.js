@@ -16,7 +16,7 @@ const { makeApp, sleep, ok, done } = require("./harness");
 
   // Scenario 1: 설정을 열면 지금 쓰는 값과 기본값 안내가 나온다
   ok($("pacing-cap").value === "10" && $("pacing-rest").value === "5", "지금 값이 입력칸에: " + $("pacing-cap").value + "/" + $("pacing-rest").value);
-  ok(/기본값/.test($("settings-card-pacing").textContent) && /10/.test($("pacing-default-note").textContent) && /5/.test($("pacing-default-note").textContent), "기본값 안내: " + $("pacing-default-note").textContent);
+  ok(/기본값/.test($("settings-panel-pacing").textContent) && /10/.test($("pacing-default-note").textContent) && /5/.test($("pacing-default-note").textContent), "기본값 안내: " + $("pacing-default-note").textContent);
   ok($("btn-reset-pacing").disabled === true, "바꾼 값이 없으면 '기본값으로'는 비활성");
 
   // Scenario 2: 입력을 바꿔 저장하면 서버로 가고 저장 문구가 나온다

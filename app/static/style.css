@@ -488,6 +488,12 @@ select {
   padding: 3px 8px;
   margin-left: 4px;
 }
+/* 카드 안의 탭(설정 > 다운로드 · 실행 스케줄) */
+.card-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin: 0 0 16px; border-bottom: 1px solid var(--border); }
+.card-tabs .card-tab { background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; margin-bottom: -1px; padding: 10px 14px; font-size: 14px; font-weight: 600; color: var(--muted); }
+.card-tabs .card-tab:hover { color: var(--text); }
+.card-tabs .card-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.card-tab-footer { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
 .schedule-time-row { flex-wrap: wrap; }
 .viewer-scan-box { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
 .schedule-day-chips { display: inline-flex; align-items: center; gap: 4px; margin-left: 10px; flex-wrap: wrap; }

@@ -282,3 +282,8 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - **뷰어 쪽 변경**(webtoon-server): `INTEGRATION_TOKEN` 환경변수로 인증하는 `POST /api/integration/rescan`(스캔을 백그라운드로 시작하고 바로 반환, 이미 스캔 중이면 새로 시작하지 않음), `GET /api/integration/scan-status`, 로그인 게이트(`PROFILES_ENABLED`) 허용 목록 추가(토큰은 라우터에서 검사, 공유 프로필 링크로는 404). 스캔 자체를 한 번에 하나만 도는 공유 작업(`services._start_scan_task`)으로 바꿔 수동/자동/연동 스캔이 겹치면 합류하고 요청이 끊겨도 스캔은 계속된다.
 - **화면**: `74-settings-report.js` — 발송하지 않는 시간 줄(`report-quiet-row`: 시작~끝 + 요일 칩 `quiet-day`), 모으는 시간, 뷰어 스캔 설정(토큰은 표시만, `clear_token`으로 지움). 오류(겹침 등)는 서버 메시지 그대로 보여 주고 입력은 유지한다. 테스트: `tests/backend/test_report_quiet_hours.py`, `test_report_dispatch.py`, `test_viewer_scan_settings.py`, `tests/js/test_report_settings_ui.js`.
 
+## 설정 화면 구성(카드와 탭)
+
+- 설정 탭의 카드 순서: **다운로드 · 실행 스케줄**(`settings-card-run`, 카드 안의 탭) → 카카오웹툰 관리(`settings-card-kakao`, 기다무 충전 시각 옵션 포함) → 디스코드 설정 → **연동 주소**(`settings-card-links`: 웹툰 뷰어 서버 주소 + 뷰어 스캔 설정 + 이 앱의 외부 접속 주소, 디스코드 웹훅 없이도 항상 보임) → 다운로드 리포트(`settings-card-report`, 웹훅이 있을 때만) → 나머지.
+- **카드 안의 탭**(`75-settings-tabs.js`, 마크업 규칙): `.card-tabs`(`role="tablist"`) 안의 `.card-tab[data-tab]` 버튼과 같은 카드 안의 `.card-tab-panel[data-panel]`이 이름으로 짝을 이룬다. 탭에 `data-footer="이름"`이 있으면 그 탭이 선택됐을 때만 `.card-tab-footer[data-footer="이름"]`(여러 탭이 같이 쓰는 저장 줄)이 보인다 — 다운로드 · 실행 스케줄 카드에서는 신작 스캔/다운로드/아카이빙 탭이 하나의 저장 버튼(`btn-save-settings`, 세 스케줄을 한 번에 저장)을 같이 쓰고, 다운로드 폴더/속도 조절 탭은 각자의 저장 버튼을 쓴다. 숨겨진 패널도 DOM에 그대로 있어서 설정 불러오기(`loadSettingsPage`)와 저장은 보고 있는 탭과 상관없이 동작하고 불러와도 선택된 탭은 유지된다. 패널 아이디: `settings-panel-roots`, `settings-panel-pacing`(예전의 `settings-card-download-roots`/`settings-card-pacing`/`settings-card-schedule` 카드는 없다). 새 탭 카드를 만들 때는 같은 마크업 규칙을 쓰면 JS를 따로 만들 필요가 없다. 테스트: `tests/js/test_settings_card_tabs.js`.
+

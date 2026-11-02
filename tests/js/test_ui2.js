@@ -37,7 +37,7 @@ const kakao = (id, title, extra = {}) => ({ title_id: id, title, thumbnail_url: 
 
   console.log("1) 다운로드 폴더 선택기(네이버/카카오 따로, 마운트된 폴더 안에서 고르거나 새로 만들기)");
   run("window.__p = loadSettingsPage();"); await w.__p; await sleep(40);
-  ok(!!$("settings-card-download-roots") && !$("kakao-download-root-group").classList.contains("hidden"), "카드가 있고 카카오 관리를 켜면 카카오 폴더도 보임");
+  ok(!!$("settings-panel-roots") && !$("kakao-download-root-group").classList.contains("hidden"), "카드가 있고 카카오 관리를 켜면 카카오 폴더도 보임");
   ok(!$("naver-download-root") && !$("kakao-download-root"), "직접 입력하는 칸은 없어짐");
   ok($("naver-download-root-picker").querySelector(".drp-path").textContent === HOST && $("naver-download-root-picker").textContent.includes("(컨테이너: /webtoon_download, 기본 폴더)"), "네이버: 호스트 경로(" + HOST + ")가 앞에, 컨테이너 경로는 괄호로 보임");
   ok($("kakao-download-root-picker").textContent.includes("네이버와 같은 폴더"), "카카오: 비워 두면 '네이버와 같은 폴더'로 표시");

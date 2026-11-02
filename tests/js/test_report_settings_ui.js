@@ -53,7 +53,7 @@ const { makeApp, sleep, ok, done } = require("./harness");
 
   // Scenario 5: 뷰어 스캔 설정 — 불러오기(토큰 값은 안 보이고 저장돼 있다는 표시만), 켜고 새 토큰/대기 시간 저장, 토큰 지우기, 오류
   ok($("viewer-scan-toggle").checked === false && $("viewer-scan-token").value === "" && /저장됨/.test($("viewer-scan-token").placeholder) && $("viewer-scan-max-wait").value === "45", "스캔 설정 불러옴(토큰은 표시만)");
-  ok(/15~30분/.test($("settings-card-report").textContent) || /오래 걸/.test($("settings-card-report").textContent), "스캔이 오래 걸릴 수 있다는 안내");
+  ok(/15~30분/.test($("settings-card-links").textContent) && /오래 걸/.test($("settings-card-links").textContent), "스캔이 오래 걸릴 수 있다는 안내(연동 주소 카드)");
   $("viewer-scan-toggle").checked = true; $("viewer-scan-token").value = "새토큰"; $("viewer-scan-max-wait").value = "60";
   $("btn-save-viewer-scan").click(); await sleep(80);
   ok(JSON.stringify(posts.scan[0]) === JSON.stringify({ enabled: true, token: "새토큰", clear_token: false, max_wait_minutes: 60 }) && $("viewer-scan-token").value === "" && $("viewer-scan-save-result").textContent === "저장했습니다.", "스캔 설정 저장: " + JSON.stringify(posts.scan[0]));

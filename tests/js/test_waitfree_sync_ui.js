@@ -17,11 +17,11 @@ const { makeApp, sleep, ok, done } = require("./harness");
   const hidden = (id) => $(id).classList.contains("hidden");
   const rows = () => [...w.document.querySelectorAll("#waitfree-schedule-list li")].map((li) => li.textContent.replace(/\s+/g, " ").trim());
 
-  // Scenario 1: 처음(옵션 꺼짐) — 체크 해제, 설명과 예정 목록은 숨김. 옵션은 실행 스케줄 카드의 다운로드 블록 아래에 있다
+  // Scenario 1: 처음(옵션 꺼짐) — 체크 해제, 설명과 예정 목록은 숨김. 옵션은 "카카오웹툰 관리" 카드 안(대여권 옵션 아래)에 있다
   run("window.__p = loadWaitfreeSyncSetting();"); await w.__p; await sleep(40);
   ok($("waitfree-sync-toggle").checked === false && hidden("waitfree-schedule-box"), "꺼짐: 체크 해제, 예정 목록 숨김");
-  const card = $("settings-card-schedule"), dl = card.querySelector('.schedule-block[data-job="download_job"]');
-  ok(card.contains($("waitfree-sync-toggle")) && !!(dl.compareDocumentPosition($("waitfree-sync-toggle")) & w.Node.DOCUMENT_POSITION_FOLLOWING), "다운로드 스케줄 블록 아래(실행 스케줄 카드 안)에 있다");
+  const card = $("settings-card-kakao"), rental = $("kakao-rental-auto-group");
+  ok(card.contains($("waitfree-sync-toggle")) && !$("settings-card-run").contains($("waitfree-sync-toggle")) && !!(rental.compareDocumentPosition($("waitfree-sync-toggle")) & w.Node.DOCUMENT_POSITION_FOLLOWING), "카카오웹툰 관리 카드 안, 대여권 옵션 아래에 있다");
   ok(/정기 다운로드는 충전 시각 전인 기다무 작품을 건너뛰/.test($("waitfree-sync-group").textContent) && /수동 실행은/.test($("waitfree-sync-group").textContent), "옵션 설명: 정기 다운로드가 건너뜀, 수동 실행은 그대로");
 
   // Scenario 2: 켜면 바로 저장(요청 한 번)하고 그 아래에 "다운로드 예정" 목록이 시각 순(서버가 준 순서)으로 나온다 — 시각(한국시간)과 웹툰 제목, 남은 시간
