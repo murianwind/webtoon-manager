@@ -316,10 +316,16 @@ document.getElementById("btn-download-roots-save").addEventListener("click", asy
   }
 });
 
+// 뷰어 스캔 설정은 뷰어 서버 주소가 저장돼 있을 때만 보인다(주소가 없으면 스캔을 시킬 곳이 없다). 입력만 하고 저장하기 전에는 바뀌지 않는다.
+function showViewerScanBox(savedUrl) {
+  document.getElementById("viewer-scan-toggle").closest(".viewer-scan-box").classList.toggle("hidden", !savedUrl);
+}
+
 async function loadWebtoonServerUrl() {
   try {
     const data = await apiCall("/api/settings/webtoon-server");
     document.getElementById("webtoon-server-url").value = data.webtoon_server_url;
+    showViewerScanBox(data.webtoon_server_url);
   } catch (e) {
     // 조용히 무시 — 이 필드 하나 때문에 설정 탭 전체 로드가 막히면 안 됨
   }
@@ -334,6 +340,7 @@ document.getElementById("btn-save-webtoon-server-url").addEventListener("click",
       method: "POST",
       body: JSON.stringify({ webtoon_server_url: url }),
     });
+    showViewerScanBox(url);
     resultEl.style.color = "";
     resultEl.textContent = "저장했습니다.";
   } catch (e) {

@@ -1,16 +1,16 @@
 // 설정 화면 정리 — ① 다운로드 폴더/다운로드 속도 조절/신작 스캔/다운로드/아카이빙을 카드 하나("다운로드 · 실행 스케줄") 안의 탭으로 모은다
-// ② 웹툰 뷰어 서버 주소와 이 앱의 외부 접속 주소를 카드 하나("연동 주소")로 모은다 ③ 기다무 충전 시각 다운로드 옵션은 "카카오웹툰 관리" 카드로 옮긴다.
+// ② 웹툰 뷰어 서버 주소와 이 앱의 외부 접속 주소를 카드 하나("연동 주소", 웹훅이 있어야 보임)로 모은다 ③ 기다무 충전 시각 다운로드 옵션은 "카카오웹툰 관리" 카드로 옮긴다.
 const { makeApp, sleep, ok, done } = require("./harness");
 (async () => {
   const cron = (h, m = 0, days = []) => ({ mode: "cron", interval_minutes: 60, cron_times: [{ hour: h, minute: m, days }], target: "naver" });
-  let saved = null;
+  let saved = null, webhook = false;
   const routes = {
     "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "http://192.168.0.49:25600" },
     "/api/settings": (o) => {
       if (o.method === "POST") { saved = JSON.parse(o.body); return saved; }
       return { discovery_job: cron(7, 0, ["mon"]), download_job: [{ ...cron(4, 30), target: "kakao" }], archive_job: cron(5, 0) };
     },
-    "/api/settings/discord": () => ({ webhook_url_set: false, bot_token_set: false, notify_channel_id: "", bot_ready: false }),
+    "/api/settings/discord": () => ({ webhook_url_set: webhook, bot_token_set: false, notify_channel_id: "", bot_ready: false }),
     "/api/webtoons": () => [], "/api/kakao-webtoons": () => [],
   };
   const { w, run } = makeApp(routes); await sleep(60); run("kakaoWebtoonsEnabled = true;");
@@ -68,13 +68,15 @@ const { makeApp, sleep, ok, done } = require("./harness");
   ok(kakao.contains($("waitfree-sync-group")) && kakao.contains($("waitfree-sync-toggle")) && kakao.contains($("waitfree-schedule-box")), "카카오웹툰 관리 카드 안");
   ok(!!(kakao.querySelector("#kakao-rental-auto-group").compareDocumentPosition($("waitfree-sync-group")) & w.Node.DOCUMENT_POSITION_FOLLOWING), "대여권 옵션 아래에 있다");
 
-  // Scenario 7: 연동 주소 카드 — 뷰어 서버 주소(+스캔 설정)와 이 앱의 외부 접속 주소가 한 카드에 있고, 웹훅이 없어서 리포트 카드가 숨겨져도 보인다. 리포트 카드에는 더 없다
-  const links = $("settings-card-links");
-  ok(links.querySelector("h2").textContent.trim() === "연동 주소" && shown(links), "연동 주소 카드가 보임");
+  // Scenario 7: 연동 주소 카드 — 뷰어 서버 주소(+스캔 설정)와 이 앱의 외부 접속 주소가 한 카드에 있다. 디스코드 링크(바로가기/목록 제외)에 쓰는 주소라 리포트 카드처럼 웹훅이 있어야 보인다. 리포트 카드에는 더 없다
+  const links = $("settings-card-links"), report = $("settings-card-report");
+  ok(links.querySelector("h2").textContent.trim() === "연동 주소", "연동 주소 카드 제목");
   ok(["webtoon-server-url", "btn-save-webtoon-server-url", "viewer-scan-toggle", "viewer-scan-token", "viewer-scan-max-wait", "btn-save-viewer-scan", "app-public-base-url", "btn-save-app-public-base-url"].every((id) => links.contains($(id))), "두 주소와 뷰어 스캔 설정이 한 카드에");
-  const report = $("settings-card-report");
-  ok(!shown(report) && ["webtoon-server-url", "app-public-base-url", "viewer-scan-toggle"].every((id) => !report.contains($(id))), "리포트 카드에는 주소/스캔 설정이 없다(웹훅 없으면 리포트 카드는 숨김)");
+  ok(!shown(links) && !shown(report), "웹훅이 없으면 연동 주소/리포트 카드 모두 숨김");
+  ok(["webtoon-server-url", "app-public-base-url", "viewer-scan-toggle"].every((id) => !report.contains($(id))), "리포트 카드에는 주소/스캔 설정이 없다");
   ok(report.contains($("report-quiet-group")) && report.contains($("report-batch-minutes")) && report.contains($("report-unregistered-toggle")), "리포트 카드에는 발송하지 않는 시간/모으는 시간/새 에피소드 섹션");
-  ok($("webtoon-server-url").value === "http://192.168.0.49:25600", "뷰어 서버 주소는 그대로 불러와짐");
+  ok($("webtoon-server-url").value === "http://192.168.0.49:25600", "뷰어 서버 주소는 그대로 불러와짐(숨겨져 있어도 값은 유지)");
+  webhook = true; run("window.__p = loadDiscordSettings();"); await w.__p; await sleep(40);
+  ok(shown(links) && shown(report), "웹훅을 저장하면 연동 주소/리포트 카드가 나타난다");
   done();
 })();

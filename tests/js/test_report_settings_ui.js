@@ -5,9 +5,10 @@ const { makeApp, sleep, ok, done } = require("./harness");
   const quiet = (sh, sm, eh, em, days = []) => ({ start_hour: sh, start_minute: sm, end_hour: eh, end_minute: em, days });
   let report = { quiet_hours: [quiet(23, 0, 6, 0, ["mon", "tue"]), quiet(13, 30, 14, 0)], batch_minutes: 15 };
   let scan = { enabled: false, token_set: true, max_wait_minutes: 45, ready: false };
+  let serverUrl = "http://viewer";
   const posts = { report: [], scan: [] }; let reportError = null, scanError = null;
   const routes = {
-    "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "http://viewer" },
+    "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": (o) => { if (o && o.method === "POST") serverUrl = JSON.parse(o.body).webtoon_server_url; return { webtoon_server_url: serverUrl }; },
     "/api/settings": { discovery_job: { mode: "off", interval_minutes: 60, cron_times: [{ hour: 3, minute: 0, days: [] }], target: "naver" }, download_job: [], archive_job: { mode: "off", interval_minutes: 60, cron_times: [{ hour: 3, minute: 0, days: [] }], target: "naver" } },
     "/api/settings/report": (o) => { if (o && o.method === "POST") { if (reportError) throw new Error(reportError); report = JSON.parse(o.body); posts.report.push(report); } return report; },
     "/api/settings/viewer-scan": (o) => { if (o && o.method === "POST") { if (scanError) throw new Error(scanError); const b = JSON.parse(o.body); posts.scan.push(b); scan = { ...scan, enabled: b.enabled, max_wait_minutes: b.max_wait_minutes, token_set: b.clear_token ? false : (b.token ? true : scan.token_set) }; } return scan; },
@@ -66,5 +67,18 @@ const { makeApp, sleep, ok, done } = require("./harness");
   ok(posts.scan[2].clear_token === true && /없음|입력/.test($("viewer-scan-token").placeholder), "토큰 지우기");
   scanError = "스캔 대기 시간은 1~240분이어야 합니다."; $("btn-save-viewer-scan").click(); await sleep(80);
   ok(/1~240분/.test($("viewer-scan-save-result").textContent), "스캔 설정 오류 표시");
+  // Scenario 6: 뷰어 스캔 설정(박스)은 뷰어 서버 주소가 저장돼 있을 때만 보인다 — 주소를 저장하면 나타나고, 지우면 사라진다. 숨겨져도 저장된 스캔 설정은 그대로
+  const box = $("viewer-scan-toggle").closest(".viewer-scan-box");
+  ok(!box.classList.contains("hidden"), "주소가 저장돼 있으면 스캔 설정이 보임");
+  $("webtoon-server-url").value = ""; $("btn-save-webtoon-server-url").click(); await sleep(60);
+  ok(box.classList.contains("hidden") && $("webtoon-server-save-result").textContent === "저장했습니다.", "주소를 지우고 저장하면 스캔 설정이 숨겨짐");
+  $("webtoon-server-url").value = "http://192.168.0.49:25600"; $("btn-save-webtoon-server-url").click(); await sleep(60);
+  ok(!box.classList.contains("hidden"), "주소를 저장하면 스캔 설정이 나타남");
+  $("webtoon-server-url").value = ""; $("webtoon-server-url").dispatchEvent(new w.Event("input"));
+  ok(!box.classList.contains("hidden"), "주소 입력칸을 지우는 중이어도(저장 전) 바뀌지 않는다 — 저장된 주소 기준");
+  $("webtoon-server-url").value = "http://typed-but-not-saved"; $("webtoon-server-url").dispatchEvent(new w.Event("input"));
+  ok(!box.classList.contains("hidden"), "입력만 하고 저장하기 전에는 바뀌지 않는다(저장된 주소 기준)");
+  serverUrl = ""; run("window.__p = loadWebtoonServerUrl();"); await w.__p; await sleep(30);
+  ok(box.classList.contains("hidden"), "저장된 주소가 없으면(설정 화면을 열 때) 숨겨짐");
   done();
 })();

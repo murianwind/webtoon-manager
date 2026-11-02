@@ -21,13 +21,13 @@ const { makeApp, sleep, ok, done } = require("./harness");
 
   // 2) 웹훅 없음 + 리포트 옵션 꺼짐: 카카오 카드는 보이고(안내 표시), 리포트 카드는 숨김
   run("window.__p = loadSettingsPage();"); await w.__p; await sleep(60);
-  ok(shown("settings-card-kakao") && shown("settings-card-links") && !shown("settings-card-report"), "웹훅이 없어도 카카오웹툰 관리와 연동 주소는 보이고, 다운로드 리포트는 숨겨짐");
+  ok(shown("settings-card-kakao") && !shown("settings-card-links") && !shown("settings-card-report"), "웹훅이 없어도 카카오웹툰 관리는 보이고, 연동 주소와 다운로드 리포트는 숨겨짐(보낼 곳이 있어야 의미가 있다)");
   ok(shown("kakao-no-webhook-hint") && /알림/.test($("kakao-no-webhook-hint").textContent) && /다운로드는 그대로/.test($("kakao-no-webhook-hint").textContent), "웹훅이 없으면 '알림은 못 받지만 다운로드는 그대로'라는 안내가 보임");
   ok(shown("kp-cookie-json") || $("kp-cookie-json") !== null, "쿠키 입력칸이 카카오 카드 안에 있어 웹훅 없이도 입력 가능");
 
   // 3) 웹훅 저장: 리포트 카드가 나타나고 안내는 사라짐. 리포트 옵션을 꺼도 카카오 카드는 그대로
   state.webhook = true; run("window.__p = loadDiscordSettings();"); await w.__p; await sleep(30);
-  ok(shown("settings-card-report") && shown("settings-card-kakao") && !shown("kakao-no-webhook-hint"), "웹훅이 있으면 리포트 카드가 나타나고 안내는 숨겨짐");
+  ok(shown("settings-card-report") && shown("settings-card-links") && shown("settings-card-kakao") && !shown("kakao-no-webhook-hint"), "웹훅이 있으면 연동 주소/리포트 카드가 나타나고 안내는 숨겨짐");
   $("report-unregistered-toggle").checked = true; $("report-unregistered-toggle").dispatchEvent(new w.Event("change")); await sleep(30);
   $("report-unregistered-toggle").checked = false; $("report-unregistered-toggle").dispatchEvent(new w.Event("change")); await sleep(30);
   ok(state.unregistered === false && shown("settings-card-kakao"), "리포트의 '미등록 웹툰 새 에피소드' 옵션을 꺼도 카카오 카드는 사라지지 않음(옵션은 리포트 내용만 정함)");

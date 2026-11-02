@@ -32,11 +32,12 @@ async function loadDiscordSettings() {
 // 입력 포함)를 하는 곳이라 항상 보인다. 웹훅이 없으면 그 카드에 "알림은 못 받는다"는 안내만 띄운다.
 // 화면에 보일지만 정할 뿐, 저장된 설정 값은 건드리지 않는다.
 function updateSettingsCardVisibility() {
-  // "실행 스케줄"은 신작 스캔/다운로드/아카이빙처럼 디스코드와 무관한 것도 다루니
-  // 웹훅 여부와 상관없이 항상 보인다. "다운로드 리포트"(발송 시각 포함)만 보낼 곳이
-  // 있어야 의미가 있어서 웹훅이 설정돼야 나타난다.
+  // "다운로드 · 실행 스케줄"은 신작 스캔/다운로드/아카이빙처럼 디스코드와 무관한 것도 다루니
+  // 웹훅 여부와 상관없이 항상 보인다. "다운로드 리포트"와 "연동 주소"(리포트의 바로가기/목록 제외
+  // 링크에 쓰는 주소)는 보낼 곳이 있어야 의미가 있어서 웹훅이 설정돼야 나타난다.
   const webhookConfigured = document.getElementById("discord-webhook-url").dataset.masked === "true";
   document.getElementById("settings-card-report").classList.toggle("hidden", !webhookConfigured);
+  document.getElementById("settings-card-links").classList.toggle("hidden", !webhookConfigured);  // 연동 주소(뷰어/외부 접속 주소)도 리포트 링크용이라 같은 조건
 
   document.getElementById("kakao-no-webhook-hint").classList.toggle("hidden", webhookConfigured);
 }
