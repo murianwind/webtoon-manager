@@ -256,6 +256,8 @@ function kakaoManualSummaryHtml(a) {
   const lines = [`저장 폴더: ${escapeHtml(a.folder)}`];
   if (a.mode === "new_folder") {
     lines.push("이 작품 폴더에 받은 파일이 없어서 처음(프롤로그 포함)부터 받습니다.");
+  } else if (a.mode === "recorded_only") {
+    lines.push(`폴더는 비어 있지만 받은 회차 기록(${a.downloaded_count}개)이 있어서, 기록에 없는 회차만 받습니다. 새 회차를 받을 때 폴더를 만듭니다.`);
   } else if (a.mode === "single_marker" && a.marker) {
     lines.push(`폴더에 파일이 하나(${a.marker.number}번 ${escapeHtml(a.marker.subtitle)})뿐이라 그 회차 이후부터 받습니다.`);
   } else {

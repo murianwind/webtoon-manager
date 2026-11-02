@@ -8,7 +8,8 @@
 - 기록이 없는 작품(이 기능이 들어오기 전부터 받던 작품): 시작할 때 한 번(backfill_all), 또는 첫 자동 다운로드 때(sync_before_planning)
   폴더의 파일 번호 + 아카이빙 이력(옮긴 파일 이름)으로 처음 기록을 만든다. 폴더 안의 빈 회차는 기록하지 않아서 받게 된다.
 - 그 뒤로는 회차를 저장하는 곳(kakao_page_download.download_episode — 자동/수동/기다무 모두 거친다)에서 받을 때마다 더한다.
-- 폴더를 통째로 비우면 기록도 버리고 처음부터 받는다(다시 받으려고 비운 것으로 본다).
+- 폴더를 비우거나 없애도(전체를 아카이빙한 경우 등) 기록은 지우지 않는다 — 기록에 없는 회차만 받는다. 기록은 날짜로도 지워지지 않는다(아카이빙 이력과 달리).
+  처음부터 다시 받으려면 수동 다운로드에서 "받지 않은 것으로 기록"으로 직접 지정한다. 아카이빙으로 옮기기 직전에는 폴더의 회차를 기록에 확정해 둔다(remember_folder_episodes).
 - 표식 파일 하나만 있고 아카이빙 이력도 없으면(예전 도구가 남긴 폴더) 파일 번호가 사이트와 다를 수 있어서, 첫 다운로드 때 사이트와 맞춰 본 위치로 기록한다.
 """
 
@@ -43,12 +44,10 @@ def initial_numbers(existing, archived: set[int], single_marker_number: int | No
 
 def sync_before_planning(series_id: int, existing, plan_without_record) -> set[int] | None:
     """다운로드 계획을 세우기 전에 기록을 폴더 상태에 맞춘다. 계획에 쓸 기록(없으면 None)을 돌려준다.
-    폴더가 비었으면 기록을 버리고, 기록이 없으면 처음 만들고, 있으면 폴더에 새로 생긴 파일 번호를 더한다."""
+    폴더가 비었으면 기록을 그대로 둔다(없으면 None), 기록이 없으면 처음 만들고, 있으면 폴더에 새로 생긴 파일 번호를 더한다."""
     recorded = repository.get_kakao_downloaded_numbers(series_id)
     if not existing:
-        if recorded:
-            repository.set_kakao_downloaded_numbers(series_id, set())
-        return None
+        return recorded or None
     folder_numbers = {f.number for f in existing}
     if recorded is None:
         marker = plan_without_record.marker
@@ -63,6 +62,19 @@ def sync_before_planning(series_id: int, existing, plan_without_record) -> set[i
         repository.add_kakao_downloaded_numbers(series_id, missing)
         recorded = recorded | missing
     return recorded or None
+
+
+def remember_folder_episodes(series_id: int, folder_numbers) -> None:
+    """아카이빙으로 옮기기 직전에 호출한다 — 폴더에 있는(옮길 것과 남길 것 모두) 회차를 받은 회차 기록에 확정해 둔다.
+    아카이빙 이력은 보관 기간이 지나면 지워지고 파일도 폴더를 떠나서, 이 기록이 이 작품이 받은 회차를 기억하는 유일하게 오래 남는 곳이다.
+    기록이 없는 작품이면 기존 방식(아카이빙 이력)으로 먼저 채운 뒤 더한다. 추적하지 않는 작품이면 아무것도 하지 않는다."""
+    numbers = {int(n) for n in folder_numbers}
+    if not numbers:
+        return
+    record = repository.get_kakao_downloaded_numbers(series_id)
+    if record is None:
+        record = archived_numbers(series_id)
+    repository.set_kakao_downloaded_numbers(series_id, record | numbers)
 
 
 def mark(series_id: int, numbers, downloaded: bool, existing) -> dict:

@@ -37,10 +37,12 @@ plan = kp.plan_by_folder_rules(eps(452), files(451), "작품", recorded={447, 44
 assert nums(plan.to_download) == [450, 452], nums(plan.to_download)
 assert [r.before_start for r in plan.rows if r.episode.number == 446] == [True]                                                # 기록의 가장 앞(447)보다 앞은 시작 지점 이전
 print("1-3) 실패한 450은 아카이빙 뒤에도 다시 받음 OK")
-# 1-4. 폴더를 비웠으면(파일 없음) 기록을 무시하고 처음부터
+# 1-4. 폴더가 비어도(파일 없음) 기록이 있으면 기록을 믿고 기록에 없는 회차만 받는다(전체를 아카이빙한 뒤 연재를 재개한 경우). 기록도 없으면 처음부터
 plan = kp.plan_by_folder_rules(eps(5), [], "작품", recorded={1, 2, 3})
+assert plan.mode == "recorded_only" and nums(plan.to_download) == [4, 5] and all(r.archived and r.downloaded for r in plan.rows if r.episode.number <= 3)
+plan = kp.plan_by_folder_rules(eps(5), [], "작품", recorded=None)
 assert plan.mode == "new_folder" and nums(plan.to_download) == [1, 2, 3, 4, 5] and not any(r.archived or r.downloaded for r in plan.rows)
-print("1-4) 폴더 비움 → 기록 무시 OK")
+print("1-4) 폴더 비어도 기록 유지 / 기록 없으면 처음부터 OK")
 # 1-5. 기록이 없으면(None) 예전 규칙 그대로: 파일 하나뿐이면 그 다음부터
 plan = kp.plan_by_folder_rules(eps(404), files(400), "작품", recorded=None)
 assert plan.mode == "single_marker" and plan.marker.number == 400 and nums(plan.to_download) == [401, 402, 403, 404]
@@ -108,11 +110,16 @@ archive_all_but_last(); assert present() == [451]
 client.fail = set(); r = run(client); assert r.downloaded == [450, 452] and r.failed is None and {447, 448, 449, 450, 451, 452} <= repository.get_kakao_downloaded_numbers(7)
 print("3-2) 실패한 450 → 아카이빙 뒤에도 다시 받음 OK")
 
-# 3-3. 폴더를 통째로 비우면 기록을 버리고 처음부터(기록은 새로 받은 것만 남는다)
+# 3-3. 폴더를 통째로 비워도 기록은 그대로다 — 새 회차(453)만 받고 폴더는 그때 다시 만들어진다. 처음부터 다시 받으려면 기록을 직접 비운다(받지 않은 것으로 기록의 전체 버전)
 for f in list(FOLDER.iterdir()): f.unlink()
+FOLDER.rmdir()
+client = FakeClient(eps(453)); r = run(client)
+assert r.downloaded == [453] and {447, 448, 449, 450, 451, 452, 453} <= repository.get_kakao_downloaded_numbers(7), (r.downloaded, repository.get_kakao_downloaded_numbers(7))
+for f in list(FOLDER.iterdir()): f.unlink()
+repository.set_kakao_downloaded_numbers(7, set())                      # 기록을 직접 비움 = 처음부터 다시 받겠다는 뜻
 client = FakeClient(eps(3)); r = run(client)
 assert r.downloaded == [1, 2, 3] and repository.get_kakao_downloaded_numbers(7) == {1, 2, 3}
-print("3-3) 폴더 비움 → 처음부터 OK")
+print("3-3) 폴더 비워도 기록 유지 / 기록을 비우면 처음부터 OK")
 
 # 3-4. 수동 다운로드도 같은 지점에서 기록 + 보관 폴더로 옮겨진 회차를 다시 받아도 "교체"로 세지 않음
 for f in list(FOLDER.iterdir()): f.unlink()

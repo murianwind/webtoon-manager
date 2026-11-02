@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 from app import kakao_cover, repository
+from app import kakao_records
 
 from app.archiver.folder_archive import (
     _archive_folder_target,
@@ -133,6 +134,17 @@ def _move_title_files(files: list, dest: TitleDestination, report: ProgressRepor
     return moved
 
 
+def _kakao_series_id(title_id: str) -> int | None:
+    """"kakao_<번호>" 형태의 대상 번호에서 카카오페이지 작품 번호를 꺼낸다(아니면 None)."""
+    prefix = KAKAO_TARGET_PREFIX
+    if not title_id.startswith(prefix):
+        return None
+    try:
+        return int(title_id[len(prefix):])
+    except ValueError:
+        return None
+
+
 def _archive_title(job: TitleArchiveJob, report: ProgressReport | None = None) -> int:
     """실제로 파일들을 옮기고 이력을 남긴다. 반환값은 옮긴 개수.
     job.dest_type이 'rclone'이면 로컬 shutil 대신 rclone CLI로 처리한다(Windows 마운트를
@@ -148,6 +160,11 @@ def _archive_title(job: TitleArchiveJob, report: ProgressReport | None = None) -
 
     title_dir = _title_folder(job.download_root, job.title_name, job.kakao)
     files = _list_episode_files_sorted(title_dir)
+    if job.kakao and files:
+        # 옮기기 직전에 폴더의 회차(남길 파일 포함)를 받은 회차 기록에 확정한다 — 아카이빙 이력은 보관 기간이 지나면 지워지므로, 그 뒤에도 기록이 이 작품이 받은 회차를 기억하게 한다
+        series_id = _kakao_series_id(job.title_id)
+        if series_id is not None:
+            kakao_records.remember_folder_episodes(series_id, [num for num, _path in files])
     if job.keep_last and len(files) > 0:
         files = files[:-1]  # 마지막(가장 큰 번호)은 보존
     if job.read_numbers is not None:

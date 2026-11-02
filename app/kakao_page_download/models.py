@@ -141,7 +141,7 @@ class EpisodeRow:
 
 @dataclass
 class DownloadPlan:
-    mode: str  # new_folder | single_marker | compare
+    mode: str  # new_folder | recorded_only | single_marker | compare
     rows: list[EpisodeRow] = field(default_factory=list)
     to_download: list[Episode] = field(default_factory=list)  # 지금 받을 수 있는 것(번호순) — 앞에 잠긴 회차가 있어도 무료/대여 중이면 포함
     locked: list[Episode] = field(default_factory=list)  # 못 받는 것 전부(번호순) — 가장 앞의 잠긴 회차부터 기다무로 하나씩 연다
@@ -296,7 +296,8 @@ def plan_by_folder_rules(
     받을 수 있는 회차(무료/대여 중)는 앞에 잠긴 회차가 있어도 그때그때 받고, 잠긴 회차는 번호순으로 모아 두었다가 가장 앞의 것부터
     기다무로 하나씩 연다(run_download). recorded는 작품의 받은 회차 기록(없으면 None) — 폴더에 파일이 있고 기록도 있으면 아카이빙으로
     옮겨진 회차도 "받은 것"으로 보고(파일이 하나뿐이라는 이유로 앞 회차가 전부 잘려 나가지 않는다), 가장 앞 기록부터를 대상으로 삼는다.
-    폴더에 파일이 없으면 기록은 무시하고 처음부터 받는다(폴더를 비운 것은 다시 받으려는 것). series_title은 파일 이름 속 부제목에 붙은
+    폴더에 파일이 없어도 기록이 있으면 기록을 믿고 기록에 없는 회차만 받고(recorded_only), 기록도 없으면 처음부터 받는다(new_folder).
+    series_title은 파일 이름 속 부제목에 붙은
     작품명을 떼고 비교하는 데 쓴다(없으면 있는 그대로 비교).
 
     숨김(hidden) 회차는 "아직 무료/대여로 열리지 않은 예정 회차"다 — 사이트는 "N일 후 무료"로 목록에 보여 주므로 빼지 않고 잠긴 회차로
@@ -308,7 +309,13 @@ def plan_by_folder_rules(
     archived_numbers: set[int] = set()
 
     lower_bound = 0  # 이 번호보다 앞 회차는 자동으로 받지 않는다
-    if not existing:
+    if not existing and recorded:
+        # 폴더가 비어 있거나 없어도(전체를 아카이빙한 뒤 연재를 재개한 경우 등) 받은 회차 기록은 그대로 믿는다 — 기록에 없는 회차만 받는다.
+        # 기록은 날짜로도 폴더 상태로도 지워지지 않는다(처음부터 다시 받으려면 "받지 않은 것으로 기록"으로 직접 지정한다).
+        mode = "recorded_only"
+        archived_numbers = set(recorded)
+        lower_bound = min(recorded)
+    elif not existing:
         mode = "new_folder"
     elif recorded:
         mode = "compare"
