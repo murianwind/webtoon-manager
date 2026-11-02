@@ -256,3 +256,18 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - **시각 기반 다운로드**(`scheduler/waitfree_job.run_waitfree_due_job`): 옵션이 켜지면 `schedule.apply_waitfree_job`이 1분 간격 작업(`waitfree_job`, `max_instances=1`)을 등록하고 끄면 해제합니다(`create_scheduler`/`reschedule_all`/설정 API 모두 호출, 여러 번 불러도 하나). 틱은 저장된 시각만 보고(서버 요청 없음), 받을 작품이 없으면 작업 상태·이력도 만들지 않고, `_download_job_lock`이 잡혀 있으면(정기/수동 다운로드 중) 건너뜁니다. 받을 작품이 있으면 `job_status("download")`로 한 개씩(`_download_kakao_subscriptions(only=…)` — 기존 속도 조절·알림·완결 처리 그대로) 받은 뒤: 받고도 충전 시각이 그대로면 `RETRY_MINUTES`(10분), 오류/로그인 풀림/쿠키 없음이면 `ERROR_MINUTES`(30분) 뒤로 미룹니다(같은 작품을 연속으로 두드리지 않게).
 - **API/화면**: `GET/POST /api/settings/waitfree-sync`(POST는 스케줄러 등록도 바로 반영, 스케줄러가 아직 없으면 시작할 때 반영), `GET /api/waitfree/schedule`(구독 중이고 시각을 아는 작품을 `due_at` 순으로). 설정 > 실행 스케줄 카드의 다운로드 블록 아래 체크박스(`waitfree-sync-toggle`, 바꾸면 즉시 저장·실패 시 되돌림)와 그 밑 "다운로드 예정" 목록(`waitfree-schedule-list`: 한국시간 시각, 제목, 남은 시간 `waitfreeRemainingText`)이며 옵션이 꺼져 있으면 목록을 읽지 않고, 보고 있는 동안 30초마다 갱신합니다. 테스트: `tests/backend/test_waitfree_sync.py`, `tests/js/test_waitfree_sync_ui.js`.
 
+## 스케줄: 요일을 시각마다 선택
+
+- **저장 형식**: `JobSchedule.cron_times`의 항목이 `{hour, minute, days}`(`days`는 `mon`~`sun`, 비어 있으면 매일)입니다. 예전의 스케줄 공통 `cron_days` 필드는 없앴고, 읽을 때(`schedule_config.from_dict` — 저장된 값과 API 입력 모두) `days`가 **없는**(None) 시각마다 공통 요일을 복사해서 동작이 그대로 유지됩니다(`days: []`처럼 명시한 빈 목록은 매일이라 그대로 둠). `cron_hour`/`cron_minute` 단일 시각 형식도 계속 읽습니다. `sanitized()`가 요일을 월~일 순서로, 잘못된 값과 중복을 빼고 정리합니다.
+- **실행**: `scheduler/schedule._build_trigger`가 시각마다 `CronTrigger(day_of_week=…)`를 하나씩 만들어 `OrTrigger`로 묶습니다(`days` 없으면 `*`).
+- **API**: `CronTimeIn.days`(None이면 옛 화면이 보낸 공통 `cron_days` 사용), `GET /api/settings` 응답에는 `cron_days`가 없고 시각마다 `days`가 들어 있습니다(`_schedule_dict`가 정리해서 내려보냄).
+- **아카이빙 10분 간격 검사**(`_check_archive_gap_against`): 이제 한 주(월 00:00 기준, 10080분) 안의 실제 실행 순간끼리 비교합니다(`_week_minutes`) — 요일이 겹치지 않으면 허용하고, 자정을 넘어 다음 날 새벽/주를 넘어가는 경우(일 23:55 다운로드 → 월 00:02 아카이빙)도 잡습니다. 오류 메시지에는 시각과 요일이 같이 나옵니다.
+- **화면**(`70-settings-schedule.js`): 시각 줄(`schedule-time-row`)마다 `schedule-day-chips`(월~일 `day-chip`)가 있고 `readScheduleControls`가 줄별로 `days`를 모읍니다. 새 시각 줄은 요일 해제(매일)로 시작합니다. 예전 `day-checkbox` 공통 줄은 없앴습니다. 테스트: `tests/backend/test_schedule_time_days.py`, `tests/js/test_schedule_time_days.js`.
+
+## CI에서 간헐적으로 실패하던 동시 받기 테스트(test_naver_core_downloader)
+
+- **증상**: `assert tracker.max == 2` 가 `동시 받기 상한(2)을 지켜야 한다: 1`로 실패(GitHub Actions에서만, 로컬에선 통과).
+- **원인**: 이미지 하나를 받는 코드가 파일을 `aiofiles`로 쓰는데 이것이 실제 스레드풀에서 돌아서, 러너가 느리거나 스레드 순서가 밀리면 첫 이미지의 "열기→받기→닫기"가 끝난 뒤에야 둘째 이미지의 파일 열기가 끝난다. 예전 헬퍼는 `iter_chunked` 안에서만 동시 수를 세서 "동시에 1개"로 재어졌다. 코드(세마포어)는 맞고 **테스트가 스레드 타이밍에 기대고 있었다**. 둘째 파일 열기만 0.2초 늦추면 로컬에서도 같은 메시지로 재현된다.
+- **수정**: `InflightTracker`가 요청의 `async with` 구간 전체를 세고, `rendezvous=2`를 주면 2개가 동시에 들어올 때까지 서로 기다린다(상한이 지켜지면 정확히 2로 만나고, 상한이 낮으면 만나지 못해 시간 초과로 실패 — 타이밍과 무관). 시간 초과로 실패한 요청은 카운트에서 빼서 숫자가 쌓여 오탐하지 않게 했다. 테스트에는 "둘째 파일 열기가 느린 환경" 시나리오를 넣어 두었다. 변형 검사: 상한 +1, 상한 1, 상한 없음 모두 실패로 잡힌다.
+- **비슷한 위험 후보**(바꾸지는 않음): 실제 `asyncio.sleep(0.05)`로 작업 시작을 기다리는 `test_kp_schedule.py`(79·90·92줄), `test_kp_archive_kakao.py`(85줄), `test_kp_cache.py`(29줄). 느린 러너에서 간헐적으로 실패하면 "조건이 될 때까지 짧게 반복 확인"하는 방식으로 바꾼다.
+

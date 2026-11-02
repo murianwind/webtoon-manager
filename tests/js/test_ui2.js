@@ -25,7 +25,7 @@ const kakao = (id, title, extra = {}) => ({ title_id: id, title, thumbnail_url: 
       const q = new URL(url, "http://x").searchParams; const path = q.get("path") || "";
       return { path, folders: (tree[path] || []).map((n) => ({ name: n, path: path ? `${path}/${n}` : n })) };
     },
-    "/api/settings": { discovery_job: { mode: "off", interval_minutes: 60, cron_times: [{ hour: 3, minute: 0 }], cron_days: [], target: "naver" }, download_job: [], report_job: { mode: "off", interval_minutes: 60, cron_times: [{ hour: 3, minute: 0 }], cron_days: [], target: "naver" }, archive_job: { mode: "off", interval_minutes: 60, cron_times: [{ hour: 3, minute: 0 }], cron_days: [], target: "naver" } },
+    "/api/settings": { discovery_job: { mode: "off", interval_minutes: 60, cron_times: [{ hour: 3, minute: 0, days: [] }], target: "naver" }, download_job: [], report_job: { mode: "off", interval_minutes: 60, cron_times: [{ hour: 3, minute: 0, days: [] }], target: "naver" }, archive_job: { mode: "off", interval_minutes: 60, cron_times: [{ hour: 3, minute: 0, days: [] }], target: "naver" } },
     "/api/kakao-manual/analyze": () => current, "/api/kakao-manual/search": [{ title_id: 68239972, title: "개미", thumbnail_url: "https://k/ant", authors: "김용회, 베르나르 베르베르", status: "연재", subscription: null }, { title_id: 61641075, title: "쌍갑포차", thumbnail_url: "https://k/s", authors: "배혜수", status: "연재", subscription: "active" }],
     "/api/kakao-manual/run": { status: "started" }, "/api/jobs/status": { manual: { status: "running", log: [] } },
     "/api/naver-list": () => [], "/api/kakao-list": { items: [kakao(71000001, "달마부장"), kakao(71000002, "궁", { status: "active", ever_subscribed: true })], version: "v1", refreshing: false, refreshed_at: "2026-09-30T01:00:00+00:00" },

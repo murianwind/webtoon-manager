@@ -44,9 +44,8 @@ def _build_trigger(schedule: JobSchedule):
     if schedule.mode == "off":
         return None
     if schedule.mode == "cron":
-        day_of_week = ",".join(schedule.cron_days) if schedule.cron_days else "*"
         triggers = [
-            CronTrigger(hour=t["hour"], minute=t["minute"], day_of_week=day_of_week, timezone="Asia/Seoul")
+            CronTrigger(hour=t["hour"], minute=t["minute"], day_of_week=",".join(t.get("days") or []) or "*", timezone="Asia/Seoul")  # 시각마다 자기 요일(없으면 매일)
             for t in schedule.cron_times
         ]
         if len(triggers) == 1:

@@ -19,9 +19,21 @@ router = APIRouter()
 
 
 
+_DAY_LABELS = {"mon": "월", "tue": "화", "wed": "수", "thu": "목", "fri": "금", "sat": "토", "sun": "일"}
+
+
 class CronTimeIn(BaseModel):
     hour: int
     minute: int
+    days: list[str] | None = None  # 이 시각에만 적용하는 요일(비어 있으면 매일). 안 보내면(옛 화면) 스케줄 공통 cron_days를 쓴다
+
+    @field_validator("days")
+    @classmethod
+    def days_must_be_valid(cls, v: list[str] | None) -> list[str] | None:
+        invalid = [d for d in v or [] if d not in schedule_config.VALID_DAYS]
+        if invalid:
+            raise ValueError(f"알 수 없는 요일: {invalid}")
+        return v
 
     @field_validator("hour")
     @classmethod
@@ -42,7 +54,7 @@ class JobScheduleIn(BaseModel):
     mode: str  # off | interval | cron
     interval_minutes: int = 60
     cron_times: list[CronTimeIn] = [CronTimeIn(hour=3, minute=0)]
-    cron_days: list[str] = []
+    cron_days: list[str] = []  # 옛 화면이 보내던 스케줄 공통 요일(읽을 때 요일이 없는 시각에 복사). 새 화면은 시각마다 days를 보낸다
     target: str = "naver"  # 다운로드 스케줄에서만 쓴다: naver | kakao | both
 
     @field_validator("mode")
@@ -90,11 +102,11 @@ class SchedulesIn(BaseModel):
 
 
 def _schedule_dict(s: "schedule_config.JobSchedule") -> dict:
+    s = s.sanitized()  # 기본값처럼 정리되지 않은 스케줄도 시각마다 days가 채워진 형태로 내려간다
     return {
         "mode": s.mode,
         "interval_minutes": s.interval_minutes,
         "cron_times": s.cron_times,
-        "cron_days": s.cron_days,
         "target": s.target,
     }
 
@@ -120,18 +132,32 @@ def _validate_archive_schedule_gap(payload: "SchedulesIn") -> None:
         _check_archive_gap_against(archive_in, download_in)
 
 
+def _week_minutes(time_in: "CronTimeIn", legacy_days: list[str]) -> list[int]:
+    """이 시각이 한 주(월 00:00 기준) 안에서 실행되는 모든 순간(분). 요일이 없으면 매일."""
+    days = time_in.days if time_in.days is not None else legacy_days
+    day_indexes = [schedule_config.VALID_DAYS.index(d) for d in days] or range(7)
+    return [day * 24 * 60 + time_in.hour * 60 + time_in.minute for day in day_indexes]
+
+
+def _time_label(time_in: "CronTimeIn", legacy_days: list[str]) -> str:
+    days = time_in.days if time_in.days is not None else legacy_days
+    day_text = "·".join(_DAY_LABELS[d] for d in schedule_config.VALID_DAYS if d in days)
+    return f"{time_in.hour:02d}:{time_in.minute:02d}" + (f", {day_text}" if day_text else "")
+
+
 def _check_archive_gap_against(archive_in: "JobScheduleIn", download_in: "JobScheduleIn") -> None:
+    """요일이 시각마다 달라서 한 주 안의 실제 순간끼리 비교한다 — 같은 날뿐 아니라 자정을 넘겨 다음 날 새벽(일요일에서 월요일 포함)에 겹치는 경우도 잡는다."""
+    week = 7 * 24 * 60
     for download_time in download_in.cron_times:
-        download_minutes = download_time.hour * 60 + download_time.minute
+        download_moments = _week_minutes(download_time, download_in.cron_days)
         for archive_time in archive_in.cron_times:
-            archive_minutes = archive_time.hour * 60 + archive_time.minute
-            gap = (archive_minutes - download_minutes) % (24 * 60)
-            if gap < 10:
+            archive_moments = _week_minutes(archive_time, archive_in.cron_days)
+            if any((a - d) % week < 10 for d in download_moments for a in archive_moments):
                 raise HTTPException(
                     status_code=422,
                     detail=(
-                        f"아카이빙 시각({archive_time.hour:02d}:{archive_time.minute:02d})은 "
-                        f"다운로드 시각({download_time.hour:02d}:{download_time.minute:02d})보다 "
+                        f"아카이빙 시각({_time_label(archive_time, archive_in.cron_days)})은 "
+                        f"다운로드 시각({_time_label(download_time, download_in.cron_days)})보다 "
                         "최소 10분 뒤여야 합니다 (다운로드 도중 파일이 옮겨지는 걸 방지)."
                     ),
                 )
@@ -149,11 +175,9 @@ async def update_schedules(payload: SchedulesIn, request: Request):
     _validate_archive_schedule_gap(payload)
     for job_id, job_in in payload.model_dump().items():
         if job_id == "download_job":
-            await asyncio.to_thread(
-                schedule_config.set_download_schedules, [schedule_config.JobSchedule(**entry) for entry in job_in]
-            )
+            await asyncio.to_thread(schedule_config.set_download_schedules, [schedule_config.from_dict(entry) for entry in job_in])
         else:
-            await asyncio.to_thread(schedule_config.set_schedule, job_id, schedule_config.JobSchedule(**job_in))
+            await asyncio.to_thread(schedule_config.set_schedule, job_id, schedule_config.from_dict(job_in))
 
     scheduler = getattr(request.app.state, "scheduler", None)
     if scheduler is not None:

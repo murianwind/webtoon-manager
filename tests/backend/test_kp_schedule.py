@@ -13,9 +13,9 @@ async def main():
     assert [s.target for s in schedule_config.get_download_schedules(D)] == ["naver"]                       # 저장 전: 기본 스케줄 하나(네이버)
     repository.set_setting("schedule_download_job", json.dumps({"mode": "cron", "cron_times": [{"hour": 4, "minute": 30}], "cron_days": ["mon"], "interval_minutes": 60}))   # 예전에 하나만 저장된 설정
     legacy = schedule_config.get_download_schedules(D)
-    assert len(legacy) == 1 and legacy[0].target == "naver" and legacy[0].mode == "cron" and legacy[0].cron_times == [{"hour": 4, "minute": 30}]
+    assert len(legacy) == 1 and legacy[0].target == "naver" and legacy[0].mode == "cron" and legacy[0].cron_times == [{"hour": 4, "minute": 30, "days": ["mon"]}]
     repository.set_setting("schedule_download_job", json.dumps({"mode": "cron", "cron_hour": 5, "cron_minute": 10}))    # 더 예전(cron_hour) 형식도
-    assert schedule_config.get_download_schedules(D)[0].cron_times == [{"hour": 5, "minute": 10}]
+    assert schedule_config.get_download_schedules(D)[0].cron_times == [{"hour": 5, "minute": 10, "days": []}]
     schedule_config.set_download_schedules([schedule_config.JobSchedule(mode="interval", interval_minutes=45, target="kakao"), schedule_config.JobSchedule(mode="off", target="bogus")])
     got = schedule_config.get_download_schedules(D)
     assert [(s.mode, s.target) for s in got] == [("interval", "kakao"), ("off", "naver")]                        # 잘못된 대상은 네이버로
@@ -31,13 +31,13 @@ async def main():
         def payload(download):
             return {**base, "download_job": download}
         entries = [
-            {"mode": "interval", "interval_minutes": 60, "cron_times": [{"hour": 3, "minute": 0}], "cron_days": [], "target": "naver"},
-            {"mode": "cron", "interval_minutes": 60, "cron_times": [{"hour": 4, "minute": 0}, {"hour": 16, "minute": 0}], "cron_days": ["sat", "sun"], "target": "kakao"},
-            {"mode": "cron", "interval_minutes": 60, "cron_times": [{"hour": 7, "minute": 0}], "cron_days": [], "target": "both"},
+            {"mode": "interval", "interval_minutes": 60, "cron_times": [{"hour": 3, "minute": 0, "days": []}], "target": "naver"},
+            {"mode": "cron", "interval_minutes": 60, "cron_times": [{"hour": 4, "minute": 0, "days": ["sat", "sun"]}, {"hour": 16, "minute": 0, "days": ["sat", "sun"]}], "target": "kakao"},
+            {"mode": "cron", "interval_minutes": 60, "cron_times": [{"hour": 7, "minute": 0, "days": []}], "target": "both"},
         ]
         r = await c.post("/api/settings", json=payload(entries)); assert r.status_code == 200, r.text
         saved = r.json()["download_job"]
-        assert [(s["mode"], s["target"]) for s in saved] == [("interval", "naver"), ("cron", "kakao"), ("cron", "both")] and saved[1]["cron_days"] == ["sat", "sun"]
+        assert [(s["mode"], s["target"]) for s in saved] == [("interval", "naver"), ("cron", "kakao"), ("cron", "both")] and [t["days"] for t in saved[1]["cron_times"]] == [["sat", "sun"], ["sat", "sun"]]
         assert (await c.get("/api/settings")).json()["download_job"] == saved
         bad = [{**entries[0], "target": "daum"}]
         assert (await c.post("/api/settings", json=payload(bad))).status_code == 422
@@ -45,10 +45,10 @@ async def main():
         edited = [{**entries[1], "target": "both"}, entries[2]]
         assert [s["target"] for s in (await c.post("/api/settings", json=payload(edited))).json()["download_job"]] == ["both", "both"]
         # 아카이빙 10분 간격 검증은 다운로드 스케줄 전부에 적용된다
-        archive = {"mode": "cron", "interval_minutes": 60, "cron_times": [{"hour": 4, "minute": 5}], "cron_days": [], "target": "naver"}
+        archive = {"mode": "cron", "interval_minutes": 60, "cron_times": [{"hour": 4, "minute": 5, "days": []}], "target": "naver"}
         r = await c.post("/api/settings", json={**payload(edited), "archive_job": archive})
         assert r.status_code == 422 and "10분" in r.json()["detail"]                                             # 04:00 다운로드 5분 뒤 → 거부
-        ok = {**archive, "cron_times": [{"hour": 4, "minute": 10}, {"hour": 16, "minute": 30}, {"hour": 7, "minute": 10}]}
+        ok = {**archive, "cron_times": [{"hour": 4, "minute": 10, "days": []}, {"hour": 16, "minute": 30, "days": []}, {"hour": 7, "minute": 10, "days": []}]}
         assert (await c.post("/api/settings", json={**payload(edited), "archive_job": ok})).status_code == 200
         assert (await c.post("/api/settings", json={**payload([]), "archive_job": ok})).json()["download_job"] == []      # 다운로드 스케줄을 전부 지워도 저장된다
         print("2) 스케줄 API OK (목록 저장/수정/삭제, 대상 검증, 아카이빙 간격 검증)")

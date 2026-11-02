@@ -9,34 +9,42 @@ _REAL_SLEEP = asyncio.sleep   # 테스트가 asyncio.sleep을 바꿔도(백오�
 
 
 class InflightTracker:
-    """동시에 진행 중인 이미지 받기의 수와 최댓값 — 동시 다운로드 상한 검증용."""
+    """동시에 진행 중인 이미지 받기의 수와 최댓값 — 동시 다운로드 상한 검증용.
 
-    def __init__(self):
+    세는 구간은 응답을 받아서 쓰는 동안(요청의 async with 안) 전체다. 예전에는 파일을 쓰는 스레드(aiofiles) 타이밍에 기대서, 느린 CI 러너에서
+    첫 이미지가 끝난 뒤에야 둘째가 시작해 "동시에 1개"로 재어지는 오탐이 있었다. rendezvous를 주면 그 수만큼 동시에 들어올 때까지 서로 기다린다 —
+    상한이 지켜지면(세마포어) 정확히 그 수로 만나고, 상한이 낮으면 만나지 못해 시간 초과로 실패하므로 타이밍과 무관하게 결정적이다."""
+
+    def __init__(self, rendezvous: int = 0, timeout: float = 0.5):
         self.current = 0
         self.max = 0
+        self._rendezvous, self._timeout = rendezvous, timeout
+        self._met = asyncio.Event()
 
-    def enter(self):
+    async def enter(self):
         self.current += 1
         self.max = max(self.max, self.current)
+        if self._rendezvous and self.current >= self._rendezvous:
+            self._met.set()
+        if self._rendezvous and not self._met.is_set():
+            try:
+                await asyncio.wait_for(self._met.wait(), self._timeout)  # 동시에 들어오지 못하면(직렬화/상한 부족) 여기서 실패한다
+            except BaseException:
+                self.current -= 1  # 실패한 요청은 "진행 중"이 아니다 — 안 되돌리면 숫자가 쌓여서 실제로는 만나지 못했는데 만난 것으로 착각한다
+                raise
 
     def leave(self):
         self.current -= 1
 
 
 class _Content:
-    def __init__(self, chunks, tracker):
-        self._chunks, self._tracker = chunks, tracker
+    def __init__(self, chunks):
+        self._chunks = chunks
 
     async def iter_chunked(self, size):
-        if self._tracker:
-            self._tracker.enter()
-        try:
-            for chunk in self._chunks:
-                await _REAL_SLEEP(0)
-                yield chunk
-        finally:
-            if self._tracker:
-                self._tracker.leave()
+        for chunk in self._chunks:
+            await _REAL_SLEEP(0)
+            yield chunk
 
 
 class FakeResponse:
@@ -52,7 +60,7 @@ class FakeResponse:
 
     @property
     def content(self):
-        return _Content(self._chunks, self._tracker)
+        return _Content(self._chunks)
 
 
 class _Request:
@@ -62,9 +70,15 @@ class _Request:
     async def __aenter__(self):
         if isinstance(self.outcome, BaseException):
             raise self.outcome
+        tracker = getattr(self.outcome, "_tracker", None)
+        if tracker:
+            await tracker.enter()  # 응답을 받아 쓰는 동안(이 async with 안)이 "진행 중"이다
         return self.outcome
 
     async def __aexit__(self, *exc):
+        tracker = getattr(self.outcome, "_tracker", None)
+        if tracker and not isinstance(self.outcome, BaseException):
+            tracker.leave()
         return False
 
 

@@ -488,20 +488,12 @@ select {
   padding: 3px 8px;
   margin-left: 4px;
 }
-.day-checkbox-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-left: 8px;
-}
-.day-checkbox {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 12px;
-}
-.schedule-day-hint { font-size: 11px; color: var(--muted); }
+.schedule-time-row { flex-wrap: wrap; }
+.schedule-day-chips { display: inline-flex; align-items: center; gap: 4px; margin-left: 10px; flex-wrap: wrap; }
+.day-chip { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); font-size: 12px; cursor: pointer; user-select: none; }
+.day-chip:has(input:checked) { border-color: var(--accent); background: #e8f8ef; color: #0b6b36; font-weight: 600; }
+.day-chip input { margin: 0; }
+.schedule-day-hint { font-size: 11px; color: var(--muted); margin: 6px 0 0; }
 
 .manual-run-buttons {
   display: flex;

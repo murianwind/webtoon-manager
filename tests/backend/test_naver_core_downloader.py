@@ -87,13 +87,29 @@ async def whole_episode():
         session=session, title_id="777", title_name=title, webtoon_type=kind, episode=EPISODE, cookies={"c": "v"}, download_root=str(root),
         folder_zero_fill=4, image_zero_fill=4, max_concurrent_downloads=workers, timeout_seconds=10)
     # Scenario 9: 회차 폴더 "{루트}/{작품 폴더}/[0012] 부제목/0001.jpg…" — 금지 문자는 전각으로, 확장자는 주소에서(없으면 .jpg), 이미지는 동시에 받되 상한을 지킨다
-    root = Path(tempfile.mkdtemp()); tracker = InflightTracker()
+    root = Path(tempfile.mkdtemp()); tracker = InflightTracker(rendezvous=2)      # 2개가 동시에 들어올 때까지 서로 기다린다(스레드 타이밍과 무관)
     many = '<div class="wt_viewer">' + "".join(f'<img src="https://img/{i}.jpg">' for i in range(1, 7)) + "</div>"
     session = episode_session(lambda url, n, tr: FakeResponse(200, chunks=[url.encode()], tracker=tr), html=many, tracker=tracker)
     ok, episode_dir = await run(session, root)
     assert ok is True and episode_dir == root / "작품： 이름" / "[0012] 열두 번째： 이야기"
     assert sorted(p.name for p in episode_dir.iterdir()) == [f"{i:04d}.jpg" for i in range(1, 7)] and (episode_dir / "0003.jpg").read_bytes() == b"https://img/3.jpg"
     assert tracker.max == 2, f"동시 받기 상한(2)을 지켜야 한다: {tracker.max}"
+    # 파일을 쓰는 스레드가 느린 환경(CI 러너)을 흉내 낸다 — 둘째 이미지의 파일 열기가 늦게 끝나도 결과가 같아야 한다(예전에는 "동시에 1개"로 재어져 실패했다)
+    import aiofiles as _aiofiles, time as _time
+    real_open, opened = _aiofiles.open, {"n": 0}
+    class SlowSecondOpen:
+        def __init__(self, *a, **k): opened["n"] += 1; self.n, self.inner = opened["n"], real_open(*a, **k)
+        async def __aenter__(self):
+            if self.n == 2: await asyncio.get_running_loop().run_in_executor(None, _time.sleep, 0.2)
+            return await self.inner.__aenter__()
+        async def __aexit__(self, *exc): return await self.inner.__aexit__(*exc)
+    downloader.aiofiles.open = SlowSecondOpen
+    try:
+        slow_tracker = InflightTracker(rendezvous=2)
+        ok, _ = await run(episode_session(lambda url, n, tr: FakeResponse(200, chunks=[url.encode()], tracker=tr), html=many, tracker=slow_tracker), Path(tempfile.mkdtemp()))
+    finally:
+        downloader.aiofiles.open = real_open
+    assert ok is True and slow_tracker.max == 2, f"느린 환경에서도 동시 받기 상한(2)이 그대로여야 한다: {slow_tracker.max}"
     ok, d = await run(episode_session(lambda url, n, tr: FakeResponse(200, chunks=[b"x"])), Path(tempfile.mkdtemp()))
     assert ok and sorted(p.name for p in d.iterdir()) == ["0001.jpg", "0002.png", "0003.jpg"]           # b.png?x=1 → .png, 확장자 없는 c → .jpg
     # Scenario 10: 웹툰 종류에 맞는 상세 주소(도전만화 등), 모르는 종류는 일반 웹툰 — 요청에는 titleId/no와 쿠키가 실린다

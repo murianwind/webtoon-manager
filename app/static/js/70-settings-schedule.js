@@ -24,14 +24,19 @@ function buildScheduleControls(jobId, schedule) {
   const timesList = document.createElement("div");
   timesList.className = "schedule-times-list";
 
-  function addTimeRow(hour, minute) {
+  // 요일은 시각마다 따로 고른다(시·분 옆의 월~일 칩) — 아무 요일도 안 고르면 그 시각은 매일 실행된다
+  function addTimeRow(hour, minute, days = []) {
     const row = document.createElement("div");
     row.className = "schedule-time-row";
     const hourOptions = Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, "0")}</option>`).join("");
     const minuteOptions = Array.from({ length: 60 }, (_, m) => `<option value="${m}">${String(m).padStart(2, "0")}</option>`).join("");
+    const dayChips = Object.entries(DAY_LABEL)
+      .map(([day, label]) => `<label class="day-chip"><input type="checkbox" class="schedule-day" value="${day}" ${days.includes(day) ? "checked" : ""} />${label}</label>`)
+      .join("");
     row.innerHTML = `
       <select class="schedule-hour">${hourOptions}</select> 시
       <select class="schedule-minute">${minuteOptions}</select> 분
+      <span class="schedule-day-chips">${dayChips}</span>
     `;
     row.querySelector(".schedule-hour").value = hour;
     row.querySelector(".schedule-minute").value = minute;
@@ -45,26 +50,17 @@ function buildScheduleControls(jobId, schedule) {
   }
 
   for (const t of schedule.cron_times) {
-    addTimeRow(t.hour, t.minute);
+    addTimeRow(t.hour, t.minute, t.days || []);
   }
 
   const addTimeBtn = makeButton("+ 시각 추가", () => addTimeRow(3, 0));
-
-  const dayCheckboxes = Object.entries(DAY_LABEL)
-    .map(
-      ([day, label]) => `
-      <label class="day-checkbox">
-        <input type="checkbox" class="schedule-day" value="${day}" ${schedule.cron_days.includes(day) ? "checked" : ""} />
-        ${label}
-      </label>`
-    )
-    .join("");
-  const dayRow = document.createElement("div");
-  dayRow.innerHTML = `<span class="day-checkbox-group">${dayCheckboxes}<span class="schedule-day-hint">(아무 요일도 안 고르면 매일)</span></span>`;
+  const dayHint = document.createElement("p");
+  dayHint.className = "schedule-day-hint";
+  dayHint.textContent = "요일은 시각마다 고릅니다(아무 요일도 안 고르면 매일).";
 
   cronRow.appendChild(timesList);
   cronRow.appendChild(addTimeBtn);
-  cronRow.appendChild(dayRow);
+  cronRow.appendChild(dayHint);
 
   function updateVisibility() {
     intervalRow.classList.toggle("hidden", modeSelect.value !== "interval");
@@ -120,7 +116,7 @@ function buildDownloadScheduleEditor(entries) {
 
   entries.forEach(addEntry);
   const addBtn = makeButton("+ 다운로드 스케줄 추가", () =>
-    addEntry({ mode: "interval", interval_minutes: 60, cron_times: [{ hour: 3, minute: 0 }], cron_days: [], target: kakaoWebtoonsEnabled ? "kakao" : "naver" })
+    addEntry({ mode: "interval", interval_minutes: 60, cron_times: [{ hour: 3, minute: 0, days: [] }], target: kakaoWebtoonsEnabled ? "kakao" : "naver" })
   );
   wrap.append(list, emptyHint, addBtn);
   return wrap;
@@ -137,12 +133,12 @@ function readScheduleControls(wrap) {
   const cronTimes = Array.from(wrap.querySelectorAll(".schedule-time-row")).map((row) => ({
     hour: Number(row.querySelector(".schedule-hour").value) || 0,
     minute: Number(row.querySelector(".schedule-minute").value) || 0,
+    days: Array.from(row.querySelectorAll(".schedule-day:checked")).map((el) => el.value),
   }));
   return {
     mode: wrap.querySelector(".schedule-mode").value,
     interval_minutes: Number(wrap.querySelector(".schedule-interval").value) || 60,
-    cron_times: cronTimes.length > 0 ? cronTimes : [{ hour: 3, minute: 0 }],
-    cron_days: Array.from(wrap.querySelectorAll(".schedule-day:checked")).map((el) => el.value),
+    cron_times: cronTimes.length > 0 ? cronTimes : [{ hour: 3, minute: 0, days: [] }],
   };
 }
 

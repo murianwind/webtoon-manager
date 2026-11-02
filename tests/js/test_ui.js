@@ -1,5 +1,5 @@
 const { makeApp, sleep, ok, done } = require("./harness");
-const sched = (o = {}) => ({ mode: "interval", interval_minutes: 60, cron_times: [{ hour: 3, minute: 0 }], cron_days: [], target: "naver", ...o });
+const sched = (o = {}) => ({ mode: "interval", interval_minutes: 60, cron_times: [{ hour: 3, minute: 0, days: [] }], target: "naver", ...o });
 (async () => {
   let saved = null;
   const analysis = {
@@ -15,7 +15,7 @@ const sched = (o = {}) => ({ mode: "interval", interval_minutes: 60, cron_times:
   };
   const routes = {
     "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" },
-    "/api/settings": (o) => { if (o.method === "POST") { saved = JSON.parse(o.body); return saved; } return { discovery_job: sched(), download_job: [sched({ target: "naver" }), sched({ mode: "cron", target: "kakao", cron_times: [{ hour: 4, minute: 30 }], cron_days: ["sat"] })], report_job: sched({ mode: "off" }), archive_job: sched({ mode: "off" }) }; },
+    "/api/settings": (o) => { if (o.method === "POST") { saved = JSON.parse(o.body); return saved; } return { discovery_job: sched(), download_job: [sched({ target: "naver" }), sched({ mode: "cron", target: "kakao", cron_times: [{ hour: 4, minute: 30, days: ["sat"] }] })], report_job: sched({ mode: "off" }), archive_job: sched({ mode: "off" }) }; },
     "/api/kakao-manual/analyze": analysis, "/api/kakao-manual/search": [{ title_id: 7, title: "쌍갑포차", thumbnail_url: "https://k/7", authors: "배혜수", status: "연재" }],
     "/api/kakao-manual/run": { status: "started" }, "/api/jobs/status": { manual: { status: "running", log: [] } }, "/api/jobs/download/run": { status: "started" },
     "/api/webtoons": () => [], "/api/kakao-webtoons": () => [],
