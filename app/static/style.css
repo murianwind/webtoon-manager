@@ -193,6 +193,13 @@ select {
 .folder-picker-path-row .folder-picker-path { flex: 1 1 auto; }
 .folder-favorite-star { font-size: 12px; white-space: nowrap; background: #fff7df; border-color: #f0d98c; color: #7a5800; }
 .folder-favorite-star:hover { background: #ffefbf; }
+/* 기다무 충전 시각 다운로드 예정 목록 */
+#waitfree-schedule-box h4 { margin: 12px 0 6px; font-size: 13px; }
+.waitfree-schedule-list { list-style: none; margin: 0; padding: 0; }
+.waitfree-schedule-list li { display: flex; align-items: center; gap: 12px; padding: 7px 12px; margin-bottom: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); font-size: 13px; }
+.waitfree-time { font-weight: 600; min-width: 112px; }
+.waitfree-title { flex: 1; }
+.waitfree-left { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .token-button-row {
   display: flex;
   flex-wrap: wrap;

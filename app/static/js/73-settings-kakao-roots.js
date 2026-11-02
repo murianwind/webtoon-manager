@@ -49,6 +49,82 @@ document.getElementById("btn-save-kakao-rental-auto").addEventListener("click", 
   }
 });
 
+// ── 기다무 충전 시각에 맞춰 자동 다운로드(옵션, 기본 꺼짐) + 다운로드 예정 목록 ───────────
+
+// 남은 시간 표기: 곧 시작 / 1분 안에 / N분 후 / N시간 M분 후 / N일 M시간 후
+function waitfreeRemainingText(seconds) {
+  if (seconds <= 0) return "곧 시작";
+  if (seconds < 60) return "1분 안에";
+  const minutes = Math.floor(seconds / 60); // 내림 — 90초는 "1분 후"(남은 시간을 부풀려 보여 주지 않는다)
+  if (minutes < 60) return `${minutes}분 후`;
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  if (hours < 24) return restMinutes ? `${hours}시간 ${restMinutes}분 후` : `${hours}시간 후`;
+  const days = Math.floor(hours / 24);
+  const restHours = hours % 24;
+  return restHours ? `${days}일 ${restHours}시간 후` : `${days}일 후`;
+}
+
+// "10월 13일 21:01" — 한국시간
+function formatKstShort(iso) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })
+      .formatToParts(new Date(iso)).map((p) => [p.type, p.value])
+  );
+  const hour = parts.hour === "24" ? "00" : parts.hour;
+  return `${parts.month}월 ${parts.day}일 ${hour}:${parts.minute}`;
+}
+
+async function refreshWaitfreeSchedule() {
+  if (!document.getElementById("waitfree-sync-toggle").checked) return; // 꺼져 있으면 서버에 요청하지 않는다
+  try {
+    const data = await apiCall("/api/waitfree/schedule");
+    const list = document.getElementById("waitfree-schedule-list");
+    list.innerHTML = "";
+    for (const item of data.items) {
+      const li = document.createElement("li");
+      const seconds = Math.round((new Date(item.due_at).getTime() - Date.now()) / 1000);
+      li.innerHTML = `<span class="waitfree-time">${escapeHtml(formatKstShort(item.due_at))}</span><span class="waitfree-title">${escapeHtml(item.title)}</span><span class="waitfree-left">${escapeHtml(waitfreeRemainingText(seconds))}</span>`;
+      list.appendChild(li);
+    }
+    document.getElementById("waitfree-schedule-empty").classList.toggle("hidden", data.items.length > 0);
+  } catch (e) {
+    // 조용히 무시 — 다음 갱신 때 다시 읽는다
+  }
+}
+
+async function loadWaitfreeSyncSetting() {
+  try {
+    const data = await apiCall("/api/settings/waitfree-sync");
+    document.getElementById("waitfree-sync-toggle").checked = data.enabled;
+    document.getElementById("waitfree-schedule-box").classList.toggle("hidden", !data.enabled);
+    await refreshWaitfreeSchedule();
+  } catch (e) {
+    // 조용히 무시
+  }
+}
+
+document.getElementById("waitfree-sync-toggle").addEventListener("change", async (ev) => {
+  const toggle = ev.target;
+  const resultEl = document.getElementById("waitfree-sync-save-result");
+  resultEl.textContent = "";
+  try {
+    await apiCall("/api/settings/waitfree-sync", { method: "POST", body: JSON.stringify({ enabled: toggle.checked }) });
+    resultEl.textContent = "저장했습니다.";
+    document.getElementById("waitfree-schedule-box").classList.toggle("hidden", !toggle.checked);
+    await refreshWaitfreeSchedule();
+  } catch (e) {
+    toggle.checked = !toggle.checked; // 저장하지 못했으니 원래 상태로 되돌린다
+    resultEl.textContent = e.message;
+  }
+});
+
+// 설정 화면을 보고 있는 동안 남은 시간을 30초마다 새로 읽는다(옵션이 꺼져 있으면 아무것도 하지 않는다)
+setInterval(() => {
+  const page = document.getElementById("page-settings");
+  if (page && !page.classList.contains("hidden")) refreshWaitfreeSchedule();
+}, 30000);
+
 document.getElementById("btn-kp-cookie-save").addEventListener("click", async () => {
   const box = document.getElementById("kp-cookie-json");
   const statusEl = document.getElementById("kp-cookie-status");

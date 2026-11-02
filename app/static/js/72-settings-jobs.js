@@ -39,6 +39,7 @@ async function loadSettingsPage() {
   loadKakaoWebtoonsEnabledToggle();
   loadKakaoPageCookieStatus();
   loadKakaoRentalAutoSetting();
+  loadWaitfreeSyncSetting();
   loadDownloadPacing();
   loadDownloadRoots();
   loadAuthorAutoRegisterSetting();

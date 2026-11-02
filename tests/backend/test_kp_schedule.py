@@ -62,14 +62,14 @@ async def main():
         await c.post("/api/settings", json=payload([{**entries[0], "mode": "off"}, entries[1]]))                  # 꺼진 스케줄은 등록 안 됨
         sch.reschedule_all(s)
         jobs = {j.id: j for j in s.get_jobs() if j.id.startswith("download_job")}
-        assert list(jobs) == ["download_job:1"] and jobs["download_job:1"].kwargs == {"target": "kakao"}       # 지우고 다시 등록(옛 항목은 남지 않음)
+        assert list(jobs) == ["download_job:1"] and jobs["download_job:1"].kwargs == {"target": "kakao", "scheduled": True}       # 지우고 다시 등록(옛 항목은 남지 않음). 정기 스케줄이 부르는 것은 scheduled=True — 기다무 충전 시각 옵션이 켜졌을 때만 정기 다운로드가 충전 전 작품을 건너뛰게 하는 표시(수동 실행은 아님)
         await c.post("/api/settings", json=payload([]))
         sch.reschedule_all(s); assert not [j for j in s.get_jobs() if j.id.startswith("download_job")]
         print("3) 스케줄러 등록 OK (스케줄마다 대상 전달, 꺼진 것/지운 것은 등록 안 됨, 재등록 시 정리)")
 
         # ── 4. 실행 대상 ──
         ran = []; gate = asyncio.Event(); started = asyncio.Event()
-        async def fake_impl(platforms):
+        async def fake_impl(platforms, scheduled=False):
             ran.append(sorted(platforms)); started.set(); await gate.wait()
         sch.download_job._run_download_job_impl = fake_impl     # run_download_job이 있는 download_job 모듈이 부르는 이름
         t1 = asyncio.create_task(sch.run_download_job("naver")); await started.wait()              # 네이버 실행 중

@@ -9,7 +9,7 @@ import os
 import zipfile
 from pathlib import Path
 
-from app import comicinfo, kakao_cover, kakao_records, repository
+from app import comicinfo, kakao_cover, kakao_records, repository, waitfree_sync
 from app.kakao_authors import split_authors
 from app.metadata_zip import COVER_MISSING, MetadataBundle
 
@@ -127,6 +127,8 @@ async def run_download(
     # 지금 못 여는 잠긴 회차(기다무 충전 중이거나 기다무로 못 여는 회차)는 건너뛰고 뒤의 열린 회차를 받는다 — 뒤에 무료가 있어도 영원히 막히지 않게.
     # 받기에 실패하면 번호순을 지키려고 그 회차에서 멈춘다(다음에 이 회차부터 다시 시도).
     waitfree_target = plan.locked[0] if plan.locked and waitfree_supported(series_item) else None
+    if waitfree_target is None or waitfree_target.waitfree_blocked:
+        waitfree_sync.forget(series_id)  # 기다무로 열 잠긴 회차가 없으면 충전 시각을 기다릴 이유가 없다(정기 다운로드가 그대로 확인한다)
     for episode in sorted([*plan.to_download, *([waitfree_target] if waitfree_target else [])], key=lambda e: e.number):
         if len(downloaded) >= max_episodes:
             break
@@ -168,13 +170,17 @@ async def _download_first_locked_with_waitfree(client, series_id, episode, folde
     if episode.waitfree_blocked:
         return None, None
     info = await client.ticket_info(series_id)
-    if info is None or not info.waitfree_ready:
+    if info is None:
+        return None, None
+    if not info.waitfree_ready:
+        waitfree_sync.remember(series_id, info.waitfree_available_at)  # 아직 충전 전 — 서버가 알려 준 다음 충전 시각을 저장해 둔다(그 시각에 맞춰 받기/정기 다운로드 건너뛰기에 쓴다)
         return None, None
     ok, reason = await client.use_waitfree_ticket(episode.product_id)
     if not ok:
         if on_progress:
             on_progress(f"{episode.number}번 회차: {reason} — 여기서 멈춥니다")
         return None, None
+    waitfree_sync.remember(series_id, getattr(client, "last_waitfree_charged_at", None))  # 방금 썼으니 다음 충전 시각이 새로 생겼다
     if on_progress:
         on_progress(f"{episode.number}번 회차를 기다무로 열었습니다")
     path = await download_episode(client, series_id, episode, folder)

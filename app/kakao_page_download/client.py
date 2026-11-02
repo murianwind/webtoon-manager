@@ -48,6 +48,7 @@ class KakaoPageClient:
         self.cookies = dict(cookies)
         self.cookies_changed = False
         self.last_failure: str | None = None  # 가장 최근 받기 실패의 원인(화면 로그 한 줄에 붙인다). 새 회차를 받기 시작할 때 지운다
+        self.last_waitfree_charged_at: str | None = None  # 가장 최근 기다무 사용 응답이 알려 준 다음 충전 시각(waitfree_charged_at)
 
     def _headers(self, *, image: bool = False, post: bool = False) -> dict:
         headers = dict(kakao_api.IMAGE_HEADERS if image else kakao_api.HEADERS)
@@ -169,6 +170,7 @@ class KakaoPageClient:
         )
         if not used or used.get("result_code") != 0:
             return False, f"기다무 사용에 실패했습니다(HTTP {status})"
+        self.last_waitfree_charged_at = (used.get("result") or {}).get("waitfree_charged_at")  # 다음 충전 시각 — 이 시각에 맞춰 받기에 쓴다
         return True, "기다무로 열었습니다"
 
     async def use_rental_ticket(self, product_id: int) -> tuple[bool, str, int | None]:

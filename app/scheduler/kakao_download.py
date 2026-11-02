@@ -3,10 +3,11 @@
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 import aiohttp
 
-from app import discord_bot, discord_notify, download_pacing, download_roots, job_status, kakao_page_auth, kakao_page_download, repository
+from app import discord_bot, discord_notify, download_pacing, download_roots, job_status, kakao_page_auth, kakao_page_download, repository, waitfree_sync
 
 log = logging.getLogger(__name__)
 
@@ -132,13 +133,22 @@ def _kakao_download_summary(total: int, results: list, use_rental_tickets: bool)
     return "카카오페이지 다운로드 요약 — " + " / ".join(parts)
 
 
-async def _download_kakao_subscriptions(settings, failures: list[dict]) -> None:
+async def _download_kakao_subscriptions(
+    settings, failures: list[dict], *, skip_waiting: bool = False, now: datetime | None = None, only: list[dict] | None = None
+) -> list[tuple[dict, object]]:
     """구독 중인 카카오페이지 작품을 폴더 규칙(폴더 없음 → 처음부터 / 파일 여러 개 → 누락 회차 / 파일 1개 → 그 이후)
     으로 받는다(이미 받은 회차는 다시 받지 않는다). 다운로드 스케줄의 대상에 카카오페이지가 들어 있을 때만 불리고,
     로그인 쿠키가 없거나 로그인이 풀려 있으면 받지 않고(풀림은 디스코드로 알림) 건너뛴다."""
-    subscribed = repository.list_kakao_webtoons_by_status(repository.STATUS_ACTIVE)
+    subscribed = list(only) if only is not None else repository.list_kakao_webtoons_by_status(repository.STATUS_ACTIVE)
+    if skip_waiting:
+        # 기다무 충전 시각에 맞춰 받기가 켜져 있으면, 충전 시각 전인 작품은 정기 다운로드가 건너뛴다(그 시각에 맞춰 따로 받는다). 수동 실행은 건너뛰지 않는다.
+        current = now or datetime.now(timezone.utc)
+        waiting = [w for w in subscribed if waitfree_sync.is_waiting(w, current)]
+        if waiting:
+            subscribed = [w for w in subscribed if w not in waiting]
+            job_status.log_line("download", f"충전 시각 전인 기다무 작품 {len(waiting)}개는 건너뜁니다(충전 시각에 맞춰 따로 받습니다)")
     if not subscribed:
-        return
+        return []
 
     async with kakao_page_download.download_lock:
         root = download_roots.kakao_root(settings)
@@ -147,13 +157,13 @@ async def _download_kakao_subscriptions(settings, failures: list[dict]) -> None:
             client = kakao_page_download.client_from_saved_cookies(session, settings.request_timeout_seconds)
             if client is None:
                 job_status.log_line("download", "카카오페이지 로그인 쿠키가 없어서 건너뜁니다(설정에서 쿠키를 저장해주세요)")
-                return
+                return []
             logged_in = await client.check_login()
             status = kakao_page_auth.cookie_status(kakao_page_auth.load_cookies())
             await kakao_page_auth.notify_if_needed(session, logged_in, status["days_left"])
             if logged_in is False:
                 job_status.log_line("download", "카카오페이지 로그인이 풀려 있어서 건너뜁니다(쿠키를 다시 붙여넣어 주세요)")
-                return
+                return []
 
             use_rental_tickets = repository.is_kakao_rental_ticket_auto_use_enabled()
             if use_rental_tickets:
@@ -175,6 +185,7 @@ async def _download_kakao_subscriptions(settings, failures: list[dict]) -> None:
                 await asyncio.sleep(settings.delay_seconds)
             job_status.log_line("download", _kakao_download_summary(len(subscribed), results, use_rental_tickets))
         await _notify_kakao_newly_finished()
+    return list(zip(subscribed, results))
 
 
 async def _notify_kakao_newly_finished() -> None:

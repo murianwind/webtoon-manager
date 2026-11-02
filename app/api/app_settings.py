@@ -7,14 +7,14 @@ import tempfile
 from pathlib import Path
 
 import aiohttp
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from app import (
     download_roots,
     repository,
 )
-from app import download_pacing, kakao_page_download
+from app import download_pacing, kakao_page_download, waitfree_sync
 from app import webtoon_server_client
 from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
 from app.config import get_settings
@@ -179,6 +179,49 @@ async def get_kakao_rental_ticket_auto_use():
 async def set_kakao_rental_ticket_auto_use(payload: RentalTicketAutoUseIn):
     await asyncio.to_thread(repository.set_setting, repository.KAKAO_RENTAL_AUTO_USE_KEY, "1" if payload.enabled else None)
     return await get_kakao_rental_ticket_auto_use()
+
+
+class WaitfreeSyncIn(BaseModel):
+    enabled: bool
+
+
+class WaitfreeSyncOut(BaseModel):
+    enabled: bool
+
+
+class WaitfreeScheduleItem(BaseModel):
+    title_id: int
+    title: str
+    next_at: str  # 서버가 알려 준 다음 충전 시각(UTC ISO)
+    due_at: str  # 이 작품을 받기 시작하는 시각 = 충전 시각 + 작품마다 정해진 30~120초(UTC ISO)
+
+
+class WaitfreeScheduleOut(BaseModel):
+    enabled: bool
+    items: list[WaitfreeScheduleItem]
+
+
+@router.get("/settings/waitfree-sync", response_model=WaitfreeSyncOut)
+async def get_waitfree_sync():
+    """"기다무 충전 시각에 맞춰 자동 다운로드" 옵션(기본 꺼짐). 켜면 정기 다운로드는 충전 시각 전인 기다무 작품을 건너뛰고, 충전 시각이 되면 그 작품만 받는다."""
+    return WaitfreeSyncOut(enabled=await asyncio.to_thread(waitfree_sync.is_enabled))
+
+
+@router.post("/settings/waitfree-sync", response_model=WaitfreeSyncOut)
+async def set_waitfree_sync(payload: WaitfreeSyncIn, request: Request):
+    await asyncio.to_thread(waitfree_sync.set_enabled, payload.enabled)
+    scheduler = getattr(request.app.state, "scheduler", None)  # 시작 전(테스트 등)에는 없다 — 시작할 때 옵션대로 등록된다
+    if scheduler is not None:
+        from app.scheduler.schedule import apply_waitfree_job  # 순환 임포트를 피하려고 함수 안에서
+
+        apply_waitfree_job(scheduler)
+    return await get_waitfree_sync()
+
+
+@router.get("/waitfree/schedule", response_model=WaitfreeScheduleOut)
+async def get_waitfree_schedule():
+    """다운로드 예정 목록 — 구독 중이고 충전 시각을 아는 카카오 작품을 받기 시작하는 시각 순으로(서버에 요청하지 않고 저장된 값만 읽는다)."""
+    return WaitfreeScheduleOut(enabled=await asyncio.to_thread(waitfree_sync.is_enabled), items=await asyncio.to_thread(waitfree_sync.schedule_view))
 
 
 class WebtoonServerUrlOut(BaseModel):

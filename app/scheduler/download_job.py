@@ -6,7 +6,7 @@ import logging
 
 import aiohttp
 
-from app import cookie_health, daily_plus, discord_notify, job_status, repository, schedule_config
+from app import cookie_health, daily_plus, discord_notify, job_status, repository, schedule_config, waitfree_sync
 from app.config import get_settings
 
 from app.scheduler.common import (
@@ -31,11 +31,12 @@ _DOWNLOAD_TARGET_PLATFORMS = {"naver": {"naver"}, "kakao": {"kakao"}, "both": {"
 _download_claimed_platforms: set[str] = set()  # 지금 실행 중이거나 순서를 기다리는 실행이 맡은 플랫폼
 
 
-async def run_download_job(target: str = "naver") -> None:
+async def run_download_job(target: str = "naver", scheduled: bool = False) -> None:
     """target: naver | kakao | both(스케줄에서 고른 대상). 정기 스케줄과 '수동 실행' 버튼이 동시에 같은 플랫폼을
     받으려 하면 같은 웹툰을 두 실행이 동시에 다운로드할 수 있다(회차 저장/압축이 원자적이지 않음) — 이미 실행 중이거나
     기다리는 실행이 같은 플랫폼을 맡고 있으면 조용히 건너뛴다(에러 아님, "이미 실행 중"으로 로그만 남김). 서로 다른
-    플랫폼(예: 네이버 스케줄과 카카오 스케줄이 같은 시각)은 건너뛰지 않고 순서를 기다렸다가 실행한다."""
+    플랫폼(예: 네이버 스케줄과 카카오 스케줄이 같은 시각)은 건너뛰지 않고 순서를 기다렸다가 실행한다.
+    scheduled: 정기 스케줄이 부른 것(True)이면 "기다무 충전 시각에 맞춰 받기"가 켜져 있을 때 충전 시각 전인 카카오 기다무 작품을 건너뛴다. 수동 실행은 항상 전부 확인한다."""
     wanted = set(_DOWNLOAD_TARGET_PLATFORMS.get(target, {"naver"}))
     platforms = wanted - _download_claimed_platforms
     if not platforms:
@@ -46,12 +47,12 @@ async def run_download_job(target: str = "naver") -> None:
     _download_claimed_platforms.update(platforms)
     try:
         async with _download_job_lock:
-            await _run_download_job_impl(platforms)
+            await _run_download_job_impl(platforms, scheduled)
     finally:
         _download_claimed_platforms.difference_update(platforms)
 
 
-async def _run_download_job_impl(platforms: set[str]) -> None:
+async def _run_download_job_impl(platforms: set[str], scheduled: bool = False) -> None:
     settings = get_settings()
     # 신작 스캔이 자동으로 구독 추가해 둔 매일+ 작품은 받지 않는다 — 저장해 둔 매일+ 목록으로(네트워크 없이) 먼저 제외됨으로 정리한다
     auto_excluded = repository.exclude_auto_added_titles(daily_plus.cached_ids()) if "naver" in platforms else []
@@ -90,7 +91,7 @@ async def _run_download_job_impl(platforms: set[str]) -> None:
 
         try:
             if "kakao" in platforms:
-                await _download_kakao_subscriptions(settings, failures)
+                await _download_kakao_subscriptions(settings, failures, skip_waiting=scheduled and waitfree_sync.is_enabled())
         except Exception as e:
             had_error = True
             log.error("카카오페이지 자동 다운로드 중 예외: %s", e)

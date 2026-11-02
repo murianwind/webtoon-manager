@@ -375,6 +375,16 @@
         <p class="hint">다운로드 스케줄은 여러 개 등록할 수 있고, 스케줄마다 받을 대상(네이버 / 카카오페이지 / 둘 다)을 고릅니다(카카오페이지 관리를 켜면 대상 선택이 나타납니다). 카카오페이지는 작품 폴더와 받은 회차 기록을 보고 아직 받지 않은 회차만 받습니다.</p>
         <div class="schedule-controls"></div>
       </div>
+      <div class="field-group" id="waitfree-sync-group">
+        <label class="checkbox-label"><input type="checkbox" id="waitfree-sync-toggle" /> 기다무 충전 시각에 맞춰 자동 다운로드</label>
+        <span id="waitfree-sync-save-result" class="hint-inline"></span>
+        <p class="field-hint">기본은 꺼짐입니다. 켜면 카카오페이지 작품마다 서버가 알려 준 <b>기다무 충전 시각</b>을 기억해 두고, 그 시각이 되면 그 작품만 받습니다(충전 시각 직후가 아니라 작품마다 정해진 30~120초 뒤). 이때 <b>정기 다운로드는 충전 시각 전인 기다무 작품을 건너뛰고</b> 충전 시각에 맞춰 따로 받으므로 서버 요청이 줄어듭니다. <b>수동 실행은</b> 이 옵션과 상관없이 항상 전부 확인합니다. 충전 시각을 아직 모르는 작품은 다음 정기 다운로드가 확인해서 채웁니다. 충전 주기가 3시간/1일/3일처럼 작품마다 달라도 서버가 준 시각을 그대로 쓰고, 오류나 로그인 문제가 있으면 30분 뒤로 미룹니다.</p>
+        <div id="waitfree-schedule-box" class="hidden">
+          <h4>다운로드 예정</h4>
+          <ul id="waitfree-schedule-list" class="waitfree-schedule-list"></ul>
+          <p id="waitfree-schedule-empty" class="hint hidden">아직 충전 시각을 확인한 작품이 없습니다. 다음 정기 다운로드에서 작품마다 확인합니다.</p>
+        </div>
+      </div>
       <div class="schedule-block" data-job="archive_job">
         <h3>아카이빙</h3>
         <div class="schedule-controls"></div>

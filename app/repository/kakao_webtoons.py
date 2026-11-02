@@ -42,7 +42,7 @@ def _row_to_kakao_webtoon(row) -> dict:
         "is_finished": bool(row["is_finished"]),
         "finish_notified": bool(row["finish_notified"]), "finish_ack": bool(row["finish_ack"]),
         "ticket_notified_no": row["ticket_notified_no"], "caught_up_notified_no": row["caught_up_notified_no"],
-        "new_episode_seen_no": row["new_episode_seen_no"],
+        "new_episode_seen_no": row["new_episode_seen_no"], "waitfree_next_at": row["waitfree_next_at"],
     }
 
 
@@ -168,6 +168,20 @@ def list_kakao_finish_pending() -> list[dict]:
     """완결이고 받을 회차를 다 받았는데 아직 디스코드로 알리지 않은(알람 제외도 안 한) 구독 중인 카카오 작품."""
     rows = fetchall(
         "SELECT * FROM kakao_webtoons WHERE status = ? AND is_finished = 1 AND finish_notified = 0 AND finish_ack = 0", (STATUS_ACTIVE,)
+    )
+    return [_row_to_kakao_webtoon(r) for r in rows]
+
+
+def set_kakao_waitfree_next_at(title_id: int, next_at: str | None) -> None:
+    """서버가 알려 준 기다무 다음 충전 시각(UTC ISO)을 저장한다(None이면 지움). 추적하지 않는 작품이면 아무것도 하지 않는다."""
+    with write_transaction() as conn:
+        conn.execute("UPDATE kakao_webtoons SET waitfree_next_at = ? WHERE title_id = ?", (next_at, title_id))
+
+
+def list_kakao_waitfree_schedule() -> list[dict]:
+    """구독 중인 작품 중 기다무 충전 시각을 아는 것을 시각 순으로(구독 중이 아니거나 시각을 모르면 빠진다)."""
+    rows = fetchall(
+        "SELECT * FROM kakao_webtoons WHERE status = ? AND waitfree_next_at IS NOT NULL ORDER BY waitfree_next_at, title_id", (STATUS_ACTIVE,)
     )
     return [_row_to_kakao_webtoon(r) for r in rows]
 

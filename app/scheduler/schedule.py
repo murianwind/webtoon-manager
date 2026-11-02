@@ -6,9 +6,10 @@ from apscheduler.triggers.combining import OrTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app import kakao_catalog, schedule_config
+from app import kakao_catalog, schedule_config, waitfree_sync
 from app.schedule_config import JobSchedule
 
+from app.scheduler.waitfree_job import run_waitfree_due_job
 from app.scheduler.archive_job import (
     run_archive_job,
 )
@@ -62,7 +63,7 @@ def _apply_download_schedules(scheduler: AsyncIOScheduler) -> None:
     for index, entry in enumerate(schedule_config.get_download_schedules(DEFAULT_SCHEDULES["download_job"])):
         trigger = _build_trigger(entry)
         if trigger is not None:
-            scheduler.add_job(run_download_job, trigger=trigger, id=f"download_job:{index}", kwargs={"target": entry.target})
+            scheduler.add_job(run_download_job, trigger=trigger, id=f"download_job:{index}", kwargs={"target": entry.target, "scheduled": True})
 
 
 def _apply_job_schedule(scheduler: AsyncIOScheduler, job_id: str) -> None:
@@ -98,6 +99,7 @@ def create_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone="Asia/Seoul", job_defaults={"misfire_grace_time": MISFIRE_GRACE_SECONDS, "coalesce": True})
     for job_id in DEFAULT_SCHEDULES:
         _apply_job_schedule(scheduler, job_id)
+    apply_waitfree_job(scheduler)
     # 사용자가 설정하는 스케줄이 아니라 고정된 내부 작업 — 설정 화면의 스케줄 저장/재등록과 무관하게 항상 돈다
     scheduler.add_job(
         run_kakao_catalog_refresh_job, trigger=IntervalTrigger(minutes=kakao_catalog.REFRESH_INTERVAL_MINUTES),
@@ -106,6 +108,20 @@ def create_scheduler() -> AsyncIOScheduler:
     return scheduler
 
 
+WAITFREE_JOB_ID = "waitfree_job"
+
+
+def apply_waitfree_job(scheduler: AsyncIOScheduler) -> None:
+    """"기다무 충전 시각에 맞춰 자동 다운로드" 옵션대로 1분마다 도는 확인 작업을 등록/해제한다(다시 불러도 하나만). 이 작업은 저장된 충전 시각만 보고 서버에는 요청하지 않는다."""
+    existing = scheduler.get_job(WAITFREE_JOB_ID)
+    if waitfree_sync.is_enabled():
+        if existing is None:
+            scheduler.add_job(run_waitfree_due_job, trigger=IntervalTrigger(minutes=1), id=WAITFREE_JOB_ID, max_instances=1)
+    elif existing is not None:
+        scheduler.remove_job(WAITFREE_JOB_ID)
+
+
 def reschedule_all(scheduler: AsyncIOScheduler) -> None:
     for job_id in DEFAULT_SCHEDULES:
         _apply_job_schedule(scheduler, job_id)
+    apply_waitfree_job(scheduler)

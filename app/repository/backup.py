@@ -80,7 +80,7 @@ _KAKAO_SEEN_TITLE_COLUMNS = ("author_name", "title_id", "title_name", "seen_at")
 
 _KAKAO_WEBTOON_COLUMNS = (
     "title_id", "title", "status", "ever_subscribed", "thumbnail_url", "author_summary", "writer_names", "origin_names",
-    "is_finished", "finish_notified", "finish_ack", "downloaded_numbers", "pending_numbers", "ticket_notified_no", "caught_up_notified_no", "new_episode_seen_no", "created_at", "updated_at",
+    "is_finished", "finish_notified", "finish_ack", "downloaded_numbers", "pending_numbers", "waitfree_next_at", "ticket_notified_no", "caught_up_notified_no", "new_episode_seen_no", "created_at", "updated_at",
 )
 
 
