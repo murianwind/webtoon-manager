@@ -32,7 +32,7 @@ discord_config.set_webhook_url("https://discord.com/api/webhooks/1/test")
 def reset(*, quiet=(), batch=10, scan=False, max_wait=45):
     sent.clear(); SCAN.update(start=[], poll=0, start_result="started", running=True); SECTIONS.update(naver=[], kakao=[]); VIEWER.clear()
     with db.write_transaction() as cx: cx.execute("DELETE FROM episode_history")
-    repository.set_setting(rd.STATE_KEY, None); repository.set_setting(LAST_SENT, (T0 - timedelta(days=1)).astimezone(UTC).isoformat())
+    repository.set_setting(rd.STATE_KEY, None); repository.set_setting(viewer_scan.STATE_KEY, None); repository.set_setting(LAST_SENT, (T0 - timedelta(days=1)).astimezone(UTC).isoformat())
     rd.set_quiet_hours(list(quiet)); rd.set_batch_minutes(batch)
     repository.set_setting("webtoon_server_url", "http://viewer" if scan else None); viewer_scan.set_config(enabled=scan, token="secret-token" if scan else "", max_wait_minutes=max_wait)
 _seq = [0]
@@ -112,9 +112,10 @@ assert len(sent) == 1 and "받은것" in sent[0] and "카카오신작" in sent[0
 # 웹훅 지우기: set_webhook_url("")은 기존 값을 유지하는 규칙이라 설정 칸을 직접 비운다
 reset(scan=True); repository.set_setting(discord_config._KEY_WEBHOOK_URL, None)
 add_row("웹훅없음", T0); rd.note_download_finished(T0); tick(T0 + MIN(10))
-assert sent == [] and SCAN["start"] == [] and state()["last_download_at"] is None, (sent, SCAN, state())
+# 리포트는 못 보내도(웹훅 없음) 새로 받은 게 있으면 뷰어는 새 파일을 훑어야 한다 — 스캔은 리포트/웹훅과 상관없이 요청한다
+assert sent == [] and len(SCAN["start"]) == 1 and state()["last_download_at"] is None, (sent, SCAN, state())
 discord_config.set_webhook_url("https://discord.com/api/webhooks/1/test")
-print("8) 이력 없음/웹훅 없음 OK")
+print("8) 이력 없음/웹훅 없음(스캔은 함) OK")
 
 # Scenario 9: 다운로드 작업이 끝나면 자동으로 "다운로드가 끝났다"를 기록한다(download/manual만) — 이 작업이 시작한 시각을 발송 기준으로 삼는다(처음 한 번)
 reset(); repository.set_setting(LAST_SENT, None); job_status.add_finish_listener(rd.on_job_finished)
@@ -139,4 +140,26 @@ async def registration():
         assert (await c.post("/api/settings", json={"discovery_job": off, "download_job": [], "archive_job": off})).status_code == 200      # report_job 없이 저장된다
 asyncio.run(registration())
 print("10) 시작 연결/1분 확인 작업/스케줄 API OK")
+# Scenario 11: 뷰어 스캔은 공용 — 아카이빙이 먼저 요청해 시작한 스캔이 다운로드 묶음도 덮으면(그 스캔이 변경 뒤에 시작) 새로 시작하지 않고 그 스캔이 끝나기를 기다렸다 리포트를 보낸다.
+# 실패만 있는 묶음은 스캔을 요청하지 않는다(새 파일이 없다). 할 일이 없는 확인은 서버에 아무 요청도 하지 않는다
+reset(scan=True); tick(T0)
+assert SCAN["start"] == [] and SCAN["poll"] == 0                                                                           # 대기 중인 것도 진행 중인 스캔도 없으면 조용하다
+viewer_scan.request(T0); tick(T0 + MIN(1)); assert len(SCAN["start"]) == 1                                                   # 아카이빙 같은 곳이 요청해서 스캔 시작(T0+1)
+add_row("먼저받음", T0); rd.note_download_finished(T0)                                                                       # 그 스캔이 시작되기 전에 받은 것
+tick(T0 + MIN(10)); assert sent == [] and len(SCAN["start"]) == 1, (sent, SCAN)                                              # 묶음 확정: 이미 시작한 스캔이 덮으니 새로 시작하지 않고 끝나기를 기다린다
+SCAN["running"] = False; tick(T0 + MIN(11)); assert len(sent) == 1 and "먼저받음" in sent[0] and len(SCAN["start"]) == 1
+reset(scan=True); add_row("실패만", T0, status="failed"); rd.note_download_finished(T0); tick(T0 + MIN(10))
+assert len(sent) == 1 and "실패만" in sent[0] and SCAN["start"] == [], (sent, SCAN)                                         # 스캔 없이 바로 리포트
+reset(scan=True); job_status.add_finish_listener(rd.on_job_finished)                                                       # 수동 다운로드(manual 작업)가 끝난 경우도 같다 — 웹훅이 없어도 스캔은 한다
+repository.set_setting(discord_config._KEY_WEBHOOK_URL, None); job_status.start("manual"); add_row("수동으로받음", datetime.now(UTC)); job_status.finish("manual", True)
+tick(datetime.now(UTC) + MIN(10)); assert sent == [] and len(SCAN["start"]) == 1, (sent, SCAN)
+discord_config.set_webhook_url("https://discord.com/api/webhooks/1/test")
+# 웹훅이 없으면 발송 기준 시각이 움직이지 않으니, 이미 스캔을 요청한 이력을 다음 묶음에서 또 따지면 안 된다(워터마크) — 두 번째 묶음에 실패만 있으면 스캔은 그대로 한 번
+reset(scan=True); repository.set_setting(discord_config._KEY_WEBHOOK_URL, None)
+add_row("첫묶음", T0); rd.note_download_finished(T0); tick(T0 + MIN(10)); assert len(SCAN["start"]) == 1
+SCAN["running"] = False; tick(T0 + MIN(11))
+add_row("둘째묶음실패", T0 + MIN(20), status="failed"); rd.note_download_finished(T0 + MIN(20)); tick(T0 + MIN(30)); assert len(SCAN["start"]) == 1, SCAN
+add_row("셋째묶음", T0 + MIN(40)); rd.note_download_finished(T0 + MIN(40)); tick(T0 + MIN(50)); assert len(SCAN["start"]) == 2, SCAN             # 새로 받은 것이 있으면 다시
+discord_config.set_webhook_url("https://discord.com/api/webhooks/1/test")
+print("11) 공용 스캔/실패만/수동 다운로드/워터마크 OK")
 print("ALL OK")

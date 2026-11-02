@@ -441,8 +441,8 @@
         <p class="field-hint">입력해두면 리포트에 각 작품의 "바로가기" 링크가 붙고, 구독중인 웹툰 카드에서 바로 뷰어로 이동하는 아이콘이 생깁니다(카카오 포함).</p>
         <span id="webtoon-server-save-result" class="hint-inline"></span>
         <div class="viewer-scan-box">
-          <label class="checkbox-label"><input type="checkbox" id="viewer-scan-toggle" /> 다운로드가 끝나면 뷰어 서버에 스캔을 시키고, 끝난 뒤 리포트 보내기</label>
-          <p class="field-hint">뷰어의 스캔이 끝나야 리포트의 "바로가기" 링크가 방금 받은 회차를 가리킵니다. 네트워크 드라이브 라이브러리는 스캔이 15~30분처럼 오래 걸릴 수 있어서, 스캔을 시킨 뒤 끝날 때까지(아래 최대 대기 시간까지) 리포트를 미룹니다. 뷰어에 로그인(프로필) 기능이 켜져 있으면 뷰어의 환경변수 <code>INTEGRATION_TOKEN</code>에 정한 값을 아래 연동 토큰에 똑같이 넣어야 합니다. 뷰어가 이 연동을 지원하지 않거나 토큰이 안 맞으면 스캔은 건너뛰고 리포트는 그대로 보냅니다.</p>
+          <label class="checkbox-label"><input type="checkbox" id="viewer-scan-toggle" /> 새 파일이 생기면 뷰어 서버에 스캔 시키기</label>
+          <p class="field-hint">자동/수동 다운로드(수동 다운로드 포함)로 새 회차를 받거나, 자동/수동 아카이빙과 폴더 일괄 이동으로 파일을 옮기면 뷰어 서버에 스캔을 시킵니다. 다운로드는 위 "다운로드 리포트"의 모으는 시간이 지난 뒤(묶음이 끝났을 때) 한 번만 시키고, 다운로드 리포트는 이 스캔이 끝난 뒤에 보내서 "바로가기" 링크가 방금 받은 회차를 가리키게 합니다. 스캔은 겹치지 않고 하나씩 돕니다. 스캔 도중에 새 파일이 생기면 그 스캔이 끝난 뒤 다시 시키고, 뷰어가 이미 스캔 중이면 끝난 뒤에 시킵니다. 네트워크 드라이브 라이브러리는 스캔이 15~30분처럼 오래 걸릴 수 있어서, 스캔 요청은 바로 돌아오고 1분마다 진행 상태만 확인하며 최대 대기 시간(아래)이 지나면 더 이상 기다리지 않습니다. 뷰어에 로그인(프로필) 기능이 켜져 있으면 뷰어의 환경변수 <code>INTEGRATION_TOKEN</code>에 정한 값을 아래 연동 토큰에 똑같이 넣어야 합니다. 뷰어가 이 연동을 지원하지 않거나 토큰이 안 맞으면 스캔은 건너뛰고 다운로드와 리포트는 그대로 동작합니다.</p>
           <div class="registry-add-row">
             <input id="viewer-scan-token" type="password" autocomplete="off" placeholder="연동 토큰" />
             <button id="btn-clear-viewer-scan-token">토큰 지우기</button>

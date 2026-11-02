@@ -6,7 +6,7 @@ import logging
 
 import aiohttp
 
-from app import archiver, discord_notify, download_roots, job_status, rclone_updater, repository, webtoon_server_client
+from app import archiver, discord_notify, download_roots, job_status, rclone_updater, repository, webtoon_server_client, viewer_scan
 from app.archiver.title_archive import ReadNumbersProvider
 from app.config import get_settings
 from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
@@ -99,6 +99,7 @@ async def run_archive_job() -> None:
                 lambda msg: job_status.log_line("archive", msg), conflicts, failures, download_roots.kakao_root(settings),
             )
             job_status.log_line("archive", f"완결 구독해제 대기열 {pending_moved}개 파일 이동 완료")
+            viewer_scan.note_library_changed(moved + pending_moved)  # 파일을 옮겼으면 뷰어 서버가 다시 훑게 한다(연동이 켜져 있을 때만)
             _cleanup_old_archive_history()
 
             if conflicts or failures:

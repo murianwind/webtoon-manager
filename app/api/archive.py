@@ -13,6 +13,7 @@ from app import (
     download_roots,
     job_status,
     repository,
+    viewer_scan,
 )
 from app import archiver
 from app import rclone_client
@@ -620,6 +621,7 @@ async def run_archive_now(payload: ArchiveRunIn):
                     lambda msg: job_status.log_line("archive", msg), payload.full_move, download_roots.kakao_root(settings),
                 )
                 job_status.log_line("archive", f"{moved}개 파일 이동 완료")
+                viewer_scan.note_library_changed(moved)  # 옮긴 파일이 있으면 뷰어 서버가 다시 훑게 한다(연동이 켜져 있을 때만)
             else:
                 all_ids = [t.title_id for t in repository.list_archive_targets() if t.enabled]
                 moved = await asyncio.to_thread(
@@ -633,6 +635,7 @@ async def run_archive_now(payload: ArchiveRunIn):
                     lambda msg: job_status.log_line("archive", msg), None, None, download_roots.kakao_root(settings),
                 )
                 job_status.log_line("archive", f"완결 구독해제 대기열 {pending_moved}개 파일 이동 완료")
+                viewer_scan.note_library_changed(moved + pending_moved)
 
             job_status.finish("archive", success=True)
         except Exception as e:
@@ -746,6 +749,7 @@ async def bulk_move(payload: BulkMoveIn):
             # (주기/수동/완결 이동과 동일한 단위) — 여기서 요약 한 줄을 따로 더
             # 남기면 파일 단위 기록과 중복/불일치하므로 더 이상 남기지 않는다.
             job_status.log_line("bulk_move", f"완료 — {moved}개 파일 이동")
+            viewer_scan.note_library_changed(moved)  # 폴더 일괄 이동도 보관 폴더에 파일을 만들므로 뷰어 서버가 다시 훑게 한다
             job_status.finish("bulk_move", success=True)
         except ValueError as e:
             job_status.log_line("bulk_move", f"오류: {e}")

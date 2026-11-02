@@ -54,6 +54,9 @@ const { makeApp, sleep, ok, done } = require("./harness");
   // Scenario 5: 뷰어 스캔 설정 — 불러오기(토큰 값은 안 보이고 저장돼 있다는 표시만), 켜고 새 토큰/대기 시간 저장, 토큰 지우기, 오류
   ok($("viewer-scan-toggle").checked === false && $("viewer-scan-token").value === "" && /저장됨/.test($("viewer-scan-token").placeholder) && $("viewer-scan-max-wait").value === "45", "스캔 설정 불러옴(토큰은 표시만)");
   ok(/15~30분/.test($("settings-card-links").textContent) && /오래 걸/.test($("settings-card-links").textContent), "스캔이 오래 걸릴 수 있다는 안내(연동 주소 카드)");
+  const scanText = $("viewer-scan-toggle").closest(".viewer-scan-box").textContent.replace(/\s+/g, " ");
+  ok(/다운로드/.test(scanText) && /아카이빙/.test(scanText) && /수동 다운로드/.test(scanText) && /폴더 일괄 이동/.test(scanText), "스캔을 시키는 경우(다운로드, 수동 다운로드, 아카이빙, 폴더 일괄 이동)를 안내: " + scanText.slice(0, 200));
+  ok(/한 번에 하나/.test(scanText) || /겹치지 않/.test(scanText), "스캔은 겹치지 않고 하나씩 돈다는 안내");
   $("viewer-scan-toggle").checked = true; $("viewer-scan-token").value = "새토큰"; $("viewer-scan-max-wait").value = "60";
   $("btn-save-viewer-scan").click(); await sleep(80);
   ok(JSON.stringify(posts.scan[0]) === JSON.stringify({ enabled: true, token: "새토큰", clear_token: false, max_wait_minutes: 60 }) && $("viewer-scan-token").value === "" && $("viewer-scan-save-result").textContent === "저장했습니다.", "스캔 설정 저장: " + JSON.stringify(posts.scan[0]));

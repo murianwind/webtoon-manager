@@ -7,7 +7,7 @@
 
 상태(state)는 설정 테이블에 JSON 한 덩어리로 저장해서 재시작해도 이어진다. 1분마다 도는 확인(scheduler.report_job.run_report_tick)이 이 상태만 보고 움직인다:
   last_download_at: 마지막으로 다운로드가 끝난 시각(없으면 보낼 것이 대기 중이 아님) / cutoff: 확정된 묶음의 끝(이 시각까지의 이력을 보낸다)
-  scan_started_at / scan_done: 이 묶음의 뷰어 스캔 진행 상태.
+  scan_requested: 이 묶음에서 뷰어 스캔을 이미 요청했다 / scan_started_at: 리포트가 스캔을 기다리기 시작한 시각(최대 대기 계산용) / scan_done: 기다림이 끝났다(스캔 반영/실패/시간 초과).
 """
 import json
 from datetime import datetime, timezone
@@ -113,7 +113,7 @@ def set_batch_minutes(minutes: int) -> None:
 # ── 발송 상태 ─────────────────────────────────────────────────────────
 
 def _empty_state() -> dict:
-    return {"last_download_at": None, "cutoff": None, "scan_started_at": None, "scan_done": False}
+    return {"last_download_at": None, "cutoff": None, "scan_requested": False, "scan_started_at": None, "scan_done": False}
 
 
 def load_state() -> dict:
@@ -154,7 +154,7 @@ def note_download_finished(now: datetime | None = None, started_at: str | None =
     fields = {"last_download_at": now.isoformat()}
     # 묶음이 확정됐어도 아직 스캔이 진행 중이 아니면(시작 전이거나, 끝나고 발송하지 않는 시간을 기다리는 중) 다시 열어서 새로 끝난 다운로드까지 한 통으로 보낸다.
     if state["cutoff"] and not (state["scan_started_at"] and not state["scan_done"]):
-        fields.update(cutoff=None, scan_started_at=None, scan_done=False)
+        fields.update(cutoff=None, scan_requested=False, scan_started_at=None, scan_done=False)
     update_state(**fields)
 
 

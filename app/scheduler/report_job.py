@@ -370,36 +370,68 @@ async def _run_report_job_impl(force_test: bool = False, until: str | None = Non
 _report_tick_lock = asyncio.Lock()
 
 
+async def _advance_scan(now: datetime, advanced: list) -> None:
+    """뷰어 스캔 조정 장치를 한 걸음 진행한다 — 한 번의 확인(틱)에서 한 번만(상태 조회가 겹치지 않게)."""
+    if advanced or not viewer_scan.has_work():
+        return
+    advanced.append(True)
+    async with aiohttp.ClientSession() as session:
+        await viewer_scan.tick(session, now, get_settings().request_timeout_seconds)
+
+
 async def run_report_tick(now: datetime | None = None) -> None:
-    """1분마다 도는 리포트 발송 확인 — 저장된 상태(report_dispatch)만 보고 움직인다(서버 요청은 스캔/발송할 때만).
-    다운로드가 끝나고 N분 동안 새 다운로드가 없으면 묶음을 확정 → 보낼 이력이 있으면 뷰어 스캔(끝날 때까지 기다림) → 발송하지 않는 시간이면 끝날 때까지 대기 → 발송."""
+    """1분마다 도는 확인 — 저장된 상태(report_dispatch, viewer_scan)만 보고 움직인다(서버 요청은 스캔/발송할 때만).
+    ① 다운로드 쪽: 다운로드가 끝나고 N분 동안 새 다운로드가 없으면 묶음을 확정 → 새로 받은 게 있으면 뷰어 스캔을 요청(웹훅/리포트와 상관없이) →
+    보낼 이력이 있으면 스캔이 끝날 때까지 대기 → 발송하지 않는 시간이면 끝날 때까지 대기 → 발송.
+    ② 아카이빙 등이 요청한 뷰어 스캔도 같은 조정 장치(viewer_scan)가 이 확인에서 진행한다."""
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     if _report_tick_lock.locked() or _report_job_lock.locked():
         return
     async with _report_tick_lock:
-        state = report_dispatch.load_state()
-        if state["last_download_at"] is None:
-            return  # 보낼 것이 대기 중이 아니다
-        if state["cutoff"] is None:
-            if now - datetime.fromisoformat(state["last_download_at"]) < timedelta(minutes=report_dispatch.get_batch_minutes()):
-                return  # 아직 묶음이 열려 있다(마지막 다운로드 뒤 N분이 안 지남)
-            state = report_dispatch.update_state(cutoff=state["last_download_at"])
-        cutoff = state["cutoff"]
-        since = repository.get_setting(_SETTING_KEY_REPORT_LAST_SENT_AT)
-        rows = report_seen.filter_unseen_rows(repository.list_episode_history_window(since, cutoff)) if since else []
-        if not rows or not discord_config.get_webhook_url():
-            report_dispatch.finish_cycle(cutoff)  # 보낼 것이 없거나 보낼 곳이 없다 — 스캔도 하지 않는다
-            return
-        settings = get_settings()
-        if viewer_scan.is_ready() and not state["scan_done"]:
-            async with aiohttp.ClientSession() as session:
-                changes = await viewer_scan.advance(session, state, now, settings.request_timeout_seconds)
-            state = report_dispatch.update_state(**changes)
-            if not state["scan_done"]:
-                return  # 스캔이 끝나기를 기다린다(다음 확인 때 상태만 다시 본다)
-        if report_dispatch.is_quiet(now):
-            return  # 발송하지 않는 시간 — 쌓아 둔 채 끝날 때까지 기다린다(스캔은 이미 끝났다)
-        async with _report_job_lock:
-            await _run_report_job_impl(force_test=False, until=cutoff)
-        report_dispatch.finish_cycle(cutoff)
+        advanced: list = []
+        await _report_step(now, advanced)
+        await _advance_scan(now, advanced)  # 리포트와 상관없이 요청된 스캔(아카이빙 등)이나 진행 중인 스캔 확인
 
+
+async def _report_step(now: datetime, advanced: list) -> None:
+    state = report_dispatch.load_state()
+    if state["last_download_at"] is None:
+        return  # 보낼 것이 대기 중이 아니다
+    if state["cutoff"] is None:
+        if now - datetime.fromisoformat(state["last_download_at"]) < timedelta(minutes=report_dispatch.get_batch_minutes()):
+            return  # 아직 묶음이 열려 있다(마지막 다운로드 뒤 N분이 안 지남)
+        state = report_dispatch.update_state(cutoff=state["last_download_at"])
+    cutoff = state["cutoff"]
+    since = repository.get_setting(_SETTING_KEY_REPORT_LAST_SENT_AT)
+
+    if not state["scan_requested"]:
+        _request_scan_for_batch(cutoff)  # 이번 묶음에 새로 받은 게 있으면 뷰어 스캔 요청 — 리포트를 보내든 말든 뷰어는 새 파일을 훑어야 한다
+        state = report_dispatch.update_state(scan_requested=True)
+
+    rows = report_seen.filter_unseen_rows(repository.list_episode_history_window(since, cutoff)) if since else []
+    if not rows or not discord_config.get_webhook_url():
+        report_dispatch.finish_cycle(cutoff)  # 보낼 것이 없거나 보낼 곳이 없다 — 리포트만 건너뛴다(스캔 요청은 이미 했다)
+        return
+    if viewer_scan.is_ready() and not state["scan_done"]:
+        await _advance_scan(now, advanced)
+        started = state["scan_started_at"] or now.isoformat()
+        if not state["scan_started_at"]:
+            state = report_dispatch.update_state(scan_started_at=started)
+        waited = now - datetime.fromisoformat(started)
+        if viewer_scan.covered_state(datetime.fromisoformat(cutoff)) == "waiting" and waited < timedelta(minutes=viewer_scan.get_max_wait_minutes()):
+            return  # 뷰어 스캔이 끝나기를 기다린다(그 뒤에 리포트의 바로가기 링크가 새 회차를 가리킨다)
+        state = report_dispatch.update_state(scan_done=True)  # 반영됐거나(done), 스캔을 못 시켰거나(failed), 너무 오래 걸려서 — 기다리지 않는다
+    if report_dispatch.is_quiet(now):
+        return  # 발송하지 않는 시간 — 쌓아 둔 채 끝날 때까지 기다린다
+    async with _report_job_lock:
+        await _run_report_job_impl(force_test=False, until=cutoff)
+    report_dispatch.finish_cycle(cutoff)
+
+
+def _request_scan_for_batch(cutoff: str) -> None:
+    """확정된 묶음(이전 확인 시점 ~ cutoff)에 새로 받은 회차(성공)가 있으면 뷰어 스캔을 요청한다. 같은 이력을 다시 따지지 않게 워터마크를 옮긴다."""
+    since = viewer_scan.load_state()["watermark"] or repository.get_setting(_SETTING_KEY_REPORT_LAST_SENT_AT)
+    cutoff_at = datetime.fromisoformat(cutoff)
+    if since and any(row["status"] == "success" for row in repository.list_episode_history_window(since, cutoff)):
+        viewer_scan.request(cutoff_at)
+    viewer_scan.set_watermark(cutoff_at)
