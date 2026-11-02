@@ -71,6 +71,15 @@ def record_event(job_name: str, lines: list[str], success: bool = True) -> None:
         log.warning("실행 이력 저장 실패 (%s): %s", job_name, e)
 
 
+_finish_listeners: list = []
+
+
+def add_finish_listener(listener) -> None:
+    """작업이 끝날 때마다 listener(job_name)을 부른다(같은 것을 두 번 등록하지 않는다) — 다운로드 리포트가 "다운로드가 끝났다"를 알기 위해 쓴다."""
+    if listener not in _finish_listeners:
+        _finish_listeners.append(listener)
+
+
 def finish(job_name: str, success: bool) -> None:
     with _lock:
         st = _statuses[job_name]
@@ -86,6 +95,12 @@ def finish(job_name: str, success: bool) -> None:
         repository.add_job_history(job_name, started_at or finished_at, finished_at, st.status, log_copy)
     except Exception as e:
         log.warning("실행 이력 저장 실패 (%s): %s", job_name, e)  # 이력 저장 실패가 잡 자체의 실행 결과에 영향을 주면 안 되지만, 흔적은 남긴다
+
+    for listener in list(_finish_listeners):
+        try:
+            listener(job_name)
+        except Exception as e:
+            log.warning("작업 종료 리스너 실패 (%s): %s", job_name, e)  # 리스너 실패가 작업 결과에 영향을 주면 안 된다
 
 
 def snapshot() -> dict:

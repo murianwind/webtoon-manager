@@ -389,7 +389,7 @@
         <h3>아카이빙</h3>
         <div class="schedule-controls"></div>
       </div>
-      <p class="hint">다운로드와 아카이빙 둘 다 "특정 시각" 모드면, 아카이빙은 다운로드보다 최소 10분 뒤로만 설정할 수 있습니다. "다운로드 리포트"를 언제 보낼지는 아래 "다운로드 리포트" 카드에서 정합니다(디스코드 웹훅이 설정돼야 그 카드가 나타납니다).</p>
+      <p class="hint">다운로드와 아카이빙 둘 다 "특정 시각" 모드면, 아카이빙은 다운로드보다 최소 10분 뒤로만 설정할 수 있습니다. "다운로드 리포트"는 다운로드가 끝나면 보내고, 보내지 않을 시간은 아래 "다운로드 리포트" 카드에서 정합니다(디스코드 웹훅이 설정돼야 그 카드가 나타납니다).</p>
       <button id="btn-save-settings">저장</button>
       <span id="settings-save-result" class="error"></span>
     </div>
@@ -417,13 +417,21 @@
     </div>
     <div class="settings-card hidden" id="settings-card-report">
       <h2>다운로드 리포트</h2>
-      <p class="hint">지정한 시각마다, 지난 리포트 이후 받은/실패한 작품을 모아 디스코드로 보냅니다 (위 웹훅 설정 그대로 사용).</p>
-      <div class="schedule-block" data-job="report_job">
-        <h3>발송 시각</h3>
-        <div class="schedule-controls"></div>
+      <p class="hint">다운로드가 끝나면 받은/실패한 작품을 모아 디스코드로 보냅니다(위 웹훅 설정 그대로 사용). 발송하지 않는 시간에는 쌓아 두었다가 끝나면 한 번에 보냅니다.</p>
+      <div class="field-group" id="report-quiet-group">
+        <label>발송하지 않는 시간</label>
+        <div id="report-quiet-list" class="schedule-times-list"></div>
+        <p id="report-quiet-empty" class="field-hint hidden">지정한 시간이 없어서 항상 바로 보냅니다.</p>
+        <button id="btn-add-report-quiet">+ 시간대 추가</button>
+        <p class="field-hint">요일은 시작하는 날 기준이며 자정을 넘길 수 있습니다(예: 월요일 23:00~06:00은 화요일 새벽까지). 아무 요일도 안 고르면 매일입니다. 서로 겹치는 시간대는 저장할 수 없습니다. 끝나는 시각부터는 보낼 수 있습니다.</p>
       </div>
-      <button id="btn-save-report-schedule">발송 시각 저장</button>
-      <span id="report-schedule-save-result" class="error"></span>
+      <div class="field-group">
+        <label for="report-batch-minutes">모으는 시간</label>
+        <input id="report-batch-minutes" type="number" min="0" max="1440" style="width: 90px;" /> 분
+        <p class="field-hint">다운로드가 끝난 뒤 이 시간 동안 새 다운로드가 없으면 그때 한 통으로 보냅니다(그 안에 또 끝나면 다시 셉니다). 0이면 바로 보냅니다. 기다무 충전 시각 다운로드처럼 작품이 연달아 끝나는 경우에 알림이 잦아지지 않게 해 줍니다. 아래 뷰어 서버 스캔도 이 묶음이 끝난 뒤에 한 번만 시킵니다. 새 에피소드 요약(미등록 작가의 새 작품, 카카오 신규 회차)은 이 리포트에 같이 담기고, 받은 작품이 없으면 따로 보내지 않습니다.</p>
+      </div>
+      <button id="btn-save-report-settings">저장</button>
+      <span id="report-settings-save-result" class="error"></span>
       <div class="field-group">
         <label for="webtoon-server-url">웹툰 뷰어 서버 주소 <span class="hint-inline">(선택)</span></label>
         <div class="registry-add-row">
@@ -432,6 +440,20 @@
         </div>
         <p class="field-hint">입력해두면 리포트에 각 작품의 "바로가기" 링크가 붙고, 구독중인 웹툰 카드에서 바로 뷰어로 이동하는 아이콘이 생깁니다(카카오 포함).</p>
         <span id="webtoon-server-save-result" class="hint-inline"></span>
+        <div class="viewer-scan-box">
+          <label class="checkbox-label"><input type="checkbox" id="viewer-scan-toggle" /> 다운로드가 끝나면 뷰어 서버에 스캔을 시키고, 끝난 뒤 리포트 보내기</label>
+          <p class="field-hint">뷰어의 스캔이 끝나야 리포트의 "바로가기" 링크가 방금 받은 회차를 가리킵니다. 네트워크 드라이브 라이브러리는 스캔이 15~30분처럼 오래 걸릴 수 있어서, 스캔을 시킨 뒤 끝날 때까지(아래 최대 대기 시간까지) 리포트를 미룹니다. 뷰어에 로그인(프로필) 기능이 켜져 있으면 뷰어의 환경변수 <code>INTEGRATION_TOKEN</code>에 정한 값을 아래 연동 토큰에 똑같이 넣어야 합니다. 뷰어가 이 연동을 지원하지 않거나 토큰이 안 맞으면 스캔은 건너뛰고 리포트는 그대로 보냅니다.</p>
+          <div class="registry-add-row">
+            <input id="viewer-scan-token" type="password" autocomplete="off" placeholder="연동 토큰" />
+            <button id="btn-clear-viewer-scan-token">토큰 지우기</button>
+          </div>
+          <div class="registry-add-row" style="margin-top: 8px;">
+            <label for="viewer-scan-max-wait">스캔 최대 대기</label>
+            <input id="viewer-scan-max-wait" type="number" min="1" max="240" style="width: 90px; flex: 0 0 90px;" /> 분
+            <button id="btn-save-viewer-scan">저장</button>
+          </div>
+          <span id="viewer-scan-save-result" class="hint-inline"></span>
+        </div>
       </div>
       <div class="field-group">
         <label for="app-public-base-url">이 앱의 외부 접속 주소 <span class="hint-inline">(선택)</span></label>
@@ -725,6 +747,7 @@
   <script src="/js/71-settings-discord-backup.js"></script>
   <script src="/js/72-settings-jobs.js"></script>
   <script src="/js/73-settings-kakao-roots.js"></script>
+<script src="/js/74-settings-report.js"></script>
   <script src="/js/80-history.js"></script>
   <script src="/js/90-archive.js"></script>
   <script src="/js/91-archive-presets.js"></script>

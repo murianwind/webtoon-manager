@@ -34,6 +34,7 @@ async function loadSettingsPage() {
   }
   loadDiscordSettings();
   loadWebtoonServerUrl();
+  loadReportSettings();
   loadAppPublicBaseUrl();
   loadUnregisteredNewEpisodesToggle();
   loadKakaoWebtoonsEnabledToggle();

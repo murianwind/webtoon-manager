@@ -19,7 +19,7 @@ from starlette.types import Scope
 from app.api.routes import router as api_router
 from app.discord_bot import start_bot, stop_bot
 from app.log_redaction import RedactingFilter
-from app import kakao_catalog, kakao_records, repository
+from app import kakao_catalog, kakao_records, report_dispatch, repository
 from app.config import get_settings, warn_removed_env_variables
 from app.scheduler import create_scheduler
 from app.tracker import ensure_default_tags_seeded
@@ -48,6 +48,8 @@ async def lifespan(app: FastAPI):
         await asyncio.to_thread(kakao_records.backfill_and_log, get_settings())
     except Exception:
         logging.getLogger(__name__).exception("받은 회차 기록 만들기 실패(건너뜀)")
+    # 다운로드 리포트는 이제 발송 시각 스케줄이 아니라 다운로드가 끝날 때 보낸다 — 작업이 끝나면 report_dispatch가 알도록 연결하고, 옛 발송 시각 설정은 지운다.
+    report_dispatch.start()
     scheduler = create_scheduler()
     scheduler.start()
     app.state.scheduler = scheduler

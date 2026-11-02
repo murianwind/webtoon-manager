@@ -141,6 +141,7 @@ from app.repository.history import (
     list_episode_history,
     list_episode_history_between,
     list_episode_history_since,
+    list_episode_history_window,
     list_job_history,
 )
 from app.repository.backup import (
@@ -223,6 +224,7 @@ __all__ = [
     "list_episode_history",
     "list_episode_history_between",
     "list_episode_history_since",
+    "list_episode_history_window",
     "list_filename_template_presets",
     "list_folder_favorites",
     "list_job_history",

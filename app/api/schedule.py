@@ -97,7 +97,6 @@ class JobScheduleIn(BaseModel):
 class SchedulesIn(BaseModel):
     discovery_job: JobScheduleIn
     download_job: list[JobScheduleIn]  # 다운로드는 스케줄을 여러 개 등록할 수 있다(각각 대상이 다름)
-    report_job: JobScheduleIn
     archive_job: JobScheduleIn
 
 

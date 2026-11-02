@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 
-from app import daily_plus, discord_notify, job_status, kakao_api, kakao_page_auth, naver_api, report_seen, repository, webtoon_server_client
+from app import daily_plus, discord_config, discord_notify, job_status, kakao_api, kakao_page_auth, naver_api, report_dispatch, report_seen, repository, viewer_scan, webtoon_server_client
 from app.config import get_settings
 from app.constants import NAVER_DETAIL_URL_TEMPLATES
 from app.cookie_loader import get_adult_cookies
@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 _report_job_lock = asyncio.Lock()
 
 
-_SETTING_KEY_REPORT_LAST_SENT_AT = "report_last_sent_at"
+_SETTING_KEY_REPORT_LAST_SENT_AT = report_dispatch.LAST_SENT_KEY
 
 
 _SETTING_KEY_WEBTOON_SERVER_URL = "webtoon_server_url"
@@ -265,13 +265,16 @@ def _kst_day_range_utc(day) -> tuple[str, str]:
     return start_kst.astimezone(timezone.utc).isoformat(), end_kst.astimezone(timezone.utc).isoformat()
 
 
-def _select_report_rows(since: str | None, force_test: bool) -> tuple[list[dict], bool]:
+def _select_report_rows(since: str | None, force_test: bool, until: str | None = None) -> tuple[list[dict], bool]:
     """리포트에 담을 다운로드 이력과, 어제 기록으로 대체했는지(테스트 발송에서만).
 
     일반 발송은 "지난 발송 이후" 이력 전부다. 테스트 발송은 그 누적 로직을 아예 안 쓴다 — 오늘(한국시간) 다운로드한 것만 보내고,
     오늘 게 없으면 어제 것만 보낸다. 전체 이력이 몰려서 나오는 걸 막기 위해 날짜 하루 단위로 딱 끊는다."""
     if not force_test:
-        return (repository.list_episode_history_since(since) if since else []), False
+        if not since:
+            return [], False
+        # until이 있으면(자동 발송) 묶음이 확정된 시각까지만 — 그 뒤에 끝난 다운로드는 다음 묶음으로 남는다
+        return (repository.list_episode_history_window(since, until) if until else repository.list_episode_history_since(since)), False
     today = datetime.now(_KST).date()
     rows = repository.list_episode_history_between(*_kst_day_range_utc(today))
     if rows:
@@ -310,21 +313,22 @@ async def _resolve_reader_urls(session: aiohttp.ClientSession, settings, success
     return urls
 
 
-async def _run_report_job_impl(force_test: bool = False) -> None:
+async def _run_report_job_impl(force_test: bool = False, until: str | None = None) -> None:
+    """리포트 한 통을 만들어 보낸다. until: 자동 발송에서 이번 묶음의 끝(이 시각까지의 이력만 담고, 보낸 뒤 발송 기준 시각도 이 값으로 둔다). 자동 발송은 받은 이력이 있을 때만 보내고(새 에피소드 요약은 이력과 함께만 나간다), 테스트 발송은 예전처럼 요약만 있어도 보낸다."""
     settings = get_settings()
     job_status.start("report")
 
     since = repository.get_setting(_SETTING_KEY_REPORT_LAST_SENT_AT)
     now_iso = datetime.now(timezone.utc).isoformat()
-    if not since and not force_test:
+    if not since and not force_test and until is None:
         # 최초 실행이면 지금까지 쌓인 이력을 전부 몰아 보내는 대신, 지금 시점부터 집계를 시작한다 — 첫 리포트에 예전 이력이 전부
         # 딸려오는 걸 방지. 수동 테스트(force_test)일 때는 이 규칙을 건너뛴다 — 사용자가 실제 발송 형태를 확인해보고 싶은 것이므로.
-        repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, now_iso)
+        repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, until or now_iso)
         job_status.log_line("report", "최초 실행 — 이번 시점부터 집계 시작 (발송 없음)")
         job_status.finish("report", success=True)
         return
 
-    rows, used_fallback = _select_report_rows(since, force_test)
+    rows, used_fallback = _select_report_rows(since, force_test, until)
     if not force_test:
         rows = report_seen.filter_unseen_rows(rows)  # 이미 보고한 회차는 뺀다(같은 회차는 한 번만) — 테스트 발송은 전부 보여준다
     success_rows = [r for r in rows if r["status"] == "success"]
@@ -334,10 +338,10 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
     try:
         async with aiohttp.ClientSession() as session:
             unregistered_new_episodes, kakao_new_episodes = await _collect_new_episode_sections(session, settings, force_test=force_test)
-            if not rows and not unregistered_new_episodes and not kakao_new_episodes:
+            if not rows and (until is not None or (not unregistered_new_episodes and not kakao_new_episodes)):
                 job_status.log_line("report", "발송할 내용 없음 (다운로드 기록도, 새 에피소드도 없음)")
                 if not force_test:
-                    repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, now_iso)
+                    repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, until or now_iso)
                 job_status.finish("report", success=True)
                 return
 
@@ -354,10 +358,48 @@ async def _run_report_job_impl(force_test: bool = False) -> None:
                 report_seen.remember_rows(rows)
 
         if not force_test:
-            repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, now_iso)
+            repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, until or now_iso)
         job_status.log_line("report", f"리포트 발송 완료 (성공 {len(success_rows)}건, 실패 {len(failed_rows)}건)")
         job_status.finish("report", success=True)
     except Exception as e:
         log.error("리포트 발송 중 예외: %s", e)
         job_status.log_line("report", f"오류: {e}")
         job_status.finish("report", success=False)
+
+
+_report_tick_lock = asyncio.Lock()
+
+
+async def run_report_tick(now: datetime | None = None) -> None:
+    """1분마다 도는 리포트 발송 확인 — 저장된 상태(report_dispatch)만 보고 움직인다(서버 요청은 스캔/발송할 때만).
+    다운로드가 끝나고 N분 동안 새 다운로드가 없으면 묶음을 확정 → 보낼 이력이 있으면 뷰어 스캔(끝날 때까지 기다림) → 발송하지 않는 시간이면 끝날 때까지 대기 → 발송."""
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    if _report_tick_lock.locked() or _report_job_lock.locked():
+        return
+    async with _report_tick_lock:
+        state = report_dispatch.load_state()
+        if state["last_download_at"] is None:
+            return  # 보낼 것이 대기 중이 아니다
+        if state["cutoff"] is None:
+            if now - datetime.fromisoformat(state["last_download_at"]) < timedelta(minutes=report_dispatch.get_batch_minutes()):
+                return  # 아직 묶음이 열려 있다(마지막 다운로드 뒤 N분이 안 지남)
+            state = report_dispatch.update_state(cutoff=state["last_download_at"])
+        cutoff = state["cutoff"]
+        since = repository.get_setting(_SETTING_KEY_REPORT_LAST_SENT_AT)
+        rows = report_seen.filter_unseen_rows(repository.list_episode_history_window(since, cutoff)) if since else []
+        if not rows or not discord_config.get_webhook_url():
+            report_dispatch.finish_cycle(cutoff)  # 보낼 것이 없거나 보낼 곳이 없다 — 스캔도 하지 않는다
+            return
+        settings = get_settings()
+        if viewer_scan.is_ready() and not state["scan_done"]:
+            async with aiohttp.ClientSession() as session:
+                changes = await viewer_scan.advance(session, state, now, settings.request_timeout_seconds)
+            state = report_dispatch.update_state(**changes)
+            if not state["scan_done"]:
+                return  # 스캔이 끝나기를 기다린다(다음 확인 때 상태만 다시 본다)
+        if report_dispatch.is_quiet(now):
+            return  # 발송하지 않는 시간 — 쌓아 둔 채 끝날 때까지 기다린다(스캔은 이미 끝났다)
+        async with _report_job_lock:
+            await _run_report_job_impl(force_test=False, until=cutoff)
+        report_dispatch.finish_cycle(cutoff)
+

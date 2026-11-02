@@ -42,6 +42,7 @@ from app.scheduler.report_job import (
     _collect_unregistered_new_episodes,
     _run_report_job_impl,
     run_report_job,
+    run_report_tick,
 )
 from app.scheduler.discovery_job import (
     _notify_newly_finished,
@@ -81,4 +82,5 @@ __all__ = [
     "run_download_job",
     "run_kakao_catalog_refresh_job",
     "run_report_job",
+    "run_report_tick",
 ]

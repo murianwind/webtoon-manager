@@ -14,7 +14,7 @@ from app import (
     download_roots,
     repository,
 )
-from app import download_pacing, kakao_page_download, waitfree_sync
+from app import download_pacing, kakao_page_download, report_dispatch, viewer_scan, waitfree_sync
 from app import webtoon_server_client
 from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
 from app.config import get_settings
@@ -179,6 +179,76 @@ async def get_kakao_rental_ticket_auto_use():
 async def set_kakao_rental_ticket_auto_use(payload: RentalTicketAutoUseIn):
     await asyncio.to_thread(repository.set_setting, repository.KAKAO_RENTAL_AUTO_USE_KEY, "1" if payload.enabled else None)
     return await get_kakao_rental_ticket_auto_use()
+
+
+class QuietHourModel(BaseModel):
+    start_hour: int
+    start_minute: int
+    end_hour: int
+    end_minute: int
+    days: list[str] = []  # 시작하는 날 기준 요일(비어 있으면 매일)
+
+
+class ReportSettingsModel(BaseModel):
+    quiet_hours: list[QuietHourModel] = []  # 발송하지 않는 시간(겹치면 저장할 때 오류)
+    batch_minutes: int = report_dispatch.DEFAULT_BATCH_MINUTES  # 다운로드가 끝난 뒤 새 다운로드가 없을 때까지 모으는 시간(0이면 바로)
+
+
+def _report_settings() -> dict:
+    return {"quiet_hours": report_dispatch.get_quiet_hours(), "batch_minutes": report_dispatch.get_batch_minutes()}
+
+
+@router.get("/settings/report", response_model=ReportSettingsModel)
+async def get_report_settings():
+    """다운로드 리포트 발송 설정 — 발송하지 않는 시간과 모으는 시간(N분)."""
+    return await asyncio.to_thread(_report_settings)
+
+
+@router.post("/settings/report", response_model=ReportSettingsModel)
+async def set_report_settings(payload: ReportSettingsModel):
+    def _save() -> dict:
+        report_dispatch.set_quiet_hours([q.model_dump() for q in payload.quiet_hours])
+        report_dispatch.set_batch_minutes(payload.batch_minutes)
+        return _report_settings()
+
+    try:
+        return await asyncio.to_thread(_save)
+    except ValueError as e:  # 시각/요일이 잘못됐거나 구간이 겹침 — 사람이 읽을 이유가 그대로 담겨 있다
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+class ViewerScanIn(BaseModel):
+    enabled: bool
+    token: str | None = None  # 안 보내거나 비어 있으면 기존 토큰 유지
+    clear_token: bool = False
+    max_wait_minutes: int = viewer_scan.DEFAULT_MAX_WAIT_MINUTES
+
+
+class ViewerScanOut(BaseModel):
+    enabled: bool
+    token_set: bool  # 토큰 값은 돌려주지 않는다
+    max_wait_minutes: int
+    ready: bool  # 켜져 있고 뷰어 서버 주소와 토큰이 있어서 실제로 스캔을 시킬 수 있다
+
+
+def _viewer_scan_settings() -> ViewerScanOut:
+    return ViewerScanOut(enabled=viewer_scan.is_enabled(), token_set=bool(viewer_scan.get_token()), max_wait_minutes=viewer_scan.get_max_wait_minutes(), ready=viewer_scan.is_ready())
+
+
+@router.get("/settings/viewer-scan", response_model=ViewerScanOut)
+async def get_viewer_scan_settings():
+    """다운로드 뒤 웹툰 뷰어 서버에 스캔을 시킬지(기본 꺼짐), 뷰어 연동 토큰, 스캔이 끝나기를 기다리는 최대 시간."""
+    return await asyncio.to_thread(_viewer_scan_settings)
+
+
+@router.post("/settings/viewer-scan", response_model=ViewerScanOut)
+async def set_viewer_scan_settings(payload: ViewerScanIn):
+    token = "" if payload.clear_token else (payload.token or None)
+    try:
+        await asyncio.to_thread(viewer_scan.set_config, enabled=payload.enabled, token=token, max_wait_minutes=payload.max_wait_minutes)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    return await asyncio.to_thread(_viewer_scan_settings)
 
 
 class WaitfreeSyncIn(BaseModel):

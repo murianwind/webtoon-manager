@@ -143,11 +143,7 @@ function readScheduleControls(wrap) {
 }
 
 async function saveAllSchedules(resultElId) {
-  // API가 4개 작업(신작스캔/다운로드/리포트/아카이빙) 스케줄을 한 번에 같이 받는
-  // 구조라("실행 스케줄" 저장, "다운로드 리포트"의 "발송 시각" 저장 둘 다 공용으로
-  // 쓴다), 어느 버튼에서 눌러도 지금 화면(카드 위치와 무관하게 data-job로 찾음)에
-  // 있는 4개 값을 전부 모아서 같이 보낸다 — 저장 버튼이 물리적으로 다른 카드에
-  // 있어도 실제로 저장되는 내용은 항상 최신 값 그대로다.
+  // API가 3개 작업(신작스캔/다운로드/아카이빙) 스케줄을 한 번에 같이 받는 구조라, 지금 화면에 있는 값을 전부 모아서 같이 보낸다.
   const resultEl = document.getElementById(resultElId);
   resultEl.textContent = "";
   try {
@@ -165,4 +161,3 @@ async function saveAllSchedules(resultElId) {
 }
 
 document.getElementById("btn-save-settings").addEventListener("click", () => saveAllSchedules("settings-save-result"));
-document.getElementById("btn-save-report-schedule").addEventListener("click", () => saveAllSchedules("report-schedule-save-result"));

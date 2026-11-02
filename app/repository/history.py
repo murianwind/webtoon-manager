@@ -164,6 +164,22 @@ def list_episode_history_since(since_iso: str) -> list[dict]:
     ]
 
 
+def list_episode_history_window(since_iso: str, until_iso: str) -> list[dict]:
+    """(since_iso, until_iso] 구간의 이력 — 리포트 한 통이 담는 범위(지난 발송 이후 ~ 이번 묶음의 끝, 끝 포함). 묶음이 확정된 뒤에 끝난
+    다운로드는 다음 묶음으로 남는다."""
+    rows = fetchall(
+        "SELECT * FROM episode_history WHERE downloaded_at > ? AND downloaded_at <= ? ORDER BY downloaded_at ASC",
+        (since_iso, until_iso),
+    )
+    return [
+        {
+            "id": r["id"], "title_id": r["title_id"], "title_name": r["title_name"], "episode_no": r["episode_no"], "subtitle": r["subtitle"],
+            "status": r["status"], "error_msg": r["error_msg"], "downloaded_at": r["downloaded_at"], "platform": r["platform"],
+        }
+        for r in rows
+    ]
+
+
 def list_episode_history_between(start_iso: str, end_iso: str) -> list[dict]:
     """[start_iso, end_iso) 구간의 이력을 반환한다 — 리포트 테스트 발송에서 "오늘"
     또는 "어제" 하루치만 정확히 뽑아낼 때 쓴다."""

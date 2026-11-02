@@ -6,12 +6,9 @@ import logging
 
 import aiohttp
 
-from app import cookie_health, daily_plus, discord_notify, job_status, repository, schedule_config, waitfree_sync
+from app import cookie_health, daily_plus, job_status, repository, waitfree_sync
 from app.config import get_settings
 
-from app.scheduler.common import (
-    DEFAULT_SCHEDULES,
-)
 from app.scheduler.kakao_download import (
     _download_kakao_subscriptions,
 )
@@ -97,19 +94,9 @@ async def _run_download_job_impl(platforms: set[str], scheduled: bool = False) -
             log.error("카카오페이지 자동 다운로드 중 예외: %s", e)
             job_status.log_line("download", f"카카오페이지 자동 다운로드 중 오류: {e}")
 
-        if failures:
-            # 다운로드 리포트가 켜져 있으면 실패 목록이 리포트에도 그대로 포함되므로
-            # (동일한 내용이 두 번 오는 게 실제로 불편하다는 피드백 있었음), 이 자리의
-            # 즉시 실패 알림은 건너뛴다. 리포트가 꺼져 있으면(설정 안 함) 여기서라도
-            # 알려야 사용자가 실패를 알 방법이 없으므로 그대로 보낸다.
-            report_configured = schedule_config.get_schedule(
-                "report_job", DEFAULT_SCHEDULES["report_job"]
-            ).mode != "off"
-            if not report_configured:
-                try:
-                    await _notify_download_failures(session, failures)
-                except Exception as e:
-                    log.error("실패 요약 알림 전송 중 예외: %s", e)
+    if failures:
+        # 실패한 작품/회차는 리포트(다운로드가 끝나면 모아서 발송)에 담기지만, 이번 실행 로그에도 한 줄로 요약해 둔다
+        job_status.log_line("download", f"실패 {len(failures)}건: " + ", ".join(_failure_label(f) for f in failures))
 
     try:
         _cleanup_old_episode_history()
@@ -153,15 +140,9 @@ def _cleanup_old_episode_history() -> None:
         job_status.log_line("download", f"보관기간({retention_days}일) 초과 다운로드 이력 {deleted}건 정리")
 
 
-async def _notify_download_failures(
-    session: aiohttp.ClientSession, failures: list[dict]
-) -> None:
-    """이번 실행에서 실패한 웹툰/회차를 한 번에 모아서 디스코드로 보낸다 — 실패마다
-    따로 알림을 보내면 스팸이 되니, 실행이 끝날 때 요약 1건으로 보낸다."""
-    lines = [f"⚠️ **다운로드 실패 {len(failures)}건** (이번 실행)"]
-    for f in failures:
-        if f["episode_no"] is not None:
-            lines.append(f"- {f['title_name']} {f['episode_no']}화 \"{f['subtitle']}\"")
-        else:
-            lines.append(f"- {f['title_name']}: {f['subtitle']}")
-    await discord_notify.send_webhook_notification(session, "\n".join(lines))
+def _failure_label(failure: dict) -> str:
+    """실패 한 건을 로그 한 줄에 들어갈 짧은 글로 — 회차가 있으면 "작품 12화", 없으면(작품 단위 오류) "작품(이유)"."""
+    if failure["episode_no"] is not None:
+        return f"{failure['title_name']} {failure['episode_no']}화"
+    return f"{failure['title_name']}({failure['subtitle']})"
+
