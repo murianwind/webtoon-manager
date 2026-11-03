@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 from app import (
+    kakao_status,
     kakao_page_download,
     repository,
     subscription_history,
@@ -179,6 +180,7 @@ async def list_kakao_webtoons(status: str | None = None):
     kakao_catalog.ensure_fresh()
     catalog_by_id = {item["title_id"]: item for item in kakao_catalog.snapshot()[0]}
 
+    hidden_ids = kakao_status.hidden_ids()
     result = []
     for r in rows:
         catalog_item = catalog_by_id.get(r["title_id"])
@@ -197,7 +199,8 @@ async def list_kakao_webtoons(status: str | None = None):
             if fresh_author_summary and fresh_author_summary != r["author_summary"]:
                 await asyncio.to_thread(repository.refresh_kakao_webtoon_author_summary, r["title_id"], fresh_author_summary)
                 r = {**r, "author_summary": fresh_author_summary}
-        result.append(KakaoWebtoonOut(**r, **extra))
+        # 완결이거나 서비스가 끝난 작품은 is_finished로 알려 화면(제외됨/구독해제)이 가리게 한다 — 받지 않는 작품은 DB 완결 표시가 비어 있어서 상태 확인 결과(kakao_status)를 합친다
+        result.append(KakaoWebtoonOut(**{**r, **extra, "is_finished": bool(r["is_finished"]) or r["title_id"] in hidden_ids}))
     return result
 
 

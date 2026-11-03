@@ -6,12 +6,10 @@
 제외됨/구독해제 탭은 네이버를 부르지 않고 DB 기록으로 목록을 만들어서 요일을 모른다 — 전체목록을 불러올 때(네이버 목록을 어차피 받는다) 요일을 설정 테이블에
 {작품 번호: [요일]}로 저장해 두고 그 탭들이 거기서 채운다. 요일별 목록에 없는 작품(완결/장기 휴재)은 요일이 없다 — 화면에서 "기타"에 모인다. 그중 완결이 아닌 추적 작품은 작품 페이지에서 요일을 알아내 채운다(아래 LOOKUP_*).
 """
-import json
 import re
-import threading
 import time
 
-from app import repository
+from app.json_setting import JsonSetting
 
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 NAVER_MAP_KEY = "naver_weekday_map"
@@ -24,26 +22,20 @@ def from_naver(codes) -> list[str]:
     return [day for day in DAYS if day in found]
 
 
-def _live_map() -> dict[str, list[str]]:
-    raw = repository.get_setting(NAVER_MAP_KEY)
-    try:
-        data = json.loads(raw) if raw else {}
-    except ValueError:
-        return {}
-    return data if isinstance(data, dict) else {}
+_LIVE_MAP = JsonSetting(NAVER_MAP_KEY)  # 전체목록(요일별 목록)에서 받은 {작품 번호: [요일]}
 
 
 def get_naver_map() -> dict[str, list[str]]:
     """{작품 번호: [요일]} — 전체목록(요일별 목록)에서 받은 요일이 우선이고, 없으면 작품 페이지에서 알아낸 요일(조회 결과)을 쓴다."""
     lookup = {title_id: entry["days"] for title_id, entry in _get_lookup().items() if entry.get("ok") and entry.get("days")}
-    return {**lookup, **_live_map()}
+    return {**lookup, **_LIVE_MAP.load()}
 
 
 def save_naver_map(days_by_id: dict[str, list[str]]) -> None:
     """네이버 요일별 목록에서 받은 {작품 번호: [요일]}을 저장한다(요일이 있는 작품만). 바뀐 게 없으면 쓰지 않는다 — 목록을 열 때마다 큰 값을 다시 쓰지 않게."""
     wanted = {title_id: days for title_id, days in days_by_id.items() if days}
-    if wanted != _live_map():
-        repository.set_setting(NAVER_MAP_KEY, json.dumps(wanted, ensure_ascii=False, sort_keys=True))
+    if wanted != _LIVE_MAP.load():
+        _LIVE_MAP.save(dict(sorted(wanted.items())))
 
 
 # ── 요일별 목록에 없는 작품(장기 휴재 등)의 요일: 작품 페이지에서 읽기 ───────────────────────────────
@@ -71,25 +63,25 @@ def parse_title_page(html: str) -> list[str]:
     return [tab.group(1)] if tab else []
 
 
+def parse_title_finished(html: str) -> bool | None:
+    """모바일 작품 페이지 상태 스크립트의 title.finished(true/false)를 읽는다(실제 HAR 캡처로 확인한 자리). 없으면 None(모름)."""
+    match = re.search(r"\bfinished:\s*(true|false)\b", html)
+    return None if match is None else match.group(1) == "true"
+
+
+# 조회 결과 {작품 번호: {ok, days, at, http, finished}} — 한 덩어리 JSON을 읽고-바꾸고-쓰는 방식이라 JsonSetting이 잠금으로 동시 저장을 보호한다(asyncio.to_thread에서 겹쳐도 안전).
+_LOOKUP = JsonSetting(LOOKUP_KEY)
+
+
 def _get_lookup() -> dict[str, dict]:
-    raw = repository.get_setting(LOOKUP_KEY)
-    try:
-        data = json.loads(raw) if raw else {}
-    except ValueError:
-        return {}
-    return data if isinstance(data, dict) else {}
+    return _LOOKUP.load()
 
 
-# 조회 결과는 작품 전체를 한 덩어리 JSON으로 저장해서 "읽고 → 바꾸고 → 쓰기"를 한다. 스레드(asyncio.to_thread)에서 동시에 저장하면 뒤에 쓴 쪽이 앞의 결과를 지워 버리므로 잠금으로 한 덩어리로 보호한다.
-_lookup_lock = threading.Lock()
-
-
-def save_lookup(title_id: str, days: list[str] | None, now: float | None = None) -> None:
-    """작품 하나를 알아본 결과를 저장한다. days=None이면 요청이 실패한 것(요일이 없는 것과 구분해서 하루 뒤에 다시 시도). 동시에 불려도 서로의 결과를 덮어쓰지 않는다."""
-    with _lookup_lock:
-        lookup = _get_lookup()
-        lookup[title_id] = {"ok": days is not None, "days": days or [], "at": now if now is not None else time.time()}
-        repository.set_setting(LOOKUP_KEY, json.dumps(lookup, ensure_ascii=False))
+def save_lookup(title_id: str, days: list[str] | None, now: float | None = None, *, http: int | None = None, finished: bool | None = None) -> None:
+    """작품 하나를 알아본 결과를 저장한다. days=None이면 요청이 실패한 것(요일이 없는 것과 구분해서 하루 뒤에 다시 시도). 동시에 불려도 서로의 결과를 덮어쓰지 않는다.
+    http/finished: 그때 받은 HTTP 상태와 페이지의 완결 표시 — "기타"에 왜 남았는지 진단하는 데 쓴다(weekday_diagnostics)."""
+    entry = {"ok": days is not None, "days": days or [], "at": now if now is not None else time.time(), "http": http, "finished": finished}
+    _LOOKUP.edit(lambda lookup: lookup.update({title_id: entry}))
 
 
 def pending_lookup_ids(title_ids: list[str], now: float | None = None) -> list[str]:

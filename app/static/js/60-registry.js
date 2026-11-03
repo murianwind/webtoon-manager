@@ -174,7 +174,7 @@ async function enableKnownAuthor(author) {
   loadAuthorList();
 }
 
-document.getElementById("author-candidate-filter").addEventListener("input", renderAllAuthors);
+document.getElementById("author-candidate-filter").addEventListener("input", debounce(() => renderAllAuthors(), SEARCH_DEBOUNCE_MS)); // 글자마다 다시 그리지 않고 멈춘 뒤 한 번만
 
 document.getElementById("btn-add-author").addEventListener("click", async () => {
   const authorId = document.getElementById("add-author-id").value.trim();
@@ -257,7 +257,7 @@ async function renderAllTags() {
   }
 }
 
-document.getElementById("tag-catalog-search").addEventListener("input", renderAllTags);
+document.getElementById("tag-catalog-search").addEventListener("input", debounce(() => renderAllTags(), SEARCH_DEBOUNCE_MS));
 
 // ── 카카오웹툰 작가 (이름 자체가 식별자 — 네이버와 동일하게 선택됨/사용가능 2단) ──
 
@@ -361,4 +361,4 @@ async function enableKnownKakaoAuthor(author) {
   loadKakaoAuthorList();
 }
 
-document.getElementById("kakao-author-candidate-filter").addEventListener("input", renderKakaoAllAuthors);
+document.getElementById("kakao-author-candidate-filter").addEventListener("input", debounce(() => renderKakaoAllAuthors(), SEARCH_DEBOUNCE_MS));

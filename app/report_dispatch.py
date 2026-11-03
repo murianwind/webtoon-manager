@@ -10,11 +10,11 @@
   scan_requested: 이 묶음에서 뷰어 스캔을 이미 요청했다 / scan_started_at: 리포트가 스캔을 기다리기 시작한 시각(최대 대기 계산용) / scan_done: 기다림이 끝났다(스캔 반영/실패/시간 초과).
 """
 import json
-import threading
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from app import job_status, repository
+from app.json_setting import JsonSetting
 from app.schedule_config import VALID_DAYS
 
 QUIET_KEY = "report_quiet_hours"
@@ -50,29 +50,37 @@ def _intervals(r: dict) -> list[tuple[int, int]]:
     return out
 
 
-def parse_quiet_hours(items) -> list[dict]:
-    """화면/설정에서 온 구간 목록을 검증하고 정리한다. 잘못된 값이나 겹침이 있으면 사람이 읽을 이유와 함께 ValueError."""
-    result = []
-    for raw in items or []:
-        try:
-            sh, sm, eh, em = (int(raw[k]) for k in ("start_hour", "start_minute", "end_hour", "end_minute"))
-        except (KeyError, TypeError, ValueError):
-            raise ValueError("발송하지 않는 시간의 시작/끝 시각이 올바르지 않습니다.") from None
-        if not (0 <= sh <= 23 and 0 <= eh <= 23):
-            raise ValueError("시(hour)는 0~23이어야 합니다.")
-        if not (0 <= sm <= 59 and 0 <= em <= 59):
-            raise ValueError("분(minute)은 0~59여야 합니다.")
-        days = raw.get("days") or []
-        invalid = [d for d in days if d not in VALID_DAYS]
-        if invalid:
-            raise ValueError(f"알 수 없는 요일: {invalid}")
-        if (sh, sm) == (eh, em):
-            raise ValueError(f"발송하지 않는 시간의 시작과 끝이 같습니다({sh:02d}:{sm:02d}) — 같은 시각이면 구간이 없습니다.")
-        result.append({"start_hour": sh, "start_minute": sm, "end_hour": eh, "end_minute": em, "days": [d for d in VALID_DAYS if d in set(days)]})
-    for i, a in enumerate(result):
-        for b in result[i + 1:]:
+def _parse_quiet_interval(raw: dict) -> dict:
+    """구간 하나를 검증하고 정리한다(시각 범위, 요일, 시작=끝 금지). 잘못되면 사람이 읽을 이유와 함께 ValueError."""
+    try:
+        sh, sm, eh, em = (int(raw[k]) for k in ("start_hour", "start_minute", "end_hour", "end_minute"))
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("발송하지 않는 시간의 시작/끝 시각이 올바르지 않습니다.") from None
+    if not (0 <= sh <= 23 and 0 <= eh <= 23):
+        raise ValueError("시(hour)는 0~23이어야 합니다.")
+    if not (0 <= sm <= 59 and 0 <= em <= 59):
+        raise ValueError("분(minute)은 0~59여야 합니다.")
+    days = raw.get("days") or []
+    invalid = [d for d in days if d not in VALID_DAYS]
+    if invalid:
+        raise ValueError(f"알 수 없는 요일: {invalid}")
+    if (sh, sm) == (eh, em):
+        raise ValueError(f"발송하지 않는 시간의 시작과 끝이 같습니다({sh:02d}:{sm:02d}) — 같은 시각이면 구간이 없습니다.")
+    return {"start_hour": sh, "start_minute": sm, "end_hour": eh, "end_minute": em, "days": [d for d in VALID_DAYS if d in set(days)]}
+
+
+def _reject_overlaps(intervals: list[dict]) -> None:
+    """구간끼리 겹치면(요일은 시작하는 날 기준, 자정/주를 넘기는 것까지 따진다) 어느 둘이 겹치는지 밝혀 ValueError."""
+    for i, a in enumerate(intervals):
+        for b in intervals[i + 1:]:
             if any(s1 < e2 and s2 < e1 for s1, e1 in _intervals(a) for s2, e2 in _intervals(b)):
                 raise ValueError(f"발송하지 않는 시간 {_label(a)}와 {_label(b)}이 겹칩니다. 겹치지 않게 고쳐 주세요.")
+
+
+def parse_quiet_hours(items) -> list[dict]:
+    """화면/설정에서 온 구간 목록을 검증하고 정리한다. 잘못된 값이나 겹침이 있으면 사람이 읽을 이유와 함께 ValueError."""
+    result = [_parse_quiet_interval(raw) for raw in items or []]
+    _reject_overlaps(result)
     return result
 
 
@@ -113,41 +121,23 @@ def set_batch_minutes(minutes: int) -> None:
 
 # ── 발송 상태 ─────────────────────────────────────────────────────────
 
-# 상태는 JSON 한 덩어리를 "읽고 → 바꾸고 → 쓰기"로 갱신한다. 다른 스레드에서 동시에 갱신하면(작업 종료 리스너 등) 뒤에 쓴 쪽이 앞의 갱신을 지우므로 잠금으로 한 덩어리로 보호한다
-# (같은 스레드에서 update_state를 다시 부르는 finish_cycle/note_download_finished가 있어서 다시 잠글 수 있는 RLock).
-_state_lock = threading.RLock()
-
-
 def _empty_state() -> dict:
     return {"last_download_at": None, "cutoff": None, "scan_requested": False, "scan_started_at": None, "scan_done": False}
 
 
-def load_state() -> dict:
-    raw = repository.get_setting(STATE_KEY)
-    try:
-        return {**_empty_state(), **(json.loads(raw) if raw else {})}
-    except ValueError:
-        return _empty_state()
-
-
-def update_state(**fields) -> dict:
-    """저장된 상태에 이 칸들만 덮어쓴다(다운로드가 끝났다는 기록 같은 다른 칸을 건드리지 않게 읽고-바꾸고-쓰기를 한 번에 한다)."""
-    with _state_lock:
-        state = {**load_state(), **fields}
-        repository.set_setting(STATE_KEY, json.dumps(state))
-        return state
-
-
-def clear_state() -> None:
-    repository.set_setting(STATE_KEY, None)
+# 발송 상태 — 설정에 JSON 한 덩어리로 저장한다(읽고-바꾸고-쓰기는 JsonSetting이 잠금으로 한 덩어리로 보호한다: 작업 종료 알림 등 다른 스레드와 겹쳐도 안전).
+_STATE = JsonSetting(STATE_KEY, _empty_state)
+load_state = _STATE.load
+update_state = _STATE.update  # 이 칸들만 덮어쓴다(다운로드가 끝났다는 기록 같은 다른 칸을 건드리지 않게)
+clear_state = _STATE.clear
 
 
 def finish_cycle(cutoff: str) -> None:
     """cutoff까지의 묶음을 보냈거나 보낼 것이 없어서 끝낸다. 그 사이에 새 다운로드가 끝났으면(cutoff보다 뒤) 다음 묶음으로 남겨 두고, 아니면 상태를 비운다."""
-    with _state_lock:
+    with _STATE.lock:
         latest = load_state()
         if latest["last_download_at"] and latest["last_download_at"] > cutoff:
-            repository.set_setting(STATE_KEY, json.dumps({**_empty_state(), "last_download_at": latest["last_download_at"]}))
+            _STATE.save({**_empty_state(), "last_download_at": latest["last_download_at"]})
         else:
             clear_state()
 
@@ -158,7 +148,7 @@ def note_download_finished(now: datetime | None = None, started_at: str | None =
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     if repository.get_setting(LAST_SENT_KEY) is None and started_at:
         repository.set_setting(LAST_SENT_KEY, started_at)
-    with _state_lock:
+    with _STATE.lock:
         state = load_state()
         fields = {"last_download_at": now.isoformat()}
         # 묶음이 확정됐어도 아직 스캔이 진행 중이 아니면(시작 전이거나, 끝나고 발송하지 않는 시간을 기다리는 중) 다시 열어서 새로 끝난 다운로드까지 한 통으로 보낸다.

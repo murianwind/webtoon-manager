@@ -14,6 +14,14 @@ class EpisodeInfo:
 
 
 @dataclass
+class TitlePage:
+    """네이버 모바일 작품 페이지에서 읽은 것 — status: HTTP 상태(요청 자체가 실패하면 None), days: 연재 요일(mon~sun), finished: 완결 표시(페이지에 없으면 None)."""
+    status: int | None
+    days: list[str] = field(default_factory=list)
+    finished: bool | None = None
+
+
+@dataclass
 class TitleInfo:
     title_id: str
     title_name: str

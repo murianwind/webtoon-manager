@@ -13,7 +13,7 @@ from pathlib import Path
 import httpx
 
 from app import daily_plus, db, naver_api, repository, weekdays
-from app.models import NaverListItem
+from app.models import NaverListItem, TitlePage
 from fake_naver_http import FakeResponse, FakeSession
 db.get_connection()
 import app.main as m
@@ -29,6 +29,9 @@ assert weekdays.parse_title_page(week_day("<li>수</li><li>월</li><li>금</li>"
 assert weekdays.parse_title_page("<script>weekdayTabQueryParam: 'tue',</script>") == ["tue"]                                   # 연재 요일 칸이 없으면 요일 탭 값
 assert weekdays.parse_title_page(week_day("<li>완결</li>")) == [] and weekdays.parse_title_page("<html></html>") == []          # 요일이 아닌 값/없음 → 빈 목록
 assert weekdays.parse_title_page(week_day("<li>토</li>") + "<script>weekdayTabQueryParam: 'mon',</script>") == ["sat"]         # 둘 다 있으면 연재 요일 칸이 우선
+# 완결 여부 — 상태 스크립트의 title.finished(true/false). 없으면 모름(None)
+assert weekdays.parse_title_finished(page("naver_mobile_list_787500.html")) is False and weekdays.parse_title_finished(page("naver_mobile_list_644112.html")) is False
+assert weekdays.parse_title_finished("<script>title: { titleId: 1, finished: true, dailyPass: false }</script>") is True and weekdays.parse_title_finished("<html></html>") is None
 print("1) 작품 페이지 요일 읽기 OK")
 
 # Scenario 2: 요청 — 모바일 작품 페이지 주소(titleId), 성공하면 요일, 요청 실패(HTTP 오류/예외)는 None(못 알아낸 것과 요일 없음을 구분)
@@ -44,6 +47,10 @@ assert asyncio.run(naver_api.fetch_title_page_weekdays(FakeSession(handler("<htm
 class Boom:
     def get(self, *a, **k): raise ConnectionError("연결 끊김")
 assert asyncio.run(naver_api.fetch_title_page_weekdays(Boom(), "1", 5)) is None
+ok_page = asyncio.run(naver_api.fetch_title_page(FakeSession(handler(page("naver_mobile_list_787500.html"))), "787500", 5))
+assert ok_page == TitlePage(status=200, days=["sat"], finished=False), ok_page                                                            # 상태/요일/완결을 함께 돌려준다
+assert asyncio.run(naver_api.fetch_title_page(FakeSession(handler("", 403)), "1", 5)) == TitlePage(status=403, days=[], finished=None)   # HTTP 오류는 상태를 남긴다(진단용)
+assert asyncio.run(naver_api.fetch_title_page(Boom(), "1", 5)) == TitlePage(status=None, days=[], finished=None)                         # 요청 자체가 실패하면 상태 없음
 print("2) 작품 페이지 요청 OK")
 
 # Scenario 3: 저장/다시 묻기 시점 — 알아낸 요일은 60일, 요일 없음은 7일, 실패는 하루 뒤에 다시. 목록(live) 요일이 조회 결과보다 우선
@@ -77,8 +84,10 @@ hidden = set()
 async def fake_hidden(*a, **k): return set(hidden)
 naver_api.fetch_full_webtoon_list = fake_full_list; daily_plus.current_ids = fake_hidden
 ANSWERS = {}; calls = []; DELAY = [0.3]                                                                                              # 처음엔 조회를 느리게 — 응답이 조회를 기다리면 바로 드러난다
-async def fake_lookup(session, title_id, timeout): calls.append(title_id); await asyncio.sleep(DELAY[0]); return ANSWERS.get(title_id, [])
-naver_api.fetch_title_page_weekdays = fake_lookup
+FINISHED = set()                                                                                                                     # 페이지에 완결로 표시된 작품
+def page_of(days, title_id): return TitlePage(status=None, days=[], finished=None) if days is None else TitlePage(status=200, days=days, finished=title_id in FINISHED)
+async def fake_lookup(session, title_id, timeout): calls.append(title_id); await asyncio.sleep(DELAY[0]); return page_of(ANSWERS.get(title_id, []), title_id)
+naver_api.fetch_title_page = fake_lookup
 def reset(ids):
     for key in (weekdays.LOOKUP_KEY, weekdays.NAVER_MAP_KEY): repository.set_setting(key, None)
     calls.clear(); ANSWERS.clear(); hidden.clear()
@@ -123,9 +132,9 @@ async def main():
         # Scenario 8: 조회가 실패해도(예외) 전체목록은 정상이고 다음에 다시 시도한다
         reset([])
         async def boom(session, title_id, timeout): raise RuntimeError("네이버 응답 이상")
-        naver_api.fetch_title_page_weekdays = boom
+        naver_api.fetch_title_page = boom
         r = await c.get("/api/naver-list"); assert r.status_code == 200; await wait()
-        naver_api.fetch_title_page_weekdays = fake_lookup
+        naver_api.fetch_title_page = fake_lookup
         r = await c.get("/api/naver-list"); assert r.status_code == 200
         print("8) 조회 실패에도 목록은 정상 OK")
 
@@ -136,11 +145,25 @@ async def main():
         for key in (weekdays.LOOKUP_KEY, weekdays.NAVER_MAP_KEY): repository.set_setting(key, None)
         async def half(session, title_id, timeout):
             if title_id == "9701": raise RuntimeError("이 작품만 이상")
-            return ["fri"]
-        naver_api.fetch_title_page_weekdays = half
+            return page_of(["fri"], title_id)
+        naver_api.fetch_title_page = half
         await api_webtoons._run_weekday_lookup(["9701", "9702"], 5)
         saved = weekdays._get_lookup()
         assert saved["9701"]["ok"] is False and saved["9702"]["ok"] is True and saved["9702"]["days"] == ["fri"], saved
         print("9) 한 작품 실패에도 나머지 계속 OK")
+        # Scenario 10: 조회 결과의 상태(HTTP)와 완결 여부도 저장한다(진단용). 페이지가 완결이라고 알려 주면 제외됨/구독해제 작품은 완결로 저장해 화면에서 가린다. 구독 중인 작품은 신작 스캔이 맡으므로 그대로
+        for tid, status in (("9801", repository.STATUS_EXCLUDED), ("9802", repository.STATUS_UNSUBSCRIBED), ("9803", repository.STATUS_ACTIVE), ("9804", repository.STATUS_EXCLUDED)):
+            repository.upsert_new(tid, f"작품{tid}"); repository.set_status(tid, status)
+        FINISHED.update({"9801", "9802", "9803"}); ANSWERS.update({"9801": [], "9802": [], "9803": [], "9804": ["tue"]})
+        await api_webtoons._run_weekday_lookup(["9801", "9802", "9803", "9804"], 5)
+        saved = weekdays._get_lookup()
+        assert saved["9801"]["http"] == 200 and saved["9801"]["finished"] is True and saved["9804"]["finished"] is False, saved
+        assert repository.get("9801").is_finished and repository.get("9802").is_finished, "제외됨/구독해제 완결은 저장"
+        assert not repository.get("9803").is_finished and not repository.get("9804").is_finished, "구독 중이거나 연재 중이면 그대로"
+        async def fails(session, title_id, timeout): return TitlePage(status=403, days=[], finished=None)
+        naver_api.fetch_title_page = fails
+        await api_webtoons._run_weekday_lookup(["9801"], 5)
+        assert weekdays._get_lookup()["9801"]["ok"] is False and weekdays._get_lookup()["9801"]["http"] == 403, "실패는 HTTP 상태를 남긴다"
+        print("10) 조회 결과의 상태/완결 저장 OK")
 asyncio.run(main())
 print("ALL OK")

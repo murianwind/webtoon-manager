@@ -51,16 +51,32 @@ function weekdayTabCounts(rows) {
   return counts;
 }
 
+// 이번에 보여 줄 탭을 정한다: 검색 중이면 "전체", 아니면 화면이 기억한 탭(처음엔 오늘). 보던 "기타"가 비어서 탭이 사라졌으면 오늘 탭으로 돌아온다.
+function resolveActiveWeekdayTab(ctx, query, counts) {
+  if (query) return "all";
+  const state = listWindow(ctx);
+  if (state.tab === "etc" && counts.etc === 0) state.tab = null;
+  return activeWeekdayTab(ctx);
+}
+
+// 탭 줄을 그린다. 선택한 탭은 파란색(.active), 오늘 요일은 선택 여부와 상관없이 .today로 표시(선택하지 않았을 때 빨간색 — "오늘이 어느 요일인지" 잊지 않게),
+// 요일을 알 수 없는 작품이 하나도 없으면 "기타" 탭은 보여 주지 않는다.
 function renderWeekdayTabs(container, counts, active, onSelect) {
   container.innerHTML = "";
+  const todayKey = weekdayKeyOf(currentDate());
   for (const { key, label } of WEEKDAY_TABS) {
+    if (key === "etc" && counts.etc === 0) continue;
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "weekday-tab" + (key === active ? " active" : "");
+    button.className = "weekday-tab" + (key === active ? " active" : "") + (key === todayKey ? " today" : "");
     button.setAttribute("role", "tab");
     button.setAttribute("aria-selected", String(key === active));
+    if (key === todayKey) {
+      button.setAttribute("aria-current", "date");
+      button.title = "오늘";
+    }
     button.dataset.tab = key;
-    if (key === "etc") button.title = "요일별 목록에 없는 작품(완결·장기 휴재 등)";
+    if (key === "etc") button.title = "요일을 알 수 없는 작품(완결, 서비스 종료, 요일을 아직 못 알아낸 휴재 작품 등)";
     button.appendChild(document.createTextNode(label));
     const count = document.createElement("span");
     count.className = "weekday-tab-count";

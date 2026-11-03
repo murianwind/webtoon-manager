@@ -27,7 +27,7 @@ from app.constants import (
     NAVER_WEEKDAY_LIST_URL,
     RETRY_BACKOFF_BASE_SECONDS,
 )
-from app.models import EpisodeInfo, NaverListItem, SearchResultItem, TitleInfo
+from app.models import EpisodeInfo, NaverListItem, SearchResultItem, TitleInfo, TitlePage
 
 log = logging.getLogger(__name__)
 
@@ -138,9 +138,9 @@ async def fetch_title_info(
 _MOBILE_HEADERS = {**DEFAULT_HEADERS, "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1"}
 
 
-async def fetch_title_page_weekdays(session: aiohttp.ClientSession, title_id: str, timeout_seconds: int) -> Optional[list[str]]:
-    """작품 페이지(모바일)에서 연재 요일을 읽는다 — 요일별 목록에서 빠진 작품(장기 휴재 등)의 요일을 알아내는 유일한 경로.
-    요일을 읽었으면 mon~sun 목록, 페이지에 요일이 없으면 [], 요청이 실패했으면 None(못 알아낸 것과 "요일 없음"을 구분)."""
+async def fetch_title_page(session: aiohttp.ClientSession, title_id: str, timeout_seconds: int) -> TitlePage:
+    """작품 페이지(모바일)에서 HTTP 상태, 연재 요일, 완결 표시를 읽는다 — 요일별 목록에서 빠진 작품(장기 휴재 등)의 요일을 알아내는 유일한 경로.
+    HTTP 오류는 상태만 남기고(진단용), 요청 자체가 실패하면(예외) 상태도 None."""
     try:
         async with session.get(
             NAVER_MOBILE_LIST_URL,
@@ -150,11 +150,18 @@ async def fetch_title_page_weekdays(session: aiohttp.ClientSession, title_id: st
         ) as response:
             if response.status != 200:
                 log.warning("작품 페이지 요청 실패 (titleId=%s): HTTP %s", title_id, response.status)
-                return None
-            return weekdays.parse_title_page(await response.text())
+                return TitlePage(status=response.status)
+            html = await response.text()
+            return TitlePage(status=200, days=weekdays.parse_title_page(html), finished=weekdays.parse_title_finished(html))
     except Exception as e:
         log.warning("작품 페이지 요청 중 예외 (titleId=%s): %s", title_id, e)
-        return None
+        return TitlePage(status=None)
+
+
+async def fetch_title_page_weekdays(session: aiohttp.ClientSession, title_id: str, timeout_seconds: int) -> Optional[list[str]]:
+    """fetch_title_page에서 요일만 — 읽었으면 mon~sun 목록, 페이지에 요일이 없으면 [], 요청이 실패했으면 None(못 알아낸 것과 "요일 없음"을 구분)."""
+    page = await fetch_title_page(session, title_id, timeout_seconds)
+    return page.days if page.status == 200 else None
 
 
 async def _fetch_episode_list_page(

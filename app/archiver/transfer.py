@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath
 
 from app import rclone_client, repository
 from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
+from app.path_guard import resolve_under_root
 
 log = logging.getLogger(__name__)
 
@@ -221,12 +222,8 @@ def _title_folder(download_root: str, title_name: str, kakao: bool) -> Path:
 
 
 def _local_archive_path(archive_root: str, rel_path: str) -> Path:
-    """ARCHIVE_ROOT 기준 상대경로를 실제 경로로 바꾸되, 루트 밖으로 못 나가게 검증한다."""
-    root = Path(archive_root).resolve()
-    target = (root / rel_path).resolve()
-    if root != target and root not in target.parents:
-        raise ValueError("경로가 아카이브 루트 밖입니다.")
-    return target
+    """ARCHIVE_ROOT 기준 상대경로를 실제 경로로 바꾸되, 루트 밖으로 못 나가게 검증한다(공용 검사: path_guard.resolve_under_root)."""
+    return resolve_under_root(archive_root, rel_path)
 
 
 def _derive_folder_display_name(source_dest_type: str, source_path: str) -> str:

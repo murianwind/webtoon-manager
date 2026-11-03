@@ -31,6 +31,7 @@ async function loadSubscriptionTab(status) {
       }
     }
     subscriptionLoadedAt[status] = Date.now();
+    invalidateEtcDiagnostics(status); // 목록을 새로 받았으니 "기타" 원인도 새로 센다(그 사이 요일을 알아낸 작품이 있을 수 있다)
     const rows = [...naverRows, ...kakaoRows];
     const sig = JSON.stringify(rows);
     if (sig !== subscriptionSig[status] || listEl.querySelector(".webtoon-card") === null) {
@@ -38,6 +39,8 @@ async function loadSubscriptionTab(status) {
       subscriptionCache[status] = rows;
       populateFilterOptions(status);
       renderSubscriptionTab(status); // 바뀐 카드만 갱신된다
+    } else {
+      renderSubscriptionTab(status); // 목록은 그대로여도 기타 원인 안내는 새로 센 값으로 갱신한다(같은 카드는 그대로 둔다)
     }
   } catch (e) {
     if (listEl.children.length === 0) {
@@ -110,13 +113,15 @@ function renderSubscriptionTab(status) {
 
   if (tabsEl) {
     // 전체목록과 같은 요일 탭(화면마다 따로 기억) — 검색 중에는 요일과 상관없이 전체에서 찾는다
-    const activeTab = query ? "all" : activeWeekdayTab(status);
-    renderWeekdayTabs(tabsEl, weekdayTabCounts(rows), activeTab, (key) => {
+    const counts = weekdayTabCounts(rows);
+    const activeTab = resolveActiveWeekdayTab(status, query, counts);
+    renderWeekdayTabs(tabsEl, counts, activeTab, (key) => {
       listWindow(status).tab = key;
       resetListWindow(status);
       renderSubscriptionTab(status);
     });
     rows = rows.filter((w) => weekdayTabMatches(w, activeTab));
+    showEtcDiagnostics(document.getElementById(`${status}-etc-note`), status, activeTab); // 기타를 볼 때만 "왜 요일을 모르는지" 원인을 보여 준다
   }
 
   rows = [...rows].sort((a, b) => a.title.localeCompare(b.title));

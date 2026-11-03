@@ -7,8 +7,8 @@ const { listItem } = require("./factories");
     mk("naver", 1, "네이버 월화", ["mon", "tue"]), mk("naver", 2, "네이버 화", ["tue"]), mk("naver", 3, "네이버 일", ["sun"]), mk("naver", 4, "네이버 기타", []),
     mk("kakao", 5, "카카오 화", ["tue"]), mk("kakao", 6, "카카오 수", ["wed"]), mk("kakao", 7, "카카오 기타", []),
   ];
-  const { w, run, wait } = makeApp({ "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" }, "/api/naver-list": [], "/api/kakao-list": { items: [], version: "v", refreshing: false } }, { timeScale: 5 }); // 검색 지연(250ms)을 5배 빠르게 — 고정 sleep 없이 확인
-  await idle(); run("kakaoWebtoonsEnabled = true; currentDate = () => new Date('2026-11-03T03:00:00Z');");        // 2026-11-03 = 화요일(한국시간 12시)
+  const { w, run, wait } = makeApp({ "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" }, "/api/naver-list": [], "/api/kakao-list": { items: [], version: "v", refreshing: false } }, { timeScale: 5, now: "2026-11-03T03:00:00Z" }); // 검색 지연(250ms)을 5배 빠르게 — 고정 sleep 없이 확인
+  await idle(); run("kakaoWebtoonsEnabled = true;");        // 2026-11-03 = 화요일(한국시간 12시)
   const $ = (id) => w.document.getElementById(id);
   const feed = (rows) => { w.__rows = rows; run("naverListNaverItems = __rows.filter((r) => r.platform === 'naver'); naverListKakaoItems = __rows.filter((r) => r.platform === 'kakao'); combineNaverListCache(); renderNaverList();"); };
   const titles = (gridId = "naver-list-grid") => [...w.document.querySelectorAll(`#${gridId} .webtoon-card-title`)].map((e) => e.textContent.trim());
@@ -32,6 +32,24 @@ const { listItem } = require("./factories");
   clickTab("기타"); ok(JSON.stringify(titles().sort()) === JSON.stringify(["네이버 기타", "카카오 기타"]), "기타 = 요일 정보 없는 작품(완결/장기 휴재 등): " + titles());
   clickTab("전체"); ok(titles().length === 7, "전체 탭은 전부");
   clickTab("월"); ok(JSON.stringify(titles()) === '["네이버 월화"]', "월요일 탭");
+
+  // Scenario 2b: 오늘 표시 — 선택한 탭은 파란색 밑줄, 오늘(화요일)이 아닌 다른 탭을 선택하면 오늘 탭은 빨간색 밑줄로 따로 표시된다(오늘을 선택했으면 오늘=선택). 접근성: 오늘 탭에 aria-current
+  clickTab("화");
+  const tabByLabel = (label, id) => tabs(id).find((t) => tabLabel(t) === label);
+  ok(tabByLabel("화").classList.contains("active") && tabByLabel("화").classList.contains("today") && tabs().filter((t) => t.classList.contains("today")).length === 1, "오늘을 선택하면 선택과 오늘이 같은 탭");
+  clickTab("수");
+  ok(tabByLabel("수").classList.contains("active") && !tabByLabel("수").classList.contains("today") && tabByLabel("화").classList.contains("today") && !tabByLabel("화").classList.contains("active"), "수요일을 선택하면 수=선택(파랑), 화=오늘(빨강)");
+  ok(tabByLabel("화").getAttribute("aria-current") === "date" && !tabByLabel("수").hasAttribute("aria-current") && tabByLabel("화").title === "오늘", "오늘 탭 표시(aria-current, 제목 '오늘')");
+  clickTab("기타"); ok(tabByLabel("화").classList.contains("today") && tabByLabel("기타").classList.contains("active"), "기타/전체를 골라도 오늘 탭은 따로 표시");
+  clickTab("월");
+
+  // Scenario 2c: 기타 탭은 해당 작품이 하나도 없으면 숨긴다. 기타를 보던 중 비게 되면 오늘 탭으로 돌아온다
+  const noEtc = base.filter((r) => r.weekdays.length > 0);
+  feed(noEtc); ok(JSON.stringify(tabs().map(tabLabel)) === JSON.stringify(["월", "화", "수", "목", "금", "토", "일", "전체"]), "기타가 0이면 탭 없음: " + tabs().map(tabLabel));
+  feed(base); ok(tabs().map(tabLabel).includes("기타"), "기타 작품이 생기면 탭이 나타남");
+  clickTab("기타"); ok(activeTab("naver-list-weekday-tabs") === "기타" && titles().length === 2, "기타를 보는 중");
+  feed(noEtc); ok(activeTab("naver-list-weekday-tabs") === "화" && !tabs().map(tabLabel).includes("기타"), "보던 기타가 비면 오늘 탭으로: " + activeTab("naver-list-weekday-tabs"));
+  feed(base); clickTab("월");
 
   // Scenario 3: 검색하면 요일과 상관없이 전체에서 찾는다(탭은 "전체"로 보이고, 검색을 지우면 보던 탭으로 돌아간다)
   $("naver-list-search").value = "카카오 수"; $("naver-list-search").dispatchEvent(new w.Event("input")); await wait(350);
@@ -58,6 +76,10 @@ const { listItem } = require("./factories");
   ok(activeTab("excluded-weekday-tabs") === "화" && JSON.stringify(exTitles().sort()) === JSON.stringify(["제외 네이버 화(태그A)", "제외 네이버 화(태그B)", "제외 카카오 화"]), "제외됨도 오늘 탭: " + exTitles());
   ok(activeTab("naver-list-weekday-tabs") !== null && JSON.stringify(tabs("excluded-weekday-tabs").map(tabLabel)) === JSON.stringify(["월", "화", "수", "목", "금", "토", "일", "기타", "전체"]), "탭은 화면마다 따로");
   const tagSel = $("excluded-tag-filter"), exPlatform = $("excluded-platform-filter");
+  w.__exNoEtc = w.__ex.filter((r) => r.weekdays.length > 0);
+  run("subscriptionCache.excluded = __exNoEtc; renderSubscriptionTab('excluded');"); ok(!tabs("excluded-weekday-tabs").map(tabLabel).includes("기타"), "제외됨도 기타가 0이면 탭 없음");
+  ok(tabs("excluded-weekday-tabs").some((t) => t.classList.contains("today") && tabLabel(t) === "화"), "제외됨도 오늘 탭 표시");
+  run("subscriptionCache.excluded = __ex; renderSubscriptionTab('excluded');");
   ok(tagSel.classList.contains("hidden"), "플랫폼이 전체면 태그 필터는 숨김");
   const setEx = (id, v) => { $(id).value = v; $(id).dispatchEvent(new w.Event("change")); };
   setEx("excluded-platform-filter", "naver"); ok(!tagSel.classList.contains("hidden") && [...tagSel.options].map((o) => o.value).includes("태그A"), "네이버만 볼 때 태그 필터가 나온다");

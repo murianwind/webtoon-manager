@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from app.api import (
     app_settings,
     archive,
+    diagnostics,
     discord,
     history,
     jobs,
@@ -32,5 +33,6 @@ for _module in (
     system,
     history,
     archive,
+    diagnostics,
 ):
     router.include_router(_module.router)

@@ -5,6 +5,7 @@
   --text: #1c1c1e;
   --muted: #6b6b70;
   --accent: #03c75a;
+  --select: #2563eb; /* 요일 탭에서 선택한 탭(파랑) — 오늘 표시(--danger, 빨강)와 구별된다 */
   --danger: #e5484d;
   --warn: #f5a524;
 }
@@ -206,7 +207,8 @@ select {
 .list-toolbar > #naver-list-bulk-bar { flex: 0 0 100%; position: static; }
 .weekday-tab { flex: 0 0 auto; background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 9px 13px; font-size: 14px; font-weight: 600; color: var(--muted); }
 .weekday-tab:hover { color: var(--text); }
-.weekday-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.weekday-tab.active { color: var(--select); border-bottom-color: var(--select); }
+.weekday-tab.today:not(.active) { color: var(--danger); border-bottom-color: var(--danger); }
 .weekday-tab-count { margin-left: 5px; font-size: 11px; font-weight: 500; opacity: 0.75; }
 .list-more { text-align: center; padding: 18px 0 28px; }
 .list-more button { min-width: 180px; padding: 10px 18px; }

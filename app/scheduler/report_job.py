@@ -370,11 +370,18 @@ async def _run_report_job_impl(force_test: bool = False, until: str | None = Non
 _report_tick_lock = asyncio.Lock()
 
 
-async def _advance_scan(now: datetime, advanced: list) -> None:
+class _TickScan:
+    """한 번의 확인(틱) 안에서 뷰어 스캔 조정 장치를 한 걸음만 진행하게 하는 표시 — 리포트 단계와 마지막 단계가 둘 다 부르므로 상태 조회가 겹치지 않게 한 번만 한다."""
+
+    def __init__(self) -> None:
+        self.advanced = False
+
+
+async def _advance_scan(now: datetime, scan: _TickScan) -> None:
     """뷰어 스캔 조정 장치를 한 걸음 진행한다 — 한 번의 확인(틱)에서 한 번만(상태 조회가 겹치지 않게)."""
-    if advanced or not viewer_scan.has_work():
+    if scan.advanced or not viewer_scan.has_work():
         return
-    advanced.append(True)
+    scan.advanced = True
     async with aiohttp.ClientSession() as session:
         await viewer_scan.tick(session, now, get_settings().request_timeout_seconds)
 
@@ -388,12 +395,12 @@ async def run_report_tick(now: datetime | None = None) -> None:
     if _report_tick_lock.locked() or _report_job_lock.locked():
         return
     async with _report_tick_lock:
-        advanced: list = []
-        await _report_step(now, advanced)
-        await _advance_scan(now, advanced)  # 리포트와 상관없이 요청된 스캔(아카이빙 등)이나 진행 중인 스캔 확인
+        scan = _TickScan()
+        await _report_step(now, scan)
+        await _advance_scan(now, scan)  # 리포트와 상관없이 요청된 스캔(아카이빙 등)이나 진행 중인 스캔 확인
 
 
-async def _report_step(now: datetime, advanced: list) -> None:
+async def _report_step(now: datetime, scan: _TickScan) -> None:
     state = report_dispatch.load_state()
     if state["last_download_at"] is None:
         return  # 보낼 것이 대기 중이 아니다
@@ -413,7 +420,7 @@ async def _report_step(now: datetime, advanced: list) -> None:
         report_dispatch.finish_cycle(cutoff)  # 보낼 것이 없거나 보낼 곳이 없다 — 리포트만 건너뛴다(스캔 요청은 이미 했다)
         return
     if viewer_scan.is_ready() and not state["scan_done"]:
-        await _advance_scan(now, advanced)
+        await _advance_scan(now, scan)
         started = state["scan_started_at"] or now.isoformat()
         if not state["scan_started_at"]:
             state = report_dispatch.update_state(scan_started_at=started)

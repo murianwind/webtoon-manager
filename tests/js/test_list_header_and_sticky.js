@@ -75,5 +75,10 @@ const ruleOf = (text, selector) => { const m = text.match(new RegExp("(?:^|\\})\
   navHeight = 85; ok(w.document.documentElement.style.getPropertyValue("--nav-h") === "41px", "바뀌기 전에는 그대로"); w.dispatchEvent(new w.Event("resize"));
   ok(w.document.documentElement.style.getPropertyValue("--nav-h") === "85px", "창 크기가 바뀌어 메뉴가 두 줄이 되면 85px: " + w.document.documentElement.style.getPropertyValue("--nav-h"));
   navHeight = 41; w.dispatchEvent(new w.Event("resize")); ok(w.document.documentElement.style.getPropertyValue("--nav-h") === "41px", "다시 한 줄이 되면 41px");
+  // Scenario 9: 요일 탭 색 — 선택한 탭은 파랑(--select), 오늘이면서 선택 안 한 탭은 빨강(--danger) 밑줄. 선택이 오늘이면 파랑(선택이 우선)
+  ok(/--select:\s*#[0-9a-fA-F]{3,8}/.test(css), "선택 색(--select) 변수");
+  const activeRule = ruleOf(d, ".weekday-tab.active"), todayRule = ruleOf(d, ".weekday-tab.today:not(.active)");
+  ok(activeRule && /color: var\(--select\)/.test(activeRule) && /border-bottom-color: var\(--select\)/.test(activeRule), "선택한 탭: 파랑 글자와 밑줄: " + activeRule);
+  ok(todayRule && /color: var\(--danger\)/.test(todayRule) && /border-bottom-color: var\(--danger\)/.test(todayRule), "오늘이지만 선택 안 한 탭: 빨강 글자와 밑줄: " + todayRule);
   done();
 })();

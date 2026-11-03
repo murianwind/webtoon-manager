@@ -6,7 +6,7 @@ import logging
 
 import aiohttp
 
-from app import cookie_health, daily_plus, job_status, repository, waitfree_sync
+from app import cookie_health, daily_plus, job_status, repository, retention, waitfree_sync
 from app.config import get_settings
 
 from app.scheduler.kakao_download import (
@@ -114,31 +114,13 @@ async def _run_download_job_impl(platforms: set[str], scheduled: bool = False, p
 
 
 def _cleanup_old_job_history() -> None:
-    """설정된 보관 기간(일)이 있으면, 그보다 오래된 실행 이력(수동실행/신작스캔/다운로드
-    등 잡 실행 기록)을 정리한다. 설정 안 했으면 아무것도 안 함."""
-    retention_raw = repository.get_setting("job_history_retention_days")
-    if not retention_raw:
-        return
-    retention_days = int(retention_raw)
-    if retention_days <= 0:
-        return
-    deleted = repository.delete_job_history_older_than(retention_days)
-    if deleted:
-        job_status.log_line("download", f"보관기간({retention_days}일) 초과 실행 이력 {deleted}건 정리")
+    """설정된 보관 기간(일)보다 오래된 실행 이력(수동실행/신작스캔/다운로드 등 잡 실행 기록)을 정리한다. 설정 안 했으면 아무것도 안 함."""
+    retention.cleanup_history("download", "job_history_retention_days", repository.delete_job_history_older_than, "실행 이력")
 
 
 def _cleanup_old_episode_history() -> None:
-    """설정된 보관 기간(일)이 있으면, 그보다 오래된 다운로드 이력을 정리한다
-    (파일은 그대로 유지됨). 설정 안 했으면(0 또는 미설정) 아무것도 안 함."""
-    retention_raw = repository.get_setting("episode_history_retention_days")
-    if not retention_raw:
-        return
-    retention_days = int(retention_raw)
-    if retention_days <= 0:
-        return
-    deleted = repository.delete_episode_history_older_than(retention_days)
-    if deleted:
-        job_status.log_line("download", f"보관기간({retention_days}일) 초과 다운로드 이력 {deleted}건 정리")
+    """설정된 보관 기간(일)보다 오래된 다운로드 이력을 정리한다(파일은 그대로 유지됨). 설정 안 했으면(0 또는 미설정) 아무것도 안 함."""
+    retention.cleanup_history("download", "episode_history_retention_days", repository.delete_episode_history_older_than, "다운로드 이력")
 
 
 def _failure_label(failure: dict) -> str:

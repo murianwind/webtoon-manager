@@ -4,8 +4,8 @@ const { makeApp, sleep, idle, ok, done } = require("./harness");
 const { listItem } = require("./factories");
 (async () => {
   const mk = (platform, id, title, weekdays, extra = {}) => listItem(platform, id, title, weekdays, { status: "excluded", ...extra });
-  const { w, run, wait } = makeApp({ "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" }, "/api/naver-list": [], "/api/kakao-list": { items: [], version: "v", refreshing: false } }, { timeScale: 5 }); // 검색 지연(250ms)을 5배 빠르게 — 고정 sleep 없이 확인
-  await idle(); run("kakaoWebtoonsEnabled = true; currentDate = () => new Date('2026-11-03T03:00:00Z');");
+  const { w, run, wait } = makeApp({ "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" }, "/api/naver-list": [], "/api/kakao-list": { items: [], version: "v", refreshing: false } }, { timeScale: 5, now: "2026-11-03T03:00:00Z" }); // 검색 지연(250ms)을 5배 빠르게 — 고정 sleep 없이 확인
+  await idle(); run("kakaoWebtoonsEnabled = true;");
   const $ = (id) => w.document.getElementById(id);
   const titles = (gridId) => [...w.document.querySelectorAll(`#${gridId} .webtoon-card-title`)].map((e) => e.textContent.trim()).sort();
   const tabs = (id) => [...$(id).querySelectorAll(".weekday-tab")];

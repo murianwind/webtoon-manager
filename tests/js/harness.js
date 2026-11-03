@@ -13,8 +13,9 @@ const scriptErrors = [];
 // 진행 중인 fetch 수 — idle()이 "다 끝났을 때"를 알아내는 데 쓴다(프로세스 하나가 앱 하나를 쓰므로 모듈 전역으로 충분하다)
 let pendingFetches = 0;
 
-// makeApp(routes, { timeScale }): timeScale=n이면 앱의 setTimeout/setInterval 시간이 n배 빨라진다(3초 폴링을 0.3초로). 타이머로 도는 동작을 고정 sleep 없이 빠르게 확인할 때 쓴다.
-function makeApp(routes, { timeScale = 1 } = {}) {
+// makeApp(routes, { timeScale, now }): now(ISO 문자열)를 주면 앱이 보는 "지금"을 그 시각으로 고정한다(앱 스크립트가 실행되기 전에 Date를 바꾼다) — 요일/날짜에 따라 달라지는 동작을 실제 날짜와 무관하게 확인한다.
+// timeScale=n이면 앱의 setTimeout/setInterval 시간이 n배 빨라진다(3초 폴링을 0.3초로). 타이머로 도는 동작을 고정 sleep 없이 빠르게 확인할 때 쓴다.
+function makeApp(routes, { timeScale = 1, now = null } = {}) {
   const { VirtualConsole } = require("jsdom");
   const vc = new VirtualConsole();
   vc.on("jsdomError", (e) => { if (!String(e.message).includes("Not implemented")) scriptErrors.push(e.detail ? `${e.message}: ${e.detail.message || e.detail}` : e.message); });
@@ -37,6 +38,13 @@ function makeApp(routes, { timeScale = 1 } = {}) {
     const realSetTimeout = w.setTimeout.bind(w), realSetInterval = w.setInterval.bind(w);
     w.setTimeout = (fn, ms, ...args) => realSetTimeout(fn, (ms || 0) / timeScale, ...args);
     w.setInterval = (fn, ms, ...args) => realSetInterval(fn, (ms || 0) / timeScale, ...args);
+  }
+  if (now) {
+    const RealDate = w.Date, fixed = new RealDate(now).getTime();
+    w.Date = class extends RealDate {
+      constructor(...args) { if (args.length === 0) super(fixed); else super(...args); } // 인자 없이 만들면 고정된 "지금", 있으면 그대로
+      static now() { return fixed; }
+    };
   }
   w.CSS = { escape: (s) => s };
   w.alert = (m) => { w.__alerts.push(m); };

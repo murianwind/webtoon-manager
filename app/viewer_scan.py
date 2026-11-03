@@ -10,12 +10,11 @@
 - 뷰어는 로그인(PROFILES_ENABLED)이 켜져 있어도 쓸 수 있게 별도 토큰(뷰어의 INTEGRATION_TOKEN)으로 인증한다 — 토큰은 암호화해서 저장한다.
 상태는 설정 테이블에 JSON 한 덩어리로 저장해서 재시작해도 이어진다. 진행 로그는 리포트 상태 로그("report")에 남는다.
 """
-import json
 import logging
-import threading
 from datetime import datetime, timedelta, timezone
 
 from app import job_status, repository, webtoon_server_client
+from app.json_setting import JsonSetting
 from app.crypto import decrypt, encrypt
 
 log = logging.getLogger(__name__)
@@ -65,8 +64,6 @@ def is_ready() -> bool:
 # ── 요청/진행 상태 ───────────────────────────────────────────────────
 
 STATE_KEY = "viewer_scan_state"
-# 상태는 JSON 한 덩어리를 "읽고 → 바꾸고 → 쓰기"로 갱신한다 — 아카이빙 쪽 알림(request)과 1분 확인(tick)이 다른 스레드에서 겹쳐도 서로의 갱신을 지우지 않게 잠금으로 보호한다.
-_state_lock = threading.RLock()
 
 
 def _empty_state() -> dict:
@@ -80,19 +77,10 @@ def _empty_state() -> dict:
     }
 
 
-def load_state() -> dict:
-    raw = repository.get_setting(STATE_KEY)
-    try:
-        return {**_empty_state(), **(json.loads(raw) if raw else {})}
-    except ValueError:
-        return _empty_state()
-
-
-def update_state(**fields) -> dict:
-    with _state_lock:
-        state = {**load_state(), **fields}
-        repository.set_setting(STATE_KEY, json.dumps(state))
-        return state
+# 상태는 설정에 JSON 한 덩어리로 저장한다 — 아카이빙 쪽 알림(request)과 1분 확인(tick)이 다른 스레드에서 겹쳐도 서로의 갱신을 지우지 않게 JsonSetting이 잠금으로 보호한다.
+_STATE = JsonSetting(STATE_KEY, _empty_state)
+load_state = _STATE.load
+update_state = _STATE.update
 
 
 def _iso(when: datetime) -> str:
@@ -111,7 +99,7 @@ def request(when: datetime) -> None:
     """when 시각에 뷰어가 훑어야 할 변경(새로 받거나 옮긴 파일)이 생겼다고 기록한다 — 연동이 준비돼 있을 때만."""
     if not is_ready():
         return
-    with _state_lock:
+    with _STATE.lock:
         state = load_state()
         when_iso = _iso(when)
         if state["started_at"] and state["started_at"] >= when_iso:

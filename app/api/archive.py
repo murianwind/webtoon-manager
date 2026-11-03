@@ -19,6 +19,7 @@ from app import archiver
 from app import rclone_client
 from app import rclone_updater
 from app.config import get_settings
+from app.path_guard import PathOutsideRootError, resolve_under_root
 
 from app.api.common import (
     RetentionDaysIn,
@@ -540,10 +541,11 @@ async def list_archive_folders(path: str = "", local_root: str = "archive"):
     if not root_dir:
         detail = "로컬 아카이빙 경로(ARCHIVE_ROOT)" if local_root == "archive" else "다운로드 경로(DOWNLOAD_ROOT)"
         raise HTTPException(status_code=400, detail=f"{detail}가 설정되어 있지 않습니다.")
-    root = Path(root_dir).resolve()
-    target = (root / path).resolve()
-    if root != target and root not in target.parents:
-        raise HTTPException(status_code=400, detail="잘못된 경로입니다.")
+    root = Path(root_dir).resolve()  # 항목의 상대경로를 만들 때 쓴다(검사는 resolve_under_root가 한다)
+    try:
+        target = resolve_under_root(root_dir, path)
+    except PathOutsideRootError:
+        raise HTTPException(status_code=400, detail="잘못된 경로입니다.") from None
     if not target.exists():
         return {"path": path, "folders": []}
 
@@ -589,10 +591,10 @@ async def create_archive_folder(payload: CreateFolderIn):
     if not root_dir:
         detail = "로컬 아카이빙 경로(ARCHIVE_ROOT)" if payload.root == "archive" else "다운로드 경로(DOWNLOAD_ROOT)"
         raise HTTPException(status_code=400, detail=f"{detail}가 설정되어 있지 않습니다.")
-    root = Path(root_dir).resolve()
-    target = (root / payload.path).resolve()
-    if root != target and root not in target.parents:
-        raise HTTPException(status_code=400, detail="잘못된 경로입니다.")
+    try:
+        target = resolve_under_root(root_dir, payload.path)
+    except PathOutsideRootError:
+        raise HTTPException(status_code=400, detail="잘못된 경로입니다.") from None
     await asyncio.to_thread(target.mkdir, parents=True, exist_ok=True)
     return {"path": payload.path}
 

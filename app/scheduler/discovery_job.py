@@ -110,6 +110,16 @@ async def _run_discovery_job_impl() -> None:
             log.error("구독해제/제외됨 정보 갱신 중 예외: %s", e)
             job_status.log_line("discovery", f"구독해제/제외됨 정보 갱신 오류: {e}")
 
+        if repository.get_setting("kakao_webtoons_enabled") == "1":  # 쓰지 않는 기능으로 카카오에 요청하지 않는다
+            try:
+                job_status.log_line("discovery", "카카오 구독해제/제외됨 상태 확인 시작")
+                checked = await tracker.refresh_inactive_kakao_status(settings)
+                job_status.log_line("discovery", f"카카오 구독해제/제외됨 {checked}개 상태 확인 완료")
+            except Exception as e:
+                had_error = True
+                log.error("카카오 구독해제/제외됨 상태 확인 중 예외: %s", e)
+                job_status.log_line("discovery", f"카카오 구독해제/제외됨 상태 확인 오류: {e}")
+
         try:
             job_status.log_line("discovery", "구독해제 웹툰 새 에피소드 확인 시작")
             notified = await new_episode_watch.run(session, settings)

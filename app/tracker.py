@@ -18,7 +18,7 @@ from pathlib import Path
 
 import aiohttp
 
-from app import daily_plus, download_roots, comicinfo, discord_notify, job_status, kakao_api, kakao_cover, kakao_page_download, naver_api, repository
+from app import kakao_status, daily_plus, download_roots, comicinfo, discord_notify, job_status, kakao_api, kakao_cover, kakao_page_download, naver_api, repository
 from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
 from app.config import Settings
 from app.discord_notify import send_webhook_notification
@@ -180,6 +180,11 @@ async def enrich_one(
     repository.update_genres_and_tags(title_id, info.genres_ko, info.tags)
     repository.update_is_paused(title_id, info.is_paused)
     repository.update_is_new(title_id, info.is_new)
+    tracked = repository.get(title_id)
+    if tracked is not None and tracked.status != repository.STATUS_ACTIVE:
+        # 제외됨/구독해제 작품의 완결 여부 — 예전엔 구독 중인 작품만 저장해서 완결 작품이 제외됨에 그대로 보이고 요일 조회도 완결 작품에 헛수고를 했다.
+        # 구독 중인 작품은 구독하는 순간 완결 알림이 나가지 않게 기존처럼 신작 스캔(scan_subscriptions_for_updates)이 맡는다.
+        repository.update_is_finished(title_id, info.is_finished)
     if info.writer_id_name_pairs:
         ids, names = zip(*info.writer_id_name_pairs)
         repository.update_writer_ids_and_names(title_id, list(ids), list(names))
@@ -433,6 +438,34 @@ async def refresh_inactive_metadata(session: aiohttp.ClientSession, settings: Se
 
     results = await asyncio.gather(*(_run_one(wt) for wt in targets))
     return sum(1 for r in results if r)
+
+
+async def refresh_inactive_kakao_status(settings: Settings) -> int:
+    """구독 중이 아닌(구독해제/제외됨) 카카오 작품의 연재 상태(완결/휴재/서비스 종료)를 알아내 저장한다. 카카오 요일 목록은 연재 중인 작품만 담고
+    완결 여부는 다운로드를 끝냈을 때만 저장돼서, 받지 않는 작품은 완결이나 서비스가 끝난 작품도 제외됨에 그대로 보였다.
+    아직 안 알아본(또는 다시 볼 때가 된) 작품만 한 번에 LOOKUP_BATCH개까지 차례로 묻는다. 완결(on_issue N)은 DB에 완결로 저장하고(다시 연재하면 해제),
+    작품 정보가 없으면(404/410) 서비스 종료로 기록한다. 일시 오류는 상태를 바꾸지 않는다. 상태를 알아낸 작품 수를 돌려준다."""
+    inactive_ids = [row["title_id"] for row in repository.get_kakao_webtoons_map().values() if row["status"] != repository.STATUS_ACTIVE]
+    series_ids = kakao_status.pending_ids(inactive_ids)[: kakao_status.LOOKUP_BATCH]
+    if not series_ids:
+        return 0
+    resolved = 0
+    async with kakao_page_download.new_session() as kakao_session:
+        client = kakao_page_download.client_or_anonymous(kakao_session, settings.request_timeout_seconds)
+        for series_id in series_ids:
+            try:
+                http, series_item = await client.fetch_series_status(series_id)
+            except Exception as e:  # 작품 하나가 이상해도 나머지는 계속한다 — 못 알아낸 것으로 기록하면 하루 뒤에 다시 시도한다
+                log.warning("카카오 작품 상태 확인 실패 (series_id=%s): %s", series_id, e)
+                http, series_item = None, None
+            on_issue = (series_item or {}).get("on_issue")
+            kakao_status.save(series_id, on_issue=on_issue, http=http)
+            if on_issue is not None:
+                repository.set_kakao_finished(series_id, on_issue == "N")
+            if on_issue is not None or http in kakao_status.ENDED_HTTP:
+                resolved += 1
+            await asyncio.sleep(kakao_status.LOOKUP_PAUSE_SECONDS)
+    return resolved
 
 
 async def resync_registry(session: aiohttp.ClientSession, settings: Settings) -> int:

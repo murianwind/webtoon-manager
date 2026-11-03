@@ -21,6 +21,7 @@ STEPS = {  # 단계 이름: (가짜를 심을 곳, 돌려줄 값, 로그에 나�
     "unlinked": (tracker, "discover_titles_for_unlinked_watched_authors", ["a", "b"], "미구독 작가 신작 스캔"),
     "tags": (tracker, "scan_curation_tags", None, "태그 기반 신작 스캔"),
     "inactive": (tracker, "refresh_inactive_metadata", 5, "구독해제/제외됨 정보 갱신"),
+    "kakao_inactive": (tracker, "refresh_inactive_kakao_status", 3, "카카오 구독해제/제외됨 상태 확인"),
     "new_episodes": (new_episode_watch, "run", 2, "새 에피소드 확인"),
     "kakao_authors": (tracker, "scan_kakao_authors_for_new_titles", 4, "카카오웹툰 작가 신작 스캔"),
 }
@@ -29,6 +30,7 @@ notified_calls = []
 async def fake_notify(): notified_calls.append("notify")
 dj._notify_newly_finished_real = dj._notify_newly_finished                                                                          # 완결 알림 자체는 아래에서 따로 확인
 dj._notify_newly_finished = fake_notify
+repository.set_setting("kakao_webtoons_enabled", "1")                                                                                  # 카카오 관리가 켜져 있을 때의 전체 흐름(꺼진 경우는 시나리오 7)
 run = lambda: asyncio.run(dj.run_discovery_job())
 status = lambda: job_status.snapshot()["discovery"]
 log_text = lambda: "\n".join(status()["log"])
@@ -38,7 +40,7 @@ def reset(): calls.clear(); boom.clear(); notified_calls.clear()
 reset(); run()
 assert calls == list(STEPS), calls
 assert status()["status"] == "success" and notified_calls == ["notify"]
-for fragment in ("썸네일 3개 채움", "미구독 작가 신작 스캔 완료 (2건 추가)", "구독해제/제외됨 5개 정보 갱신 완료", "새 에피소드 2건 알림", "카카오웹툰 신작 4건 자동 추가"): assert fragment in log_text(), fragment
+for fragment in ("썸네일 3개 채움", "미구독 작가 신작 스캔 완료 (2건 추가)", "구독해제/제외됨 5개 정보 갱신 완료", "카카오 구독해제/제외됨 3개 상태 확인 완료", "새 에피소드 2건 알림", "카카오웹툰 신작 4건 자동 추가"): assert fragment in log_text(), fragment
 print("1) 모두 성공 OK")
 
 # Scenario 2: 단계 하나가 실패해도 나머지는 계속하고(오류 문구가 로그에), 마지막에 "오류"로 끝난다 — 단계마다 확인
@@ -99,4 +101,8 @@ kakao_catalog.refresh = fake_refresh
 repository.set_setting("kakao_webtoons_enabled", None); asyncio.run(dj.run_kakao_catalog_refresh_job()); assert refreshed == []
 repository.set_setting("kakao_webtoons_enabled", "1"); asyncio.run(dj.run_kakao_catalog_refresh_job()); asyncio.run(dj.run_kakao_catalog_refresh_job()); assert refreshed == [1, 1]
 print("6) 카카오 목록 정기 갱신 OK")
+# Scenario 7: 카카오 관리가 꺼져 있으면 카카오 작품 상태 확인은 건너뛴다(나머지 단계는 그대로) — 쓰지 않는 기능으로 카카오에 요청하지 않는다
+repository.set_setting("kakao_webtoons_enabled", None); reset(); run()
+assert calls == [name for name in STEPS if name != "kakao_inactive"] and status()["status"] == "success", calls
+print("7) 카카오 꺼짐 OK")
 print("ALL OK")

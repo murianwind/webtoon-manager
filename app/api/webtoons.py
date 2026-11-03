@@ -18,6 +18,7 @@ from app import (
     weekdays,
 )
 from app import archiver
+from app.models import TitlePage
 from app.config import get_settings
 
 from app.api.common import (
@@ -54,7 +55,8 @@ class WebtoonOut(BaseModel):
     weekdays: list[str] = []  # 연재 요일(mon~sun). 전체목록을 불러올 때 저장해 둔 값 — 요일별 목록에 없는 작품(완결/장기 휴재)은 비어 있다
 
 
-def _to_out(wt) -> WebtoonOut:
+def _to_out(wt, days: list[str] | None = None) -> WebtoonOut:
+    """days: 전체목록/작품 페이지에서 알아낸 연재 요일(없으면 [] — 화면에서 "기타")."""
     return WebtoonOut(
         title_id=wt.title_id,
         title=wt.title,
@@ -74,6 +76,7 @@ def _to_out(wt) -> WebtoonOut:
         writer_ids=wt.writer_ids,
         writer_names=wt.writer_names,
         ever_subscribed=wt.ever_subscribed,
+        weekdays=days or [],
     )
 
 
@@ -141,7 +144,7 @@ async def list_webtoons(status: str | None = None):
         # 예전에 잘못 들어간 기록이 남아있을 수 있어서 한 번 더 여기서도 막아둔다.
         rows = [r for r in rows if r.ever_subscribed]
     days_by_id = await asyncio.to_thread(weekdays.get_naver_map)  # 전체목록을 불러올 때 저장해 둔 요일(없으면 [] — 화면에서 "기타")
-    return [_to_out(r).model_copy(update={"weekdays": days_by_id.get(r.title_id, [])}) for r in rows]
+    return [_to_out(r, days_by_id.get(r.title_id)) for r in rows]
 
 
 @router.post("/webtoons/{title_id}/subscribe", response_model=WebtoonOut)
@@ -265,16 +268,25 @@ def _start_weekday_lookup(title_ids: list[str], timeout_seconds: int) -> None:
     _weekday_lookup_task = asyncio.ensure_future(_run_weekday_lookup(title_ids[: weekdays.LOOKUP_BATCH], timeout_seconds))
 
 
+def _save_page_lookup(title_id: str, page: TitlePage) -> None:
+    """조회 결과를 저장한다(실패는 days=None). 페이지가 완결이라고 알려 주면 제외됨/구독해제 작품은 완결로 저장해 화면에서 가린다 — 구독 중인 작품은 신작 스캔이 맡는다."""
+    weekdays.save_lookup(title_id, page.days if page.status == 200 else None, http=page.status, finished=page.finished)
+    if page.finished:
+        tracked = repository.get(title_id)
+        if tracked is not None and tracked.status != repository.STATUS_ACTIVE:
+            repository.update_is_finished(title_id, True)
+
+
 async def _run_weekday_lookup(title_ids: list[str], timeout_seconds: int) -> None:
     try:
         async with aiohttp.ClientSession() as session:
             for title_id in title_ids:
                 try:
-                    days = await naver_api.fetch_title_page_weekdays(session, title_id, timeout_seconds)
+                    page = await naver_api.fetch_title_page(session, title_id, timeout_seconds)
                 except Exception as e:  # 작품 하나가 이상해도 나머지는 계속한다 — 못 알아낸 것으로 기록하면 하루 뒤에 다시 시도한다
                     log.warning("작품 요일 조회 실패 (titleId=%s): %s", title_id, e)
-                    days = None
-                await asyncio.to_thread(weekdays.save_lookup, title_id, days)
+                    page = TitlePage(status=None)
+                await asyncio.to_thread(_save_page_lookup, title_id, page)
                 await asyncio.sleep(weekdays.LOOKUP_PAUSE_SECONDS)
     except Exception:
         log.exception("작품 요일 조회 중 오류")

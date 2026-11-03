@@ -203,16 +203,21 @@ class KakaoPageClient:
             return True, "대여권으로 열었습니다(응답은 못 받았지만 대여 중으로 확인됨)", count - 1
         return False, f"대여권 사용 결과를 확인하지 못했습니다(HTTP {status}) — 다시 시도하지 않습니다", count
 
-    async def fetch_series_item(self, series_id: int) -> dict | None:
-        """작품 기본 정보(제목/설명/장르/연령/연재 상태/작가). 회차 목록의 첫 페이지 응답에 들어 있어서 회차 1개만 요청해 얻는다
-        (전체 회차를 넘기지 않으므로 가볍다). 못 받으면 None."""
-        _, data = await self._request_json(
+    async def fetch_series_status(self, series_id: int) -> tuple[int | None, dict | None]:
+        """(HTTP 상태, 작품 기본 정보)를 돌려준다. 정보가 없으면 (상태, None), 요청 자체가 실패하면 (None, None) — 작품이 사라진 것(404)과
+        일시 오류(네트워크/5xx)를 구분하는 데 쓴다. 기본 정보(제목/설명/장르/연령/연재 상태/작가)는 회차 목록의 첫 페이지 응답에 들어 있어서
+        회차 1개만 요청해 얻는다(전체 회차를 넘기지 않으므로 가볍다)."""
+        status, data = await self._request_json(
             "GET", PRODUCT_LIST_URL,
             params={"series_id": series_id, "cursor_index": 0, "cursor_direction": "NEXT", "window_size": 1, "sort_type": "asc"},
             label=f"작품 정보 series_id={series_id}",
         )
         result = (data or {}).get("result") or {}
-        return result.get("series_item") or None
+        return status, result.get("series_item") or None
+
+    async def fetch_series_item(self, series_id: int) -> dict | None:
+        """작품 기본 정보만(못 받으면 None) — 상태가 필요하면 fetch_series_status."""
+        return (await self.fetch_series_status(series_id))[1]
 
     async def fetch_about(self, series_id: int) -> dict | None:
         """작품 "정보" 탭: 글/그림/원작 작가(role), 테마 키워드 등. 못 받으면 None."""

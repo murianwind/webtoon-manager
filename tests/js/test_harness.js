@@ -1,6 +1,7 @@
 // 화면 테스트 하네스(harness.js) 자체의 도우미 — 고정 sleep 대신 쓰는 idle/waitFor/시간 축소가 약속대로 동작하는지.
 //  · idle(): 진행 중인 fetch가 모두 끝나고 그 뒤의 비동기 후속 처리까지 흘러간 뒤에 돌아온다(고정 시간 대기 없이 "다 끝났을 때" 진행)
 //  · waitFor(조건): 조건이 참이 될 때까지 짧게 반복 확인하고, 시간이 지나도 안 되면 무엇을 기다렸는지 담아 실패한다
+//  · makeApp(routes, { now }): 앱이 보는 "지금"을 고정(요일/날짜에 따라 달라지는 동작을 실제 날짜와 무관하게)
 //  · makeApp(routes, { timeScale }): 앱의 setTimeout/setInterval 시간을 n배 빠르게(예: 3초 폴링을 0.3초로) — 타이머로 도는 동작을 빠르게 확인
 const { makeApp, sleep, idle, waitFor, ok, done } = require("./harness");
 (async () => {
@@ -28,5 +29,12 @@ const { makeApp, sleep, idle, waitFor, ok, done } = require("./harness");
   await sleep(30); ok(normal.w.__fired === 0, "기본은 시간 그대로(30ms에는 아직 안 지남)"); await sleep(120); ok(normal.w.__fired === 1, "기본 80ms 타이머는 지나면 동작");
   ok(fast.wait(1000) instanceof Promise, "wait(ms): 앱 시간 기준으로 기다리는 도우미(축소 시간에 맞춰 짧게)");
   t = Date.now(); await fast.wait(1000); ok(Date.now() - t < 250, "wait(1000)은 시간 축소 때 짧게 끝난다");
+  // Scenario 4: now — 앱의 "지금"이 고정된다(인자 없는 new Date()/Date.now()만, 인자가 있으면 그대로). 2026-11-03T03:00Z = 한국시간 화요일 낮
+  const clock = makeApp({}, { now: "2026-11-03T03:00:00Z" });
+  clock.run("window.__now = new Date().toISOString(); window.__nowMs = Date.now(); window.__explicit = new Date(2020, 0, 15).getFullYear(); window.__parsed = new Date('2021-05-05T00:00:00Z').toISOString(); window.__day = weekdayKeyOf(new Date());");
+  ok(clock.w.__now === "2026-11-03T03:00:00.000Z" && clock.w.__nowMs === Date.parse("2026-11-03T03:00:00Z"), "인자 없는 Date는 고정된 지금: " + clock.w.__now);
+  ok(clock.w.__explicit === 2020 && clock.w.__parsed === "2021-05-05T00:00:00.000Z", "인자가 있는 Date는 그대로");
+  ok(clock.w.__day === "tue", "앱이 계산한 오늘 요일은 화요일(실제 날짜와 무관): " + clock.w.__day);
+  ok(new Date().getTime() !== Date.parse("2026-11-03T03:00:00Z"), "테스트 프로세스의 Date는 영향받지 않는다");
   done();
 })();

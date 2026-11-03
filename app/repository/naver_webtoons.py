@@ -280,6 +280,13 @@ def mark_finished(title_id: str) -> None:
         )
 
 
+def update_is_finished(title_id: str, finished: bool) -> None:
+    """완결 여부를 그대로 저장한다(다시 연재하면 해제). 완결 알림 기록(finish_notified/finish_ack)은 건드리지 않는다 —
+    구독 중이 아닌 작품(제외됨/구독해제)의 정보를 갱신할 때 쓴다. 구독 중인 작품은 신작 스캔이 mark_finished로 맡는다."""
+    with write_transaction() as conn:
+        conn.execute("UPDATE webtoons SET is_finished = ?, updated_at = ? WHERE title_id = ?", (int(finished), _now(), title_id))
+
+
 def acknowledge_finish(title_id: str) -> None:
     """알람 제외: 구독은 그대로 유지하고 완결 알림만 그만 받는다."""
     with write_transaction() as conn:

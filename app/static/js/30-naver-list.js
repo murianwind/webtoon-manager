@@ -173,8 +173,10 @@ function renderNaverList() {
   }
 
   // 요일 탭 — 검색 중에는 요일과 상관없이 전체에서 찾는다(탭은 "전체"로 보이고, 검색을 지우면 보던 탭으로 돌아간다). 탭 옆 개수는 다른 필터를 적용한 뒤 기준이다.
-  const activeTab = query ? "all" : activeWeekdayTab("naver-list");
-  renderWeekdayTabs(document.getElementById("naver-list-weekday-tabs"), weekdayTabCounts(rows), activeTab, (key) => {
+  const counts = weekdayTabCounts(rows);
+  const activeTab = resolveActiveWeekdayTab("naver-list", query, counts);
+  showEtcDiagnostics(document.getElementById("naver-list-etc-note"), null, activeTab); // 기타를 볼 때만 "왜 요일을 모르는지" 원인을 보여 준다
+  renderWeekdayTabs(document.getElementById("naver-list-weekday-tabs"), counts, activeTab, (key) => {
     listWindow("naver-list").tab = key;
     resetListWindow("naver-list");
     renderNaverList();

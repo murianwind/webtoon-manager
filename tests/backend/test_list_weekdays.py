@@ -36,8 +36,8 @@ for tid, name in (("9001", "월수 연재"), ("9002", "일요 연재"), ("9100",
 repository.set_status("9200", repository.STATUS_EXCLUDED); repository.set_status("9201", repository.STATUS_EXCLUDED)
 repository.set_setting(weekdays.NAVER_MAP_KEY, None)
 writes = []
-_real_set = weekdays.repository.set_setting
-weekdays.repository.set_setting = lambda key, value: (writes.append(key), _real_set(key, value))[1]
+_real_set = repository.set_setting
+repository.set_setting = lambda key, value: (writes.append(key), _real_set(key, value))[1]                                              # 설정 쓰기를 가로채 센다(저장소 모듈의 함수를 바꾸면 공용 JSON 도우미도 이를 거친다)
 
 async def main():
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=m.app), base_url="http://test") as c:
