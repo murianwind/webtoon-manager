@@ -34,7 +34,7 @@ const ruleOf = (text, selector) => { const m = text.match(new RegExp("(?:^|\\})\
     ok(kids.findIndex((e) => e.contains($(search))) < kids.findIndex((e) => e.classList.contains("filter-toggle")) && kids.findIndex((e) => e.classList.contains("filter-toggle")) < kids.findIndex((e) => e === box), `${name}: 검색 → 접기 버튼 → 필터 순서`);
     if (tabs) ok(!!($(tabs).compareDocumentPosition(box) & w.Node.DOCUMENT_POSITION_PRECEDING), `${name}: 요일 탭은 필터 아래`);
   }
-  ok(!!($("naver-list-refresh-status").compareDocumentPosition($("naver-list-weekday-tabs")) & w.Node.DOCUMENT_POSITION_FOLLOWING) && !!($("naver-list-refresh-status").compareDocumentPosition(pageOf("naver-list").querySelector(".list-filters")) & w.Node.DOCUMENT_POSITION_PRECEDING), "전체목록: 마지막 확인 줄은 필터 아래, 요일 탭 위");
+  ok(pageOf("naver-list").querySelector(".list-filters").contains($("naver-list-refresh-status")) && !!(pageOf("naver-list").querySelector(".list-filters").compareDocumentPosition($("naver-list-weekday-tabs")) & w.Node.DOCUMENT_POSITION_FOLLOWING), "전체목록: 마지막 확인 줄은 접히는 필터 안(PC에서는 머리글에 따로 보임), 요일 탭은 필터 아래");
 
   // Scenario 2: 접기/펴기 — 처음엔 접혀 있고(aria-expanded=false), 누르면 펴지고(페이지에 filters-open) 다시 누르면 접힌다. 화면마다 따로
   ok(!pageOf("naver-list").classList.contains("filters-open") && toggle("naver-list").getAttribute("aria-expanded") === "false" && /^필터/.test(toggle("naver-list").textContent.trim()), "처음엔 접힘");
@@ -81,7 +81,7 @@ const ruleOf = (text, selector) => { const m = text.match(new RegExp("(?:^|\\})\
   ok(/display: contents/.test(ruleOf(m, ".list-toolbar") || ""), "모바일: 툴바 상자를 없앤다(검색창이 페이지 전체에서 고정되도록)");
   const searchRule = ruleOf(m, ".list-toolbar > .clearable-wrap");
   ok(searchRule && /position: sticky/.test(searchRule) && /top: var\(--m-nav-h\)/.test(searchRule) && /background: var\(--bg\)/.test(searchRule), "검색창: 메뉴바 바로 아래에 고정(배경 있음): " + searchRule);
-  const tabsRule = ruleOf(m, ".weekday-tabs");
+  const tabsRule = ruleOf(m, ".list-toolbar > .weekday-tabs");   // 요일 탭은 고정 툴바 안에 있고, 모바일에서는 툴바 상자를 없애므로(contents) 페이지 전체에서 고정된다
   ok(tabsRule && /position: sticky/.test(tabsRule) && /top: calc\(var\(--m-nav-h\) \+ var\(--m-search-h\)\)/.test(tabsRule) && /background: var\(--bg\)/.test(tabsRule), "요일 탭: 검색창 바로 아래에 고정: " + tabsRule);
   ok(/display: none/.test(ruleOf(m, ".list-filters") || "") && /display: flex/.test(ruleOf(m, ".filters-open .list-filters") || "") && /display: none/.test(ruleOf(m, ".list-head-status") || ""), "필터 묶음은 접혀 있다가 filters-open에서 펼쳐진다");
   ok(/display: (flex|block)/.test(ruleOf(m, ".filter-toggle") || ""), "모바일에서 접기 버튼이 보인다");

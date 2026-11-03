@@ -55,8 +55,15 @@ function setNaverListStatus(kakaoData, extra) {
   if (kakaoData && kakaoData.refreshing) parts.push("카카오페이지 목록은 백그라운드로 갱신 중");
   else if (kakaoData && kakaoData.refreshed_at) parts.push(`카카오페이지 목록: ${formatKoreanTime(kakaoData.refreshed_at)} 기준`);
   else if (kakaoData) parts.push("카카오페이지 목록을 아직 받지 못했습니다");
-  document.getElementById("naver-list-refresh-status").textContent =
-    `마지막 확인: ${formatKoreanTime(new Date(naverListLoadedAt).toISOString())} (${parts.join(", ")})${extra || ""}`;
+  showNaverListStatus(`마지막 확인: ${formatKoreanTime(new Date(naverListLoadedAt).toISOString())} (${parts.join(", ")})${extra || ""}`);
+}
+
+// "마지막 확인" 문구 — PC에서는 맨 위 제목 오른쪽(#header-list-status), 모바일에서는 접히는 필터 안(#naver-list-refresh-status)에 보인다. 화면 폭에 따라 CSS가 둘 중 하나만 보이게 하므로 두 칸에 같은 문구를 넣는다.
+function showNaverListStatus(text) {
+  document.getElementById("naver-list-refresh-status").textContent = text;
+  const headerStatus = document.getElementById("header-list-status");
+  headerStatus.textContent = text;
+  headerStatus.title = text; // 길어서 말줄임이 되면 마우스를 올려 전체를 볼 수 있게
 }
 
 // 카카오 목록은 서버가 캐시에서 바로 돌려준다(3시간마다/시작할 때/새로고침 때 백그라운드로 채워짐). 바뀐 게 있을
@@ -90,7 +97,6 @@ function pollKakaoList() {
 async function loadNaverList(forceRefresh) {
   const grid = document.getElementById("naver-list-grid");
   const emptyMsg = document.getElementById("naver-list-empty");
-  const statusEl = document.getElementById("naver-list-refresh-status");
   const btn = document.getElementById("btn-refresh-naver-list");
 
   const hasData = naverListCache.length > 0;
@@ -100,7 +106,7 @@ async function loadNaverList(forceRefresh) {
   }
   if (!hasData) grid.innerHTML = "<p>불러오는 중...</p>";
   btn.disabled = true;
-  statusEl.textContent = "확인 중...";
+  showNaverListStatus("확인 중...");
 
   try {
     naverListNaverItems = (await apiCall("/api/naver-list")).map((w) => ({ ...w, platform: "naver" }));
@@ -130,7 +136,7 @@ async function loadNaverList(forceRefresh) {
       emptyMsg.textContent = `목록을 불러오지 못했습니다: ${e.message}`;
       emptyMsg.classList.remove("hidden");
     }
-    statusEl.textContent = `새로고침 실패: ${e.message}`;
+    showNaverListStatus(`새로고침 실패: ${e.message}`);
   } finally {
     btn.disabled = false;
   }

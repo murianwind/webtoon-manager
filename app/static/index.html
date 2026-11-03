@@ -9,6 +9,8 @@
 <body>
   <header>
     <h1>웹툰 구독 관리</h1>
+    <!-- PC: 전체목록 화면의 "마지막 확인" 문구(모바일에서는 CSS가 숨기고 필터 안의 같은 문구를 보여 준다) -->
+    <span id="header-list-status" class="header-status"></span>
   </header>
 
   <nav class="main-tabs">
@@ -52,13 +54,13 @@
         <option value="new-episode">새 에피소드 먼저</option>
       </select>
       <button id="btn-refresh-naver-list">새로고침</button>
+      <p id="naver-list-refresh-status" class="hint list-head-status"></p>
       </div>
-    </div>
-    <p id="naver-list-refresh-status" class="hint list-head-status"></p>
-    <div id="naver-list-weekday-tabs" class="weekday-tabs" role="tablist"></div>
-    <div id="naver-list-bulk-bar" class="hidden archive-target-bulk-bar">
-      <span id="naver-list-bulk-count"></span>
-      <button id="btn-bulk-exclude-naver-list">선택 항목 제외됨으로 이동</button>
+      <div id="naver-list-weekday-tabs" class="weekday-tabs" role="tablist"></div>
+      <div id="naver-list-bulk-bar" class="hidden archive-target-bulk-bar">
+        <span id="naver-list-bulk-count"></span>
+        <button id="btn-bulk-exclude-naver-list">선택 항목 제외됨으로 이동</button>
+      </div>
     </div>
     <div id="naver-list-grid" class="webtoon-grid"></div>
     <p id="naver-list-empty" class="hidden empty-message">불러온 목록이 없습니다.</p>
@@ -102,9 +104,9 @@
         <option value="up">새 에피소드만</option>
       </select>
       </div>
+      <div id="excluded-weekday-tabs" class="weekday-tabs" role="tablist"></div>
     </div>
     <p id="excluded-finished-note" class="hint hidden"></p>
-    <div id="excluded-weekday-tabs" class="weekday-tabs" role="tablist"></div>
     <div id="excluded-list" class="webtoon-grid"></div>
     <p id="excluded-empty" class="hidden empty-message">목록에서 제외한 웹툰이 없습니다.</p>
   </section>
