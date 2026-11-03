@@ -84,7 +84,7 @@ const sched = (o = {}) => ({ mode: "interval", interval_minutes: 60, cron_times:
   ok($("kakao-manual-result").classList.contains("hidden"), "네이버로 바꾸면 카카오 표는 숨겨짐");
 
   console.log("4) 구독해제/제외됨 탭: 다시 열어도 카드 유지");
-  let rowsData = [{ title_id: "9", title: "가나", status: "excluded", tags: [], writer_names: ["작가"], is_adult: false, thumbnail_url: "https://n/9", is_finished: false, ever_subscribed: false }];
+  let rowsData = [{ title_id: "9", title: "가나", weekdays: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], status: "excluded", tags: [], writer_names: ["작가"], is_adult: false, thumbnail_url: "https://n/9", is_finished: false, ever_subscribed: false }];
   routes["/api/webtoons"] = () => rowsData;
   run(`window.__p = loadSubscriptionTab("excluded");`); await w.__p;
   const c1 = w.document.querySelector("#excluded-list .webtoon-card");

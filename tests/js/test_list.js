@@ -1,6 +1,7 @@
+const ALL_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]; // 요일별 탭이 생겼으므로 예제 작품은 모든 요일에 연재하는 것으로 둔다(어느 요일 탭에서든 보이게)
 const { makeApp, sleep, ok, done } = require("./harness");
-const naver = (id, title, extra = {}) => ({ title_id: String(id), title, thumbnail_url: `https://n/${id}.jpg`, author_summary: "작가", is_adult: false, is_new: false, is_paused: false, has_new_episode: false, status: null, ever_subscribed: false, ...extra });
-const kakao = (id, title, extra = {}) => ({ title_id: id, title, thumbnail_url: `https://k/${id}`, author_summary: "작가", is_adult: false, is_new: false, is_paused: false, has_new_episode: false, status: null, ever_subscribed: false, ...extra });
+const naver = (id, title, extra = {}) => ({ title_id: String(id), title, weekdays: ALL_DAYS, thumbnail_url: `https://n/${id}.jpg`, author_summary: "작가", is_adult: false, is_new: false, is_paused: false, has_new_episode: false, status: null, ever_subscribed: false, ...extra });
+const kakao = (id, title, extra = {}) => ({ title_id: id, title, weekdays: ALL_DAYS, thumbnail_url: `https://k/${id}`, author_summary: "작가", is_adult: false, is_new: false, is_paused: false, has_new_episode: false, status: null, ever_subscribed: false, ...extra });
 (async () => {
   let naverData = [naver(1, "나"), naver(2, "라"), naver(3, "다", { status: "active", ever_subscribed: true })];
   let kakaoResp = { items: [kakao(71000001, "가"), kakao(71000002, "마")], version: "v1", refreshing: false, refreshed_at: "2026-09-30T01:00:00+00:00" };
@@ -39,10 +40,10 @@ const kakao = (id, title, extra = {}) => ({ title_id: id, title, thumbnail_url: 
 
   console.log("4) 검색/필터로 숨겼다 다시 보여도 같은 카드 재사용");
   const search = w.document.getElementById("naver-list-search");
-  search.value = "마"; search.dispatchEvent(new w.Event("input")); await sleep(10);
+  search.value = "마"; search.dispatchEvent(new w.Event("input")); await sleep(300);        // 검색 입력은 250ms 멈춘 뒤에 반영된다(debounce)
   ok(titles().join(",") === "마", "검색하면 일치하는 카드만 보임");
   const shown = cards()[0];
-  search.value = ""; search.dispatchEvent(new w.Event("input")); await sleep(10);
+  search.value = ""; search.dispatchEvent(new w.Event("input")); await sleep(300);
   ok(titles().length === 5 && cards()[4] === shown, "검색을 지우면 카드가 복원되고 '마'는 같은 노드");
   ok(cards().filter((c, i) => c === after[i]).length === 5, "5개 모두 이전과 같은 노드");
 

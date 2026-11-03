@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 
 SETTING_KEY = "kakao_catalog_snapshot"
 LEGACY_DONE_KEY = "kakao_legacy_migrated"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2  # 2: 항목에 요일(weekdays)이 생겼다 — 요일이 없는 예전 캐시는 버리고 다시 받는다
 REFRESH_INTERVAL_MINUTES = 180
 _STALE_AFTER_SECONDS = REFRESH_INTERVAL_MINUTES * 60 + 300  # 스케줄이 한 번 못 돌았을 때를 위한 여유
 

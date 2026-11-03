@@ -28,6 +28,11 @@
   <section id="page-naver-list" class="page">
     <div class="toolbar toolbar-sticky">
       <input id="naver-list-search" type="text" class="clearable" placeholder="제목/저자로 검색" />
+      <select id="naver-list-platform-filter" class="hidden">
+        <option value="">플랫폼 전체</option>
+        <option value="naver">네이버</option>
+        <option value="kakao">카카오</option>
+      </select>
       <select id="naver-list-filter-status">
         <option value="all">전체</option>
         <option value="active">구독중만</option>
@@ -47,6 +52,7 @@
       <button id="btn-refresh-naver-list">새로고침</button>
     </div>
     <p id="naver-list-refresh-status" class="hint"></p>
+    <div id="naver-list-weekday-tabs" class="weekday-tabs" role="tablist"></div>
     <div id="naver-list-bulk-bar" class="hidden archive-target-bulk-bar">
       <span id="naver-list-bulk-count"></span>
       <button id="btn-bulk-exclude-naver-list">선택 항목 제외됨으로 이동</button>
@@ -75,7 +81,12 @@
   <section id="page-excluded" class="page hidden">
     <div class="toolbar toolbar-sticky">
       <input id="excluded-search" type="text" class="clearable" placeholder="제목/저자로 검색" />
-      <select id="excluded-tag-filter"><option value="">태그 전체</option></select>
+      <select id="excluded-platform-filter" class="hidden">
+        <option value="">플랫폼 전체</option>
+        <option value="naver">네이버</option>
+        <option value="kakao">카카오</option>
+      </select>
+      <select id="excluded-tag-filter" class="hidden"><option value="">태그 전체</option></select>
       <select id="excluded-badge-filter">
         <option value="">전체</option>
         <option value="new">신작만</option>
@@ -83,6 +94,7 @@
         <option value="up">새 에피소드만</option>
       </select>
     </div>
+    <div id="excluded-weekday-tabs" class="weekday-tabs" role="tablist"></div>
     <div id="excluded-list" class="webtoon-grid"></div>
     <p id="excluded-empty" class="hidden empty-message">목록에서 제외한 웹툰이 없습니다.</p>
   </section>
@@ -758,6 +770,7 @@
 <script src="/js/00-core.js"></script>
   <script src="/js/10-tabs.js"></script>
   <script src="/js/20-cards.js"></script>
+  <script src="/js/25-list-view.js"></script>
   <script src="/js/30-naver-list.js"></script>
   <script src="/js/40-subscriptions.js"></script>
   <script src="/js/50-manual-download.js"></script>

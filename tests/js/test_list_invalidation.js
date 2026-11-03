@@ -1,9 +1,10 @@
 // 구독 상태가 바뀌면 다른 탭의 목록 캐시도 갱신된다 — 구독해제/제외됨의 "목록으로"를 누른 뒤 전체목록에 바로 나타나야 하고, 반대도 마찬가지.
+const ALL_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]; // 요일별 탭이 생겼으므로 예제 작품은 모든 요일에 연재하는 것으로 둔다(어느 요일 탭에서든 보이게)
 const { makeApp, sleep, ok, done } = require("./harness");
 (async () => {
   const dbRows = { "777": { status: "excluded", ever: true, title: "제외작" } };            // 이 앱이 추적 중인 작품(네이버)
   const naverSource = [{ title_id: "100", title: "기존작" }, { title_id: "777", title: "제외작" }]; // 네이버 전체 목록(요일별)
-  const out = (id, t) => ({ title_id: id, title: t, thumbnail_url: `https://n/${id}`, author_summary: "작가", is_adult: false, is_new: false, is_paused: false, has_new_episode: false, status: dbRows[id]?.status || null, ever_subscribed: !!dbRows[id]?.ever });
+  const out = (id, t) => ({ title_id: id, title: t, weekdays: ALL_DAYS, thumbnail_url: `https://n/${id}`, author_summary: "작가", is_adult: false, is_new: false, is_paused: false, has_new_episode: false, status: dbRows[id]?.status || null, ever_subscribed: !!dbRows[id]?.ever });
   const routes = {
     "/api/settings/kakao-webtoons-enabled": { enabled: false }, "/api/settings/webtoon-server": { webtoon_server_url: "" },
     "/api/naver-list": () => naverSource.filter((w) => !["excluded", "unsubscribed"].includes(dbRows[w.title_id]?.status)).map((w) => out(w.title_id, w.title)),

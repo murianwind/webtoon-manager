@@ -15,6 +15,7 @@ from app import (
     repository,
     subscription_history,
     tracker,
+    weekdays,
 )
 from app import archiver
 from app.config import get_settings
@@ -50,6 +51,7 @@ class WebtoonOut(BaseModel):
     writer_ids: list[str]
     writer_names: list[str]
     ever_subscribed: bool
+    weekdays: list[str] = []  # 연재 요일(mon~sun). 전체목록을 불러올 때 저장해 둔 값 — 요일별 목록에 없는 작품(완결/장기 휴재)은 비어 있다
 
 
 def _to_out(wt) -> WebtoonOut:
@@ -138,7 +140,8 @@ async def list_webtoons(status: str | None = None):
         # 작품은 이 상태를 거칠 방법이 이제 없지만(목록으로가 대신 전용 상태로 보냄),
         # 예전에 잘못 들어간 기록이 남아있을 수 있어서 한 번 더 여기서도 막아둔다.
         rows = [r for r in rows if r.ever_subscribed]
-    return [_to_out(r) for r in rows]
+    days_by_id = await asyncio.to_thread(weekdays.get_naver_map)  # 전체목록을 불러올 때 저장해 둔 요일(없으면 [] — 화면에서 "기타")
+    return [_to_out(r).model_copy(update={"weekdays": days_by_id.get(r.title_id, [])}) for r in rows]
 
 
 @router.post("/webtoons/{title_id}/subscribe", response_model=WebtoonOut)
@@ -280,7 +283,7 @@ async def browse_naver_list():
                 "title_id": item.title_id,
                 "title": item.title_name,
                 "thumbnail_url": tracked.thumbnail_url if tracked and tracked.thumbnail_url else item.thumbnail_url,
-                "weekdays": item.weekdays,
+                "weekdays": weekdays.from_naver(item.weekdays),
                 "is_finished": item.is_finished,
                 "is_paused": item.is_paused,
                 "is_new": item.is_new,
@@ -293,6 +296,9 @@ async def browse_naver_list():
                 "has_new_episode": item.has_update,
             }
         )
+
+    # 제외됨/구독해제 탭은 네이버를 부르지 않고 DB 기록으로 목록을 만든다 — 그 탭들이 요일별 탭에 쓰도록 요일을 저장해 둔다(바뀐 게 있을 때만 쓴다).
+    await asyncio.to_thread(weekdays.save_naver_map, {entry["title_id"]: entry["weekdays"] for entry in result})
 
     # 네이버의 요일별 목록 API는 장기 휴재작을 응답에서 아예 빼버린다. 그래서 위 루프만
     # 돌면 이미 추적 중인(구독중/구독해제) 웹툰이 화면에서 통째로 사라질 수 있다 —

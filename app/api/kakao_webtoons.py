@@ -45,6 +45,7 @@ class KakaoWebtoonOut(BaseModel):
     is_new: bool = False
     is_paused: bool = False
     has_new_episode: bool = False
+    weekdays: list[str] = []  # 연재 요일(mon~sun) — 요일별 목록에 없는 작품(장기 휴재 등)은 비어 있다
 
 
 class KakaoWebtoonEntryIn(BaseModel):
@@ -126,7 +127,7 @@ async def browse_kakao_list(refresh: bool = False):
             {
                 "title_id": item["title_id"], "title": item["title_name"], "thumbnail_url": item["thumbnail_url"],
                 "is_adult": item["is_adult"], "author_summary": author_summary, "is_new": item["is_new"],
-                "is_paused": item["is_paused"], "has_new_episode": item["has_update"],
+                "is_paused": item["is_paused"], "has_new_episode": item["has_update"], "weekdays": item.get("weekdays", []),
                 "status": tracked["status"] if tracked else None,
                 "ever_subscribed": tracked["ever_subscribed"] if tracked else False,
             }
@@ -144,7 +145,7 @@ async def browse_kakao_list(refresh: bool = False):
         result.append(
             {
                 "title_id": wt["title_id"], "title": wt["title"], "thumbnail_url": wt["thumbnail_url"], "is_adult": False,
-                "author_summary": wt["author_summary"], "is_new": False, "is_paused": False, "has_new_episode": False,
+                "author_summary": wt["author_summary"], "is_new": False, "is_paused": False, "has_new_episode": False, "weekdays": [],
                 "status": wt["status"], "ever_subscribed": wt["ever_subscribed"],
             }
         )
@@ -184,7 +185,7 @@ async def list_kakao_webtoons(status: str | None = None):
         if catalog_item is not None:
             extra = {
                 "is_new": catalog_item["is_new"], "is_paused": catalog_item["is_paused"],
-                "has_new_episode": catalog_item["has_update"],
+                "has_new_episode": catalog_item["has_update"], "weekdays": catalog_item.get("weekdays", []),
             }
             fresh_author_summary = ", ".join(catalog_item["author_names"])
             # 저자 정보가 나중에(이 컬럼이 생기기 전 등) 비어있는 채로 저장된 채 계속

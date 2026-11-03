@@ -8,6 +8,7 @@ const NAVER_LIST_PREFS_KEY = "naverListPrefs";
 function saveNaverListPrefs() {
   const prefs = {
     filterStatus: document.getElementById("naver-list-filter-status").value,
+    platform: document.getElementById("naver-list-platform-filter").value,
     badgeFilter: document.getElementById("naver-list-badge-filter").value,
     sort: document.getElementById("naver-list-sort").value,
   };
@@ -18,6 +19,7 @@ function restoreNaverListPrefs() {
   try {
     const prefs = JSON.parse(localStorage.getItem(NAVER_LIST_PREFS_KEY) || "{}");
     if (prefs.filterStatus) document.getElementById("naver-list-filter-status").value = prefs.filterStatus;
+    if (prefs.platform) document.getElementById("naver-list-platform-filter").value = prefs.platform;
     if (prefs.badgeFilter) document.getElementById("naver-list-badge-filter").value = prefs.badgeFilter;
     if (prefs.sort) document.getElementById("naver-list-sort").value = prefs.sort;
   } catch (e) {
@@ -138,6 +140,7 @@ function renderNaverList() {
   const grid = document.getElementById("naver-list-grid");
   const emptyMsg = document.getElementById("naver-list-empty");
   const query = document.getElementById("naver-list-search").value.trim().toLowerCase();
+  const platformFilter = syncPlatformFilter(document.getElementById("naver-list-platform-filter"));
   const filterStatus = document.getElementById("naver-list-filter-status").value;
   const badgeFilter = document.getElementById("naver-list-badge-filter").value;
   const sortBy = document.getElementById("naver-list-sort").value;
@@ -150,6 +153,7 @@ function renderNaverList() {
   // 어디에도 안 보이고 그냥 사라진 것처럼 느껴진다.
   let rows = naverListCache.filter((w) => w.status !== "excluded" && !(w.status === "unsubscribed" && w.ever_subscribed));
 
+  if (platformFilter) rows = rows.filter((w) => (w.platform || "naver") === platformFilter);
   if (filterStatus === "active") rows = rows.filter((w) => w.status === "active");
   if (filterStatus === "not-active") rows = rows.filter((w) => w.status !== "active");
   if (badgeFilter === "new") rows = rows.filter((w) => w.is_new);
@@ -162,6 +166,15 @@ function renderNaverList() {
     );
   }
 
+  // 요일 탭 — 검색 중에는 요일과 상관없이 전체에서 찾는다(탭은 "전체"로 보이고, 검색을 지우면 보던 탭으로 돌아간다). 탭 옆 개수는 다른 필터를 적용한 뒤 기준이다.
+  const activeTab = query ? "all" : activeWeekdayTab("naver-list");
+  renderWeekdayTabs(document.getElementById("naver-list-weekday-tabs"), weekdayTabCounts(rows), activeTab, (key) => {
+    listWindow("naver-list").tab = key;
+    resetListWindow("naver-list");
+    renderNaverList();
+  });
+  rows = rows.filter((w) => weekdayTabMatches(w, activeTab));
+
   rows = [...rows];
   if (sortBy === "author") {
     rows.sort((a, b) => (a.author_summary || "").localeCompare(b.author_summary || "") || a.title.localeCompare(b.title));
@@ -171,8 +184,10 @@ function renderNaverList() {
     rows.sort((a, b) => a.title.localeCompare(b.title));
   }
 
+  emptyMsg.textContent = naverListCache.length > 0 ? "이 조건에 맞는 웹툰이 없습니다. 다른 요일 탭이나 필터를 확인해 보세요." : "불러온 목록이 없습니다.";
   emptyMsg.classList.toggle("hidden", rows.length > 0);
-  const built = reconcileGrid(grid, rows, "naver-list", naverListCache);
+  const shown = windowRows("naver-list", grid, rows, () => renderNaverList()); // 한 번에 다 그리면 브라우저가 멎는다 — 보이는 만큼만 만들고 이어서 그린다
+  const built = reconcileGrid(grid, shown, "naver-list", naverListCache);
   syncViewerRows(grid); // 지금 보이는 목록 기준으로 버튼 줄 수를 맞춘다(필터를 바꿀 때마다)
   updateNaverListBulkBar(); // 남아 있는 카드의 체크 상태는 유지되므로, 선택 수만 다시 센다
   if (built > 0) {
@@ -334,16 +349,15 @@ function patchWebtoonListCard(titleId, webtoon, newStatus, everSubscribed, platf
 }
 
 document.getElementById("btn-refresh-naver-list").addEventListener("click", () => loadNaverList(true));
-document.getElementById("naver-list-search").addEventListener("input", renderNaverList);
-document.getElementById("naver-list-filter-status").addEventListener("change", () => {
-  saveNaverListPrefs();
+// 검색/필터/정렬을 바꾸면 다시 처음 쪽부터 그린다(resetListWindow). 검색 입력은 멈춘 뒤에 한 번만(debounce) — 글자마다 다시 걸러서 그리면 멎는다.
+document.getElementById("naver-list-search").addEventListener("input", debounce(() => {
+  resetListWindow("naver-list");
   renderNaverList();
-});
-document.getElementById("naver-list-badge-filter").addEventListener("change", () => {
-  saveNaverListPrefs();
-  renderNaverList();
-});
-document.getElementById("naver-list-sort").addEventListener("change", () => {
-  saveNaverListPrefs();
-  renderNaverList();
-});
+}, SEARCH_DEBOUNCE_MS));
+for (const id of ["naver-list-platform-filter", "naver-list-filter-status", "naver-list-badge-filter", "naver-list-sort"]) {
+  document.getElementById(id).addEventListener("change", () => {
+    saveNaverListPrefs();
+    resetListWindow("naver-list");
+    renderNaverList();
+  });
+}

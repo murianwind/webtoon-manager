@@ -71,10 +71,21 @@ function renderSubscriptionTab(status) {
   const listEl = document.getElementById(`${status}-list`);
   const emptyEl = document.getElementById(`${status}-empty`);
   const query = document.getElementById(`${status}-search`).value.trim().toLowerCase();
-  const tagFilter = document.getElementById(`${status}-tag-filter`).value;
+  const tagSelect = document.getElementById(`${status}-tag-filter`);
+  const platformSelect = document.getElementById(`${status}-platform-filter`); // 제외됨 화면에만 있다
+  const tabsEl = document.getElementById(`${status}-weekday-tabs`); // 제외됨 화면에만 있다
   const badgeFilter = document.getElementById(`${status}-badge-filter`).value;
 
+  const platformFilter = platformSelect ? syncPlatformFilter(platformSelect) : "";
+  if (platformSelect) {
+    // 태그는 네이버 작품에만 있다 — 네이버만 볼 때만 태그 필터를 보여 주고, 숨길 때는 값도 비워서 보이지 않는 필터가 목록을 거르지 않게 한다
+    tagSelect.classList.toggle("hidden", platformFilter !== "naver");
+    if (platformFilter !== "naver") tagSelect.value = "";
+  }
+  const tagFilter = tagSelect.value;
+
   let rows = subscriptionCache[status] || [];
+  if (platformFilter) rows = rows.filter((w) => (w.platform || "naver") === platformFilter);
   if (query) {
     rows = rows.filter(
       (w) =>
@@ -88,17 +99,35 @@ function renderSubscriptionTab(status) {
   if (badgeFilter === "paused") rows = rows.filter((w) => w.is_paused);
   if (badgeFilter === "up") rows = rows.filter((w) => w.has_new_episode);
 
+  if (tabsEl) {
+    // 전체목록과 같은 요일 탭(화면마다 따로 기억) — 검색 중에는 요일과 상관없이 전체에서 찾는다
+    const activeTab = query ? "all" : activeWeekdayTab(status);
+    renderWeekdayTabs(tabsEl, weekdayTabCounts(rows), activeTab, (key) => {
+      listWindow(status).tab = key;
+      resetListWindow(status);
+      renderSubscriptionTab(status);
+    });
+    rows = rows.filter((w) => weekdayTabMatches(w, activeTab));
+  }
+
   rows = [...rows].sort((a, b) => a.title.localeCompare(b.title));
 
   emptyEl.classList.toggle("hidden", rows.length > 0);
-  const built = reconcileGrid(listEl, rows, status, subscriptionCache[status] || []);
+  const shown = windowRows(status, listEl, rows, () => renderSubscriptionTab(status)); // 한 번에 다 그리면 브라우저가 멎는다 — 보이는 만큼만 만들고 이어서 그린다
+  const built = reconcileGrid(listEl, shown, status, subscriptionCache[status] || []);
   if (built > 0) pruneMissingViewerIcons();
 }
 
 for (const status of ["unsubscribed", "excluded"]) {
-  document.getElementById(`${status}-search`).addEventListener("input", () => renderSubscriptionTab(status));
-  document.getElementById(`${status}-tag-filter`).addEventListener("change", () => renderSubscriptionTab(status));
-  document.getElementById(`${status}-badge-filter`).addEventListener("change", () => renderSubscriptionTab(status));
+  const resetAndRender = () => {
+    resetListWindow(status);
+    renderSubscriptionTab(status);
+  };
+  document.getElementById(`${status}-search`).addEventListener("input", debounce(resetAndRender, SEARCH_DEBOUNCE_MS));
+  document.getElementById(`${status}-tag-filter`).addEventListener("change", resetAndRender);
+  document.getElementById(`${status}-badge-filter`).addEventListener("change", resetAndRender);
+  const platformSelect = document.getElementById(`${status}-platform-filter`);
+  if (platformSelect) platformSelect.addEventListener("change", resetAndRender);
 }
 
 async function subscriptionAction(titleId, action, currentTab) {

@@ -39,6 +39,7 @@ IMAGE_FILENAME_CARD = "o1/dims/resize/384"
 
 WEBTOON_CATEGORY_UID = 10
 _WEEKDAY_TAB_UIDS = (1, 2, 3, 4, 5, 6, 7)  # 월~일
+_WEEKDAY_TAB_DAYS = dict(zip(_WEEKDAY_TAB_UIDS, ("mon", "tue", "wed", "thu", "fri", "sat", "sun")))
 _SCREEN_UID = 52  # 요일연재 화면
 _MAX_PAGES_PER_TAB = 40  # is_end가 안 오는 이상 응답에 대비한 안전 상한(요일당 200~250개 수준이 정상)
 _MAX_SEARCH_PAGES = 10
@@ -155,6 +156,7 @@ def _card_to_item(card: dict) -> dict | None:
         "is_paused": card.get("on_issue") == _ON_ISSUE_PAUSED,
         "is_finished": card.get("on_issue") == _ON_ISSUE_FINISHED,
         "thumbnail_url": _thumbnail_url(card),
+        "weekdays": [],  # 요일 탭마다 훑을 때 채운다(_fetch_weekday_catalog_uncached) — 검색 결과로 만든 항목은 요일을 모른다
     }
 
 
@@ -194,14 +196,16 @@ async def _fetch_weekday_catalog_uncached(
 
     tab_results = await asyncio.gather(*[_one(t) for t in _WEEKDAY_TAB_UIDS])
 
-    items: dict[int, dict] = {}  # 여러 요일에 걸린 작품("월, 화, 수")은 series_id로 한 번만
+    items: dict[int, dict] = {}  # 여러 요일에 걸린 작품("월, 화, 수")은 series_id로 한 번만 — 요일은 나온 탭마다 모은다
     all_ok = True
-    for cards, ok in tab_results:
+    for tab_uid, (cards, ok) in zip(_WEEKDAY_TAB_UIDS, tab_results):
         all_ok = all_ok and ok
         for card in cards:
             item = _card_to_item(card)
             if item is not None:
-                items.setdefault(item["title_id"], item)
+                kept = items.setdefault(item["title_id"], item)
+                if _WEEKDAY_TAB_DAYS[tab_uid] not in kept["weekdays"]:
+                    kept["weekdays"].append(_WEEKDAY_TAB_DAYS[tab_uid])
     return list(items.values()), all_ok
 
 

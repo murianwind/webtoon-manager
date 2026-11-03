@@ -1,7 +1,8 @@
 // 웹툰 전체목록: 구독 중인 카드에 "제외됨으로" 버튼 — 구독을 해제하는 게 아니라 강제로 제외됨으로 보낸다(네이버/카카오). 확인 창을 거친다.
+const ALL_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]; // 요일별 탭이 생겼으므로 예제 작품은 모든 요일에 연재하는 것으로 둔다(어느 요일 탭에서든 보이게)
 const { makeApp, sleep, ok, done } = require("./harness");
-const naver = (id, title, extra = {}) => ({ title_id: String(id), title, thumbnail_url: `https://n/${id}.jpg`, author_summary: "작가", is_adult: false, is_new: false, is_paused: false, has_new_episode: false, status: null, ever_subscribed: false, ...extra });
-const kakao = (id, title, extra = {}) => ({ title_id: id, title, thumbnail_url: `https://k/${id}`, author_summary: "작가", is_adult: false, is_new: false, is_paused: false, has_new_episode: false, status: null, ever_subscribed: false, ...extra });
+const naver = (id, title, extra = {}) => ({ title_id: String(id), title, weekdays: ALL_DAYS, thumbnail_url: `https://n/${id}.jpg`, author_summary: "작가", is_adult: false, is_new: false, is_paused: false, has_new_episode: false, status: null, ever_subscribed: false, ...extra });
+const kakao = (id, title, extra = {}) => ({ title_id: id, title, weekdays: ALL_DAYS, thumbnail_url: `https://k/${id}`, author_summary: "작가", is_adult: false, is_new: false, is_paused: false, has_new_episode: false, status: null, ever_subscribed: false, ...extra });
 (async () => {
   const posts = [];
   const routes = {
