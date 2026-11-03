@@ -12,6 +12,7 @@ from typing import Optional
 
 import aiohttp
 
+from app import weekdays
 from app.constants import (
     DEFAULT_HEADERS,
     EPISODE_LIST_MAX_RETRIES,
@@ -19,6 +20,7 @@ from app.constants import (
     NAVER_CURATION_LIST_URL,
     NAVER_CURATION_META_URL,
     NAVER_INFO_URL,
+    NAVER_MOBILE_LIST_URL,
     NAVER_LIST_URL,
     NAVER_SEARCH_ALL_URL,
     NAVER_TAG_SHORTCUT_URL,
@@ -130,6 +132,28 @@ async def fetch_title_info(
             return _parse_title_info(raw, title_id)
     except Exception as e:
         log.error("title info 요청 중 예외 (titleId=%s): %s", title_id, e)
+        return None
+
+
+_MOBILE_HEADERS = {**DEFAULT_HEADERS, "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1"}
+
+
+async def fetch_title_page_weekdays(session: aiohttp.ClientSession, title_id: str, timeout_seconds: int) -> Optional[list[str]]:
+    """작품 페이지(모바일)에서 연재 요일을 읽는다 — 요일별 목록에서 빠진 작품(장기 휴재 등)의 요일을 알아내는 유일한 경로.
+    요일을 읽었으면 mon~sun 목록, 페이지에 요일이 없으면 [], 요청이 실패했으면 None(못 알아낸 것과 "요일 없음"을 구분)."""
+    try:
+        async with session.get(
+            NAVER_MOBILE_LIST_URL,
+            params={"titleId": title_id},
+            headers=_MOBILE_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=timeout_seconds),
+        ) as response:
+            if response.status != 200:
+                log.warning("작품 페이지 요청 실패 (titleId=%s): HTTP %s", title_id, response.status)
+                return None
+            return weekdays.parse_title_page(await response.text())
+    except Exception as e:
+        log.warning("작품 페이지 요청 중 예외 (titleId=%s): %s", title_id, e)
         return None
 
 

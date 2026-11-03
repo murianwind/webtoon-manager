@@ -1,0 +1,43 @@
+// 제외됨 화면은 완결 웹툰을 보여 주지 않는다 — 완결 작품은 수동 다운로드에서 분석해서 구독할 수 있으니 제외됨 목록에 쌓아 둘 필요가 없다.
+// (요일별 탭의 개수, 검색, "기타" 탭 모두에서 빠지고, 안내 줄에 몇 개를 숨겼는지 알려 준다. 구독해제 화면과 전체목록은 그대로.)
+const { makeApp, sleep, ok, done } = require("./harness");
+(async () => {
+  const mk = (platform, id, title, weekdays, extra = {}) => ({ platform, title_id: platform === "kakao" ? 70000000 + id : String(id), title, thumbnail_url: "", author_summary: "저자", writer_names: ["저자"], tags: [], weekdays, status: "excluded", ever_subscribed: false, is_new: false, is_paused: false, has_new_episode: false, is_adult: false, is_finished: false, ...extra });
+  const { w, run } = makeApp({ "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" }, "/api/naver-list": [], "/api/kakao-list": { items: [], version: "v", refreshing: false } });
+  await sleep(60); run("kakaoWebtoonsEnabled = true; currentDate = () => new Date('2026-11-03T03:00:00Z');");
+  const $ = (id) => w.document.getElementById(id);
+  const titles = (gridId) => [...w.document.querySelectorAll(`#${gridId} .webtoon-card-title`)].map((e) => e.textContent.trim()).sort();
+  const tabs = (id) => [...$(id).querySelectorAll(".weekday-tab")];
+  const label = (t) => t.firstChild.textContent.trim();
+  const count = (id, name) => tabs(id).find((t) => label(t) === name).querySelector(".weekday-tab-count").textContent;
+  const showExcluded = (rows) => { w.__rows = rows; run("subscriptionCache.excluded = __rows; populateFilterOptions('excluded'); renderSubscriptionTab('excluded');"); };
+  const note = () => $("excluded-finished-note");
+
+  // Scenario 1: 완결은 어느 탭에도, 검색에도 안 나온다. 탭 개수에도 안 센다. 완결이 아닌 작품(휴재 포함)은 그대로
+  const rows = [
+    mk("naver", 1, "연재중 화요일", ["tue"]), mk("naver", 2, "완결 화요일", ["tue"], { is_finished: true }), mk("naver", 3, "휴재 목요일", ["thu"], { is_paused: true }),
+    mk("naver", 4, "완결 기타", [], { is_finished: true }), mk("naver", 5, "요일 모름", []), mk("kakao", 6, "카카오 완결", [], { is_finished: true }), mk("kakao", 7, "카카오 연재 화", ["tue"]),
+  ];
+  showExcluded(rows);
+  ok(JSON.stringify(titles("excluded-list")) === JSON.stringify(["연재중 화요일", "카카오 연재 화"].sort()), "화요일 탭에 완결 제외: " + titles("excluded-list"));
+  ok(count("excluded-weekday-tabs", "화") === "2" && count("excluded-weekday-tabs", "기타") === "1" && count("excluded-weekday-tabs", "전체") === "4", "탭 개수에서도 완결 제외: 화 " + count("excluded-weekday-tabs", "화") + " 기타 " + count("excluded-weekday-tabs", "기타") + " 전체 " + count("excluded-weekday-tabs", "전체"));
+  tabs("excluded-weekday-tabs").find((t) => label(t) === "기타").click(); ok(JSON.stringify(titles("excluded-list")) === '["요일 모름"]', "기타 탭에도 완결이 없다: " + titles("excluded-list"));
+  tabs("excluded-weekday-tabs").find((t) => label(t) === "전체").click(); ok(titles("excluded-list").length === 4 && !titles("excluded-list").some((t) => t.includes("완결")), "전체 탭도 완결 제외");
+  $("excluded-search").value = "완결"; $("excluded-search").dispatchEvent(new w.Event("input")); await sleep(350);
+  ok(titles("excluded-list").length === 0 && !$("excluded-empty").classList.contains("hidden"), "검색해도 완결은 안 나온다");
+  $("excluded-search").value = ""; $("excluded-search").dispatchEvent(new w.Event("input")); await sleep(350);
+
+  // Scenario 2: 안내 줄 — 몇 개를 숨겼는지(수동 다운로드에서 구독할 수 있다는 안내와 함께). 숨길 게 없으면 줄도 숨긴다. 검색/필터와 상관없이 숨긴 전체 개수
+  ok(note() && !note().classList.contains("hidden") && /완결 웹툰 3개/.test(note().textContent) && /수동 다운로드/.test(note().textContent), "안내 줄: " + (note() && note().textContent.trim()));
+  showExcluded(rows.filter((r) => !r.is_finished)); ok(note().classList.contains("hidden"), "숨긴 것이 없으면 안내 줄도 없다");
+  showExcluded([mk("naver", 9, "완결뿐", [], { is_finished: true })]); ok(titles("excluded-list").length === 0 && !$("excluded-empty").classList.contains("hidden") && /완결 웹툰 1개/.test(note().textContent), "완결만 있으면 빈 목록 + 안내");
+
+  // Scenario 3: 구독해제 화면과 전체목록은 그대로 — 완결이어도 보인다
+  w.__unsub = [mk("naver", 21, "구독해제 완결", [], { status: "unsubscribed", ever_subscribed: true, is_finished: true })];
+  run("subscriptionCache.unsubscribed = __unsub; renderSubscriptionTab('unsubscribed');");
+  ok(titles("unsubscribed-list").length === 1 && !$("unsubscribed-finished-note"), "구독해제 화면에는 영향 없음");
+  w.__list = [mk("naver", 31, "목록의 완결", ["tue"], { status: null, is_finished: true })];
+  run("naverListNaverItems = __list; naverListKakaoItems = []; combineNaverListCache(); renderNaverList();");
+  ok(titles("naver-list-grid").length === 1, "전체목록에는 영향 없음");
+  done();
+})();

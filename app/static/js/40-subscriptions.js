@@ -85,6 +85,15 @@ function renderSubscriptionTab(status) {
   const tagFilter = tagSelect.value;
 
   let rows = subscriptionCache[status] || [];
+  if (status === "excluded") {
+    // 제외됨 화면은 완결 웹툰을 보여 주지 않는다 — 완결 작품은 수동 다운로드에서 분석해서 구독할 수 있으니 여기 쌓아 둘 필요가 없다(데이터는 그대로 두고 화면에서만 가린다).
+    // 몇 개를 가렸는지는 검색/필터와 상관없이 안내 줄에 알린다.
+    const hiddenFinished = rows.filter((w) => w.is_finished).length;
+    rows = rows.filter((w) => !w.is_finished);
+    const note = document.getElementById("excluded-finished-note");
+    note.textContent = `완결 웹툰 ${hiddenFinished}개는 이 목록에 표시하지 않습니다(필요하면 수동 다운로드에서 분석해서 구독할 수 있습니다).`;
+    note.classList.toggle("hidden", hiddenFinished === 0);
+  }
   if (platformFilter) rows = rows.filter((w) => (w.platform || "naver") === platformFilter);
   if (query) {
     rows = rows.filter(

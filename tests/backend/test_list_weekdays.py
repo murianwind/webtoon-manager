@@ -89,12 +89,14 @@ kakao_catalog._state.update(loaded=True, items=[item(501, "월수", ["mon", "wed
 kakao_catalog.ensure_fresh = lambda: False
 repository.upsert_new_kakao_webtoon(504, "제외된 일요", status=repository.STATUS_EXCLUDED); repository.upsert_new_kakao_webtoon(505, "제외된 모름", status=repository.STATUS_EXCLUDED)
 repository.upsert_new_kakao_webtoon(506, "장기휴재 구독", status=repository.STATUS_ACTIVE)
+repository.upsert_new_kakao_webtoon(507, "제외된 완결", status=repository.STATUS_EXCLUDED); repository.set_kakao_finished(507, True)
 async def kakao():
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=m.app), base_url="http://test") as c:
         listing = {w["title_id"]: w for w in (await c.get("/api/kakao-list")).json()["items"]}
         assert listing[501]["weekdays"] == ["mon", "wed"] and listing[503]["weekdays"] == ["sun"] and listing[506]["weekdays"] == [] and 504 not in listing, {k: v["weekdays"] for k, v in listing.items()}
         excluded = {w["title_id"]: w for w in (await c.get("/api/kakao-webtoons", params={"status": "excluded"})).json()}
         assert excluded[504]["weekdays"] == ["sun"] and excluded[505]["weekdays"] == []
+        assert excluded[507]["is_finished"] is True and excluded[504]["is_finished"] is False                                  # 제외됨 화면이 완결을 가릴 수 있게 완결 여부도 준다
 asyncio.run(kakao())
 print("7) 카카오 목록 응답 요일 OK")
 print("ALL OK")

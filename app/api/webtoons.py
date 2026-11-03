@@ -254,6 +254,32 @@ class NaverListEntryIn(BaseModel):
         return v
 
 
+_weekday_lookup_task: asyncio.Task | None = None
+
+
+def _start_weekday_lookup(title_ids: list[str], timeout_seconds: int) -> None:
+    """요일을 알아볼 작품이 있으면 백그라운드로 시작한다(이미 돌고 있으면 또 시작하지 않는다 — 목록을 연달아 불러도 같은 작품을 겹쳐 묻지 않게)."""
+    global _weekday_lookup_task
+    if not title_ids or (_weekday_lookup_task is not None and not _weekday_lookup_task.done()):
+        return
+    _weekday_lookup_task = asyncio.ensure_future(_run_weekday_lookup(title_ids[: weekdays.LOOKUP_BATCH], timeout_seconds))
+
+
+async def _run_weekday_lookup(title_ids: list[str], timeout_seconds: int) -> None:
+    try:
+        async with aiohttp.ClientSession() as session:
+            for title_id in title_ids:
+                try:
+                    days = await naver_api.fetch_title_page_weekdays(session, title_id, timeout_seconds)
+                except Exception as e:  # 작품 하나가 이상해도 나머지는 계속한다 — 못 알아낸 것으로 기록하면 하루 뒤에 다시 시도한다
+                    log.warning("작품 요일 조회 실패 (titleId=%s): %s", title_id, e)
+                    days = None
+                await asyncio.to_thread(weekdays.save_lookup, title_id, days)
+                await asyncio.sleep(weekdays.LOOKUP_PAUSE_SECONDS)
+    except Exception:
+        log.exception("작품 요일 조회 중 오류")
+
+
 @router.get("/naver-list")
 async def browse_naver_list():
     settings = get_settings()
@@ -303,6 +329,11 @@ async def browse_naver_list():
     # 네이버의 요일별 목록 API는 장기 휴재작을 응답에서 아예 빼버린다. 그래서 위 루프만
     # 돌면 이미 추적 중인(구독중/구독해제) 웹툰이 화면에서 통째로 사라질 수 있다 —
     # DB에만 남아있는 건 우리가 갖고 있는 정보로 채워서라도 계속 보이게 한다.
+    # 요일도 목록에서 빠지므로(그대로면 "기타"에 남는다) 완결이 아닌 추적 작품은 작품 페이지에서 요일을 알아내 채운다 —
+    # 응답을 늦추지 않게 백그라운드로 하고, 알아낸 요일은 다음에 불러올 때부터 나온다(한 번 알아낸 요일은 60일 동안 다시 묻지 않는다).
+    days_by_id = await asyncio.to_thread(weekdays.get_naver_map)
+    missing = [wt.title_id for wt in existing if wt.title_id not in seen_ids and wt.title_id not in hidden and not wt.is_finished]
+    _start_weekday_lookup(await asyncio.to_thread(weekdays.pending_lookup_ids, missing), settings.request_timeout_seconds)
     for wt in existing:
         if wt.title_id in seen_ids or wt.status == repository.STATUS_EXCLUDED or wt.title_id in hidden:
             continue
@@ -311,7 +342,7 @@ async def browse_naver_list():
                 "title_id": wt.title_id,
                 "title": wt.title,
                 "thumbnail_url": wt.thumbnail_url,
-                "weekdays": [],
+                "weekdays": days_by_id.get(wt.title_id, []),
                 "is_finished": wt.is_finished,
                 "is_paused": wt.is_paused,
                 "is_new": wt.is_new,

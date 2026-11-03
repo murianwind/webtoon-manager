@@ -46,6 +46,7 @@ class KakaoWebtoonOut(BaseModel):
     is_paused: bool = False
     has_new_episode: bool = False
     weekdays: list[str] = []  # 연재 요일(mon~sun) — 요일별 목록에 없는 작품(장기 휴재 등)은 비어 있다
+    is_finished: bool = False  # 완결 여부 — 제외됨 화면이 완결 작품을 가린다
 
 
 class KakaoWebtoonEntryIn(BaseModel):

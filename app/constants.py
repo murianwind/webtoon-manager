@@ -6,6 +6,7 @@
 
 NAVER_API_BASE = "https://comic.naver.com/api"
 NAVER_INFO_URL = f"{NAVER_API_BASE}/article/list/info"
+NAVER_MOBILE_LIST_URL = "https://m.comic.naver.com/webtoon/list"  # 작품 페이지(모바일, 서버에서 그려서 준다) — 요일별 목록에서 빠진 작품의 연재 요일을 읽는 데 쓴다
 NAVER_LIST_URL = f"{NAVER_API_BASE}/article/list"
 NAVER_ARTIST_OTHER_TITLES_URL = f"{NAVER_API_BASE}/artist/otherTitle/list"
 NAVER_CURATION_LIST_URL = f"{NAVER_API_BASE}/curation/list"
