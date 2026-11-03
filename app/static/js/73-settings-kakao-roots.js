@@ -453,7 +453,7 @@ async function refreshJobStatus() {
     return;
   }
 
-  for (const jobName of ["discovery", "download", "metadata_sync", "report"]) {
+  for (const jobName of ["discovery", "quick_scan", "download", "metadata_sync", "report"]) {
     const st = statuses[jobName];
     if (!st) continue;
     const badge = document.getElementById(`${jobName}-status-badge`);

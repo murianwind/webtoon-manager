@@ -25,13 +25,17 @@ def start(title_ids: list[str], timeout_seconds: int) -> None:
     _task = asyncio.ensure_future(run(title_ids[: weekdays.LOOKUP_BATCH], timeout_seconds))
 
 
-def _save_page_lookup(title_id: str, page: TitlePage) -> None:
-    """조회 결과를 저장한다(실패는 days=None). 페이지가 완결이라고 알려 주면 제외됨/구독해제 작품은 완결로 저장해 화면에서 가린다 — 구독 중인 작품은 신작 스캔이 맡는다."""
+def apply_page(title_id: str, page: TitlePage) -> None:
+    """조회 결과를 저장한다(실패는 days=None) — 백그라운드 조회와 빠른 상태 스캔이 같이 쓴다. 완결이라고 알려 주면 제외됨/구독해제 작품은 완결로 저장해 화면에서 가린다
+    (구독 중인 작품은 신작 스캔이 맡는다). 휴재 여부(paused)는 알 때만(None이 아닐 때) 추적 작품에 그대로 저장한다."""
     weekdays.save_lookup(title_id, page.days if page.status == 200 else None, http=page.status, finished=page.finished)
-    if page.finished:
-        tracked = repository.get(title_id)
-        if tracked is not None and tracked.status != repository.STATUS_ACTIVE:
-            repository.update_is_finished(title_id, True)
+    tracked = repository.get(title_id)
+    if tracked is None:
+        return
+    if page.finished and tracked.status != repository.STATUS_ACTIVE:
+        repository.update_is_finished(title_id, True)
+    if page.paused is not None:
+        repository.update_is_paused(title_id, page.paused)
 
 
 async def run(title_ids: list[str], timeout_seconds: int) -> None:
@@ -44,7 +48,7 @@ async def run(title_ids: list[str], timeout_seconds: int) -> None:
                 except Exception as e:
                     log.warning("작품 요일 조회 실패 (titleId=%s): %s", title_id, e)
                     page = TitlePage(status=None)
-                await asyncio.to_thread(_save_page_lookup, title_id, page)
+                await asyncio.to_thread(apply_page, title_id, page)
                 await asyncio.sleep(weekdays.LOOKUP_PAUSE_SECONDS)
     except Exception:
         log.exception("작품 요일 조회 중 오류")

@@ -149,7 +149,7 @@ async function loadJobHistoryPage() {
   await loadJobHistory();
 }
 
-const JOB_NAME_LABEL = { discovery: "신작 스캔", download: "다운로드", manual: "수동 다운로드", registry: "작가/태그 재동기화", subscription: "구독/작가 등록", metadata_sync: "메타 동기화", report: "다운로드 리포트" };
+const JOB_NAME_LABEL = { discovery: "신작 스캔", download: "다운로드", manual: "수동 다운로드", registry: "작가/태그 재동기화", subscription: "구독/작가 등록", metadata_sync: "메타 동기화", report: "다운로드 리포트", quick_scan: "빠른 상태 스캔" };
 
 async function loadJobHistory() {
   const container = document.getElementById("job-history-list");
@@ -242,6 +242,11 @@ document.getElementById("btn-save-job-history-retention").addEventListener("clic
 
 document.getElementById("btn-run-discovery").addEventListener("click", async () => {
   await apiCall("/api/jobs/discovery/run", { method: "POST" });
+  await refreshJobStatus();
+});
+
+document.getElementById("btn-run-quick-scan").addEventListener("click", async () => {
+  await apiCall("/api/jobs/quick-scan/run", { method: "POST" });
   await refreshJobStatus();
 });
 

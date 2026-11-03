@@ -19,6 +19,7 @@ class TitlePage:
     status: int | None
     days: list[str] = field(default_factory=list)
     finished: bool | None = None
+    paused: bool | None = None  # 휴재 표시(작품 정보 API의 rest) — 정보 API를 쓰지 못했으면 None
 
 
 @dataclass

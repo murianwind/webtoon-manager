@@ -5,10 +5,12 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from app import (
     job_status,
     kakao_page_download,
+    quick_scan,
     repository,
     schedule_config,
     tracker,
@@ -100,6 +102,23 @@ async def set_job_history_retention_days(payload: RetentionDaysIn):
         repository.set_setting, _KEY_JOB_HISTORY_RETENTION_DAYS, str(payload.retention_days) if payload.retention_days > 0 else None
     )
     return await get_job_history_retention_days()
+
+
+class QuickScanIn(BaseModel):
+    scope: list[str] | None = None  # 확인할 그룹(etc=요일을 모르는 작품, mon~sun) — 없으면 전부(기타 먼저, 오늘부터 요일별로)
+
+
+@router.post("/jobs/quick-scan/run")
+async def trigger_quick_scan(payload: QuickScanIn | None = None):
+    """빠른 상태 스캔(완결/휴재/요일만 가볍게) — 수동 실행 버튼과 전체목록 새로고침이 부른다(새로고침은 오늘/선택한 요일/기타만 범위로)."""
+    scope = None
+    if payload is not None and payload.scope is not None:
+        invalid = [group for group in payload.scope if group not in ("etc", *quick_scan.WEEK)]
+        if invalid:
+            raise HTTPException(status_code=400, detail=f"알 수 없는 범위: {invalid}")
+        scope = set(payload.scope)
+    asyncio.create_task(scheduler_mod.run_quick_scan_job(scope))
+    return {"status": "started"}
 
 
 @router.post("/jobs/discovery/run")

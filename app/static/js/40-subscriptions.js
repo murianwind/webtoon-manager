@@ -31,7 +31,6 @@ async function loadSubscriptionTab(status) {
       }
     }
     subscriptionLoadedAt[status] = Date.now();
-    invalidateEtcDiagnostics(status); // 목록을 새로 받았으니 "기타" 원인도 새로 센다(그 사이 요일을 알아낸 작품이 있을 수 있다)
     const rows = [...naverRows, ...kakaoRows];
     const sig = JSON.stringify(rows);
     if (sig !== subscriptionSig[status] || listEl.querySelector(".webtoon-card") === null) {
@@ -39,8 +38,6 @@ async function loadSubscriptionTab(status) {
       subscriptionCache[status] = rows;
       populateFilterOptions(status);
       renderSubscriptionTab(status); // 바뀐 카드만 갱신된다
-    } else {
-      renderSubscriptionTab(status); // 목록은 그대로여도 기타 원인 안내는 새로 센 값으로 갱신한다(같은 카드는 그대로 둔다)
     }
   } catch (e) {
     if (listEl.children.length === 0) {
@@ -90,12 +87,8 @@ function renderSubscriptionTab(status) {
   let rows = subscriptionCache[status] || [];
   if (status === "excluded") {
     // 제외됨 화면은 완결 웹툰을 보여 주지 않는다 — 완결 작품은 수동 다운로드에서 분석해서 구독할 수 있으니 여기 쌓아 둘 필요가 없다(데이터는 그대로 두고 화면에서만 가린다).
-    // 몇 개를 가렸는지는 검색/필터와 상관없이 안내 줄에 알린다.
-    const hiddenFinished = rows.filter((w) => w.is_finished).length;
+    // 몇 개를 가렸는지는 화면에 띄우지 않고 빠른 상태 스캔의 실행 이력에 남긴다.
     rows = rows.filter((w) => !w.is_finished);
-    const note = document.getElementById("excluded-finished-note");
-    note.textContent = `완결 웹툰 ${hiddenFinished}개는 이 목록에 표시하지 않습니다(필요하면 수동 다운로드에서 분석해서 구독할 수 있습니다).`;
-    note.classList.toggle("hidden", hiddenFinished === 0);
   }
   rows = applyCommonFilters(rows, { platform: platformFilter, badge: badgeFilter });
   rows = rows.filter((w) => matchesSearch(w, query, true)); // 구독해제/제외됨은 작가 이름으로도 찾는다
@@ -103,9 +96,7 @@ function renderSubscriptionTab(status) {
 
   if (tabsEl) {
     // 전체목록과 같은 요일 탭(화면마다 따로 기억) — 검색 중에는 요일과 상관없이 전체에서 찾는다
-    rows = applyWeekdayTabs(status, rows, {
-      query, tabsEl, etcNoteEl: document.getElementById(`${status}-etc-note`), etcStatus: status, onChange: () => renderSubscriptionTab(status),
-    });
+    rows = applyWeekdayTabs(status, rows, { query, tabsEl, onChange: () => renderSubscriptionTab(status) });
   }
 
   rows = [...rows].sort((a, b) => a.title.localeCompare(b.title));

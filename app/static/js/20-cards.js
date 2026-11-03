@@ -73,37 +73,35 @@ function reconcileGrid(grid, rows, context, allRows) {
   return built;
 }
 
-// 전체목록의 버튼 줄 맞춤(지금 보이는 목록 기준) — 구독 중 카드는 "구독해제 / 제외됨으로 / 뷰어 아이콘" 3줄이고 구독하지 않은 카드는 "구독 / 목록제외" 2줄이라
-// 카드 아래쪽 정렬에서 버튼이 한 줄씩 어긋난다. 뷰어 버튼이 실제로 보이는 카드가 하나라도 있으면 모든 카드를 3줄로 맞추고(뷰어 버튼이 없는 카드에는 보이지 않는 자리),
-// 하나도 없으면 모든 카드를 2줄로 둔다("아직 미등록만" 목록이나 뷰어에 있는 작품이 없을 때 쓸데없는 빈 줄이 생기지 않게). 카드를 그리거나 뷰어 확인이 끝날 때마다 다시 맞춘다.
-function makeViewerSlotPlaceholder() {
-  // 구독 중 카드의 뷰어 아이콘과 같은 버튼이라 높이가 같고, 뷰어에 없는 작품의 아이콘을 숨길 때와 같은 방식(hideViewerIcon)으로 숨긴다. 뷰어 확인 대상(data-viewer-check-title)은 아니다.
-  const slot = makeIconButton(READER_ICON_SVG, "", () => {});
-  slot.removeAttribute("title");
-  slot.removeAttribute("aria-label");
-  slot.dataset.viewerSlot = "placeholder";
-  hideViewerIcon(slot);
-  return slot;
-}
-
-function syncViewerRows(grid) {
-  const actionsOf = (card) => card.querySelector(".webtoon-card-actions");
+// 전체목록의 마지막 줄 — 모든 카드에 "분석" 버튼이 있다. 뷰어 버튼이 **보이는** 카드는 뷰어 아이콘 바로 옆(같은 줄)에 작게, 뷰어 버튼이 없거나 숨겨진(뷰어에 없는 작품) 카드는
+// 마지막 텍스트 버튼(목록제외/제외됨으로) 아래에 같은 크기의 버튼으로 붙인다. 그래서 모든 카드가 항상 3줄(구독/구독해제, 목록제외/제외됨으로, 뷰어+분석 또는 분석)이라 카드 아래쪽 정렬에서
+// 버튼이 어긋나지 않고, 줄을 맞추려고 보이지 않는 자리를 끼워 넣을 필요도 없다. 카드를 그리거나 뷰어 확인이 끝날 때마다(아이콘이 숨겨질 수 있다) 다시 맞춘다.
+function syncCardActionRows(grid) {
   const isShown = (button) => button.style.visibility !== "hidden";
-  const cards = [...grid.querySelectorAll(":scope > .webtoon-card")];
-  const needRow = webtoonServerConfigured && cards.some((card) => {
-    const icon = actionsOf(card).querySelector("[data-viewer-check-title]");
-    return icon && isShown(icon);
-  });
-  for (const card of cards) {
-    const actions = actionsOf(card);
+  for (const card of grid.querySelectorAll(":scope > .webtoon-card")) {
+    const actions = card.querySelector(".webtoon-card-actions");
+    const analyze = actions.querySelector("[data-analyze]");
+    if (!analyze) continue;
     const icon = actions.querySelector("[data-viewer-check-title]");
-    const slot = actions.querySelector("[data-viewer-slot]");
-    if (icon) {
-      icon.style.display = needRow || isShown(icon) ? "" : "none"; // 숨겨진(뷰어에 없는) 아이콘은 빈 줄이 필요할 때만 자리를 차지한다
-    } else if (needRow && !slot) {
-      actions.appendChild(makeViewerSlotPlaceholder());
-    } else if (!needRow && slot) {
-      slot.remove();
+    let row = actions.querySelector(".card-viewer-row");
+    if (icon && isShown(icon)) {
+      if (!row) {
+        row = document.createElement("div");
+        row.className = "card-viewer-row";
+        actions.insertBefore(row, icon);
+      }
+      icon.style.display = "";
+      row.appendChild(icon);
+      row.appendChild(analyze);
+      analyze.classList.add("analyze-inline");
+    } else {
+      analyze.classList.remove("analyze-inline");
+      if (icon) {
+        icon.style.display = "none"; // 뷰어에 없는 작품의 아이콘은 줄을 차지하지 않는다
+        actions.appendChild(icon);
+      }
+      actions.appendChild(analyze);
+      if (row) row.remove();
     }
   }
 }
@@ -202,6 +200,12 @@ function buildWebtoonCard(w, context) {
       // 완결작만 완전 삭제 허용 — 완결작은 자동추가 로직이 원래 다시 안 건드리므로 안전하다.
       actions.appendChild(makeButton("완전 삭제", () => deleteWebtoonPermanently(w.title_id, "excluded")));
     }
+  }
+
+  if (context === "naver-list") {
+    const analyzeBtn = makeButton("분석", () => openManualAnalysis(platform, w.title_id)); // 수동 다운로드의 분석 화면으로(자리는 syncCardActionRows가 맞춘다)
+    analyzeBtn.dataset.analyze = "1";
+    actions.appendChild(analyzeBtn);
   }
 
   return card;

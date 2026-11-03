@@ -1,8 +1,8 @@
 // 웹툰 전체목록: 구독 중 카드와 구독하지 않은 카드의 버튼이 같은 줄에 오도록 맞춘다(네이버/카카오 모두).
-// 구독 중 카드는 "구독해제 / 제외됨으로 / 뷰어 아이콘" 3줄, 구독하지 않은 카드는 "구독 / 목록제외" 2줄이라 카드 아래쪽 정렬에서 한 줄씩 어긋났다.
-// 규칙(지금 보이는 목록 기준): 뷰어 버튼이 실제로 보이는 카드가 하나라도 있으면 모든 카드를 3줄로(뷰어 버튼이 없는 카드에는 보이지 않는 자리),
-// 하나도 없으면 모든 카드를 2줄로 둔다 — "아직 미등록만"처럼 뷰어 버튼이 필요 없는 목록에 쓸데없는 빈 줄이 생기지 않게.
-const { makeApp, sleep, idle, ok, done } = require("./harness");
+// 예전에는 구독 중 카드는 "구독해제 / 제외됨으로 / 뷰어 아이콘" 3줄, 구독하지 않은 카드는 "구독 / 목록제외" 2줄이라 카드 아래쪽 정렬에서 한 줄씩 어긋났고,
+// 줄을 맞추려고 뷰어가 보이는 카드가 있을 때만 보이지 않는 자리를 끼워 넣었다. 지금은 모든 카드에 "분석" 버튼이 있어서 어떤 목록이든 모든 카드가 항상 3줄이다:
+// 첫째 구독/구독해제, 둘째 목록제외/제외됨으로, 셋째 뷰어 아이콘+분석(뷰어 버튼이 보일 때) 또는 분석 단독(자리 표시 없음). 분석 버튼 자체는 test_card_analyze_button.js가 본다.
+const { makeApp, idle, ok, done } = require("./harness");
 const { naver, kakao } = require("./factories");
 const SUB = { status: "active", ever_subscribed: true };
 
@@ -23,41 +23,39 @@ async function render({ serverUrl = "http://viewer", items, inViewer = () => tru
 }
 const MIXED = [naver(1, "네이버 구독 중", SUB), naver(2, "네이버 미구독"), kakao(71000001, "카카오 구독 중", { ...SUB, platform: "kakao" }), kakao(71000002, "카카오 미구독", { platform: "kakao" })];
 const TITLES = ["네이버 구독 중", "네이버 미구독", "카카오 구독 중", "카카오 미구독"];
+const all3 = (rows, titles = TITLES) => titles.every((t) => rows(t).length === 3);
+const counts = (rows, titles = TITLES) => titles.map((t) => rows(t).length);
 
 (async () => {
-  // Scenario 1: 구독 중 카드의 뷰어 버튼이 보이면 네 종류 카드 모두 3줄 — 첫째는 구독/구독해제, 둘째는 목록제외/제외됨으로, 셋째는 뷰어 자리
+  // Scenario 1: 섞인 목록 — 네 종류 카드 모두 3줄. 첫째는 구독/구독해제, 둘째는 목록제외/제외됨으로, 셋째는 뷰어+분석(구독 중이고 뷰어에 있음) 또는 분석 단독. 보이지 않는 자리 표시는 없다
   let { rows, card } = await render({ items: MIXED });
-  ok(TITLES.every((t) => rows(t).length === 3), "섞인 목록: 모든 카드가 3줄: " + TITLES.map((t) => rows(t).length));
-  ok(rows("네이버 미구독")[0].textContent === "구독" && rows("네이버 구독 중")[0].textContent === "구독해제" && rows("카카오 미구독")[1].textContent === "목록제외" && rows("카카오 구독 중")[1].textContent === "제외됨으로", "첫째/둘째 줄이 같은 자리");
-  // 구독하지 않은 카드의 셋째 줄은 눈에 안 보이고 눌리지 않는 자리(구독 중 카드의 뷰어 아이콘과 같은 버튼이라 높이가 같다), 뷰어 확인 대상이 아니다
-  for (const t of ["네이버 미구독", "카카오 미구독"]) {
-    const slot = rows(t)[2];
-    ok(slot.tagName === "BUTTON" && slot.style.visibility === "hidden" && slot.disabled && slot.getAttribute("aria-hidden") === "true" && slot.tabIndex === -1 && slot.className === rows("네이버 구독 중")[2].className && !slot.hasAttribute("data-viewer-check-title"), t + ": 보이지 않는 뷰어 자리");
-  }
-  ok(rows("네이버 구독 중")[2].style.visibility !== "hidden", "구독 중 카드의 뷰어 버튼은 보인다");
+  ok(all3(rows), "섞인 목록: 모든 카드가 3줄: " + counts(rows));
+  ok(rows("네이버 미구독")[0].textContent === "구독" && rows("네이버 구독 중")[0].textContent === "구독해제" && rows("카카오 미구독")[1].textContent === "목록제외" && rows("카카오 구독 중")[1].textContent === "제외됨으로", "첫째/둘째 줄 버튼");
+  ok(rows("네이버 구독 중")[2].classList.contains("card-viewer-row") && rows("네이버 미구독")[2].dataset.analyze === "1", "셋째 줄: 뷰어 버튼이 있으면 뷰어+분석 줄, 없으면 분석 단독");
+  ok(!card("네이버 미구독").querySelector("[data-viewer-slot]") && !card("카카오 미구독").querySelector("[data-viewer-slot]"), "보이지 않는 자리 표시는 쓰지 않는다");
 
-  // Scenario 2: 구독 중 카드가 하나도 없는 목록("아직 미등록만" 등)에는 빈 줄을 만들지 않는다 — 모두 2줄
+  // Scenario 2: 구독 중 카드가 하나도 없는 목록("아직 미등록만" 등)도 3줄 — 셋째 줄은 분석 단독
   ({ rows } = await render({ items: [naver(2, "네이버 미구독"), kakao(71000002, "카카오 미구독", { platform: "kakao" })] }));
-  ok(["네이버 미구독", "카카오 미구독"].every((t) => rows(t).length === 2), "미구독만: 모두 2줄: " + ["네이버 미구독", "카카오 미구독"].map((t) => rows(t).length));
+  ok(all3(rows, ["네이버 미구독", "카카오 미구독"]), "미구독만: 모두 3줄: " + counts(rows, ["네이버 미구독", "카카오 미구독"]));
 
-  // Scenario 3: 구독 중 카드가 있어도 뷰어에 있는 작품이 하나도 없으면(뷰어 확인 뒤 아이콘이 모두 숨음) 줄이 접혀 모두 2줄
+  // Scenario 3: 구독 중 카드가 있어도 뷰어에 있는 작품이 하나도 없으면(뷰어 확인 뒤 아이콘이 모두 숨음) 숨은 아이콘은 줄을 차지하지 않고 분석이 아래 줄 — 모두 3줄
   ({ rows } = await render({ items: MIXED, inViewer: () => false }));
-  ok(TITLES.every((t) => rows(t).length === 2), "뷰어에 있는 작품이 없음: 모두 2줄: " + TITLES.map((t) => rows(t).length));
-  // Scenario 4: 일부만 뷰어에 있으면 3줄을 유지하고, 뷰어에 없는 구독 중 카드는 아이콘을 숨긴 자리를 남긴다
-  ({ rows } = await render({ items: MIXED, inViewer: (t) => t === "네이버 구독 중" }));
-  ok(TITLES.every((t) => rows(t).length === 3), "일부만 뷰어에 있음: 모두 3줄: " + TITLES.map((t) => rows(t).length));
-  ok(rows("카카오 구독 중")[2].style.visibility === "hidden" && rows("네이버 구독 중")[2].style.visibility !== "hidden", "뷰어에 없는 카드는 숨긴 자리, 있는 카드는 보이는 버튼");
+  ok(all3(rows) && TITLES.every((t) => rows(t)[2].dataset.analyze === "1"), "뷰어에 있는 작품이 없음: 모두 3줄(분석 단독): " + counts(rows));
+  // Scenario 4: 일부만 뷰어에 있으면 — 있는 카드는 뷰어 아이콘 옆 분석, 없는 카드는 아이콘이 숨고(줄 없음) 아래 줄 분석. 모두 3줄
+  ({ rows, card } = await render({ items: MIXED, inViewer: (t) => t === "네이버 구독 중" }));
+  ok(all3(rows), "일부만 뷰어에 있음: 모두 3줄: " + counts(rows));
+  ok(rows("네이버 구독 중")[2].classList.contains("card-viewer-row") && rows("카카오 구독 중")[2].dataset.analyze === "1" && card("카카오 구독 중").querySelector("[data-viewer-check-title]").style.display === "none", "뷰어에 없는 카드는 숨긴 아이콘 + 분석 줄");
 
-  // Scenario 5: 필터를 바꾸면 그 목록 기준으로 다시 맞춘다 — 전체(3줄) → 아직 미등록만(2줄) → 다시 전체(3줄)
+  // Scenario 5: 필터를 바꿔도(전체 → 아직 미등록만 → 전체) 모든 카드가 3줄
   let ctx = await render({ items: MIXED });
-  ok(TITLES.every((t) => ctx.rows(t).length === 3), "전체: 3줄");
+  ok(all3(ctx.rows), "전체: 3줄");
   await ctx.setFilter("not-active");
-  ok(["네이버 미구독", "카카오 미구독"].every((t) => ctx.rows(t).length === 2), "아직 미등록만: 2줄(빈 줄 없음): " + ["네이버 미구독", "카카오 미구독"].map((t) => ctx.rows(t).length));
+  ok(all3(ctx.rows, ["네이버 미구독", "카카오 미구독"]), "아직 미등록만: 3줄: " + counts(ctx.rows, ["네이버 미구독", "카카오 미구독"]));
   await ctx.setFilter("all");
-  ok(TITLES.every((t) => ctx.rows(t).length === 3), "다시 전체: 3줄");
+  ok(all3(ctx.rows), "다시 전체: 3줄");
 
-  // Scenario 6: 뷰어 서버를 설정하지 않았으면 처음부터 뷰어 줄이 없다 — 모두 2줄이고 자리도 만들지 않는다
+  // Scenario 6: 뷰어 서버를 설정하지 않았으면 처음부터 뷰어 아이콘이 없다 — 모두 3줄(셋째는 분석), 자리도 만들지 않는다
   ({ rows, card } = await render({ serverUrl: "", items: MIXED }));
-  ok(TITLES.every((t) => rows(t).length === 2) && !card("네이버 미구독").querySelector("[data-viewer-slot]"), "뷰어 서버 없음: 모두 2줄, 자리 없음");
+  ok(all3(rows) && TITLES.every((t) => rows(t)[2].dataset.analyze === "1" && !card(t).querySelector("[data-viewer-check-title], [data-viewer-slot]")), "뷰어 서버 없음: 모두 3줄(분석), 뷰어/자리 없음: " + counts(rows));
   done();
 })();

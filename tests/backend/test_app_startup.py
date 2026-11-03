@@ -46,7 +46,8 @@ with startup() as client:
     assert scheduler.running, "스케줄러가 시작돼야 한다"
     jobs = {job.id: job for job in scheduler.get_jobs()}
     assert "report_tick" in jobs and jobs["report_tick"].trigger.interval.total_seconds() == 60 and jobs["report_tick"].max_instances == 1, list(jobs)      # 리포트 발송 확인(1분)
-    assert "kakao_catalog_refresh" in jobs and "waitfree_job" not in jobs, list(jobs)                                               # 고정 작업은 있고, 꺼 둔 기다무 작업은 없다
+    assert "kakao_catalog_refresh" in jobs and "waitfree_job" not in jobs, list(jobs)
+    assert "quick_scan_nightly" in jobs and jobs["quick_scan_nightly"].max_instances == 1, list(jobs)                                # 매일 새벽 빠른 상태 스캔(고정 작업)                                               # 고정 작업은 있고, 꺼 둔 기다무 작업은 없다
     assert repository.get_setting("schedule_report_job") is None, "옛 리포트 발송 시각 설정이 정리돼야 한다"
     assert report_dispatch.on_job_finished in job_status._finish_listeners, "다운로드 작업이 끝나면 리포트가 알도록 연결돼야 한다"
     assert calls == {"start_bot": 1, "stop_bot": 0, "backfill": 1, "refresh": 1}, calls                                              # 카카오 관리가 켜져 있으니 목록 갱신을 시작

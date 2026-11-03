@@ -45,7 +45,7 @@ const ruleOf = (text, selector) => { const m = text.match(new RegExp("(?:^|\\})\
   ok(JSON.stringify(kinds("naver-list")) === JSON.stringify(["search", "toggle", "filters", "tabs", "bulk"]), "전체목록 툴바 구성: " + kinds("naver-list"));
   ok(JSON.stringify(kinds("excluded")) === JSON.stringify(["search", "toggle", "filters", "tabs"]) && kinds("unsubscribed").join() === "search,toggle,filters", "제외됨/구독해제 툴바 구성: " + kinds("excluded") + " | " + kinds("unsubscribed"));
   ok($("page-naver-list").querySelector(".list-filters").contains($("naver-list-refresh-status")), "마지막 확인 줄(모바일용)은 접히는 필터 안");
-  ok(!!($("page-excluded").querySelector(".list-toolbar").compareDocumentPosition($("excluded-finished-note")) & w.Node.DOCUMENT_POSITION_FOLLOWING) && !$("page-excluded").querySelector(".list-toolbar").contains($("excluded-finished-note")), "완결 안내 줄은 툴바(고정 영역) 밖 아래 — 고정 영역을 키우지 않는다");
+  ok(!$("excluded-finished-note") && !$("excluded-etc-note") && !$("naver-list-etc-note"), "안내 줄(완결 N개/기타 원인)은 화면에 두지 않는다 — 고정 영역을 키우지 않고 실행 이력으로 옮겼다");
 
   // Scenario 5: CSS(PC) — 머리글은 제목 왼쪽/상태 오른쪽(긴 문구는 말줄임), 모바일용 칸은 숨김, 요일 탭은 툴바 한 줄 전체를 쓰고 선택 막대도 툴바 안
   const { inside: m, outside: d } = mobileBlock(css);

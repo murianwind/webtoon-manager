@@ -13,6 +13,15 @@ document.getElementById("manual-query").addEventListener("keydown", (e) => {
 });
 
 // 검색 결과 카드의 제목(누르면 작품 페이지가 새 탭으로 열린다)
+// 다른 화면(전체목록 카드의 "분석" 버튼)에서 수동 다운로드 탭을 열어 그 작품을 바로 분석한다 — 플랫폼 선택과 입력칸도 맞춰 둔다(네이버: titleId, 카카오: 작품 번호)
+function openManualAnalysis(platform, titleId) {
+  switchToTab("manual-download");
+  if (kakaoWebtoonsEnabled) document.getElementById("manual-platform").value = platform;
+  document.getElementById("manual-query").value = String(titleId);
+  applyManualPlatformView();
+  return platform === "kakao" ? runKakaoManualAnalyze(Number(titleId)) : runManualAnalyze(String(titleId));
+}
+
 function manualCardTitleHtml(url, title) {
   return `<div class="webtoon-card-title"><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(title)}</a></div>`;
 }

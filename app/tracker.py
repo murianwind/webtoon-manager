@@ -464,7 +464,7 @@ async def refresh_inactive_kakao_status(settings: Settings, *, all_batches: bool
         while pending:
             batch = pending[: kakao_status.LOOKUP_BATCH]
             for series_id in batch:
-                resolved += await _refresh_one_kakao_status(client, series_id, listed_ids)
+                resolved += await refresh_one_kakao_status(client, series_id, listed_ids)
                 await asyncio.sleep(kakao_status.LOOKUP_PAUSE_SECONDS)
             done += len(batch)
             if progress is not None:
@@ -477,7 +477,7 @@ async def refresh_inactive_kakao_status(settings: Settings, *, all_batches: bool
     return resolved
 
 
-async def _refresh_one_kakao_status(client, series_id: int, listed_ids: set[int]) -> int:
+async def refresh_one_kakao_status(client, series_id: int, listed_ids: set[int]) -> int:
     """작품 하나의 상태(연재/휴재/완결/서비스 종료/판매 중지)를 확인해 저장한다. 알아냈으면 1, 못 알아냈으면 0(일시 오류 — 하루 뒤에 다시). 한 작품이 예외로 실패해도 밖으로 던지지 않는다.
     요일별 목록(listed_ids)에 없는 연재/휴재 작품은 작품 개요에서 연재 요일도 알아낸다(판매 중지/완결/종료는 요일이 의미 없어 묻지 않는다)."""
     try:

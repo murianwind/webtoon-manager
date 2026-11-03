@@ -3,7 +3,7 @@
 const { makeApp, idle, ok, done } = require("./harness");
 const { listItem } = require("./factories");
 (async () => {
-  const { w, run } = makeApp({ "/api/diagnostics/weekday-gaps": { status: null, naver: { total: 0, reasons: {}, failed_http: {}, samples: {} }, kakao: { total: 0, reasons: {}, failed_http: {}, samples: {} } } }, { now: "2026-11-03T03:00:00Z" }); // 화요일
+  const { w, run } = makeApp({}, { now: "2026-11-03T03:00:00Z" }); // 화요일
   await idle();
   const fn = (name) => w.eval(name);
   const row = (extra) => listItem("naver", 1, "쌍갑포차", ["tue"], extra);
@@ -32,19 +32,19 @@ const { listItem } = require("./factories");
   ok(common(rows, { platform: "naver", badge: "new" }).map((r) => r.title).join() === "N1", "둘 다");
 
   // Scenario 4: 요일 탭 적용 — 개수는 (탭을 적용하기 전) 넘겨받은 목록 기준, 탭 줄을 그리고, 고른 탭의 작품만 돌려준다. 검색 중이면 전체. 탭을 누르면 창을 처음으로 돌리고 다시 그리라고 알린다
-  const tabsEl = w.document.createElement("div"), noteEl = w.document.createElement("p"); w.document.body.append(tabsEl, noteEl);
+  const tabsEl = w.document.createElement("div"); w.document.body.append(tabsEl);
   const mixed = [listItem("naver", 1, "화", ["tue"]), listItem("naver", 2, "수", ["wed"]), listItem("naver", 3, "기타", [])];
   let rerenders = 0; w.__apply = fn("applyWeekdayTabs");
   const labelOf = (el) => [...el.querySelectorAll(".weekday-tab")].map((t) => t.firstChild.textContent.trim() + ":" + t.querySelector(".weekday-tab-count").textContent).join(" ");
-  let shown = w.__apply("ctx-a", mixed, { query: "", tabsEl, etcNoteEl: noteEl, etcStatus: null, onChange: () => { rerenders++; } });
+  let shown = w.__apply("ctx-a", mixed, { query: "", tabsEl, onChange: () => { rerenders++; } });
   ok(shown.map((r) => r.title).join() === "화", "오늘(화요일) 탭의 작품만: " + shown.map((r) => r.title));
   ok(labelOf(tabsEl) === "월:0 화:1 수:1 목:0 금:0 토:0 일:0 기타:1 전체:3", "탭 개수는 받은 목록 기준: " + labelOf(tabsEl));
   [...tabsEl.querySelectorAll(".weekday-tab")].find((t) => t.firstChild.textContent.trim() === "수").click();
   ok(rerenders === 1, "탭을 누르면 다시 그리라고 알린다");
-  shown = w.__apply("ctx-a", mixed, { query: "", tabsEl, etcNoteEl: noteEl, etcStatus: null, onChange: () => { rerenders++; } });
+  shown = w.__apply("ctx-a", mixed, { query: "", tabsEl, onChange: () => { rerenders++; } });
   ok(shown.map((r) => r.title).join() === "수", "누른 탭이 기억된다: " + shown.map((r) => r.title));
-  shown = w.__apply("ctx-a", mixed, { query: "검색중", tabsEl, etcNoteEl: noteEl, etcStatus: null, onChange: () => {} });
+  shown = w.__apply("ctx-a", mixed, { query: "검색중", tabsEl, onChange: () => {} });
   ok(shown.length === 3 && tabsEl.querySelector(".weekday-tab.active").firstChild.textContent.trim() === "전체", "검색 중에는 전체");
-  ok(w.__apply("ctx-b", mixed, { query: "", tabsEl, etcNoteEl: noteEl, etcStatus: null, onChange: () => {} }).map((r) => r.title).join() === "화", "화면(ctx)마다 따로 기억한다");
+  ok(w.__apply("ctx-b", mixed, { query: "", tabsEl, onChange: () => {} }).map((r) => r.title).join() === "화", "화면(ctx)마다 따로 기억한다");
   done();
 })();

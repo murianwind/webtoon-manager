@@ -36,6 +36,8 @@ from app.scheduler.archive_job import (
     run_archive_job,
 )
 from app.scheduler import report_message, report_sections, report_tick
+from app.scheduler import quick_scan_job
+from app.scheduler.quick_scan_job import run_quick_scan_job, run_quick_scan_nightly
 from app.scheduler.report_job import (
     _SETTING_KEY_REPORT_LAST_SENT_AT,
     _run_report_job_impl,
@@ -82,6 +84,9 @@ __all__ = [
     "reschedule_all",
     "run_archive_job",
     "run_discovery_job",
+    "run_quick_scan_job",
+    "run_quick_scan_nightly",
+    "quick_scan_job",
     "run_download_job",
     "run_kakao_catalog_refresh_job",
     "run_report_job",

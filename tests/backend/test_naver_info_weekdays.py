@@ -38,16 +38,16 @@ def site(info=None, page=None):
         return outcome
     return FakeSession(handler)
 look = lambda session, tid="1": asyncio.run(naver_api.fetch_title_weekdays(session, tid, 5))
-s = site(info=FakeResponse(200, raw("822640"))); assert look(s) == TitlePage(status=200, days=["thu"], finished=False)
+s = site(info=FakeResponse(200, raw("822640"))); assert look(s) == TitlePage(status=200, days=["thu"], finished=False, paused=True), "정보 API는 휴재(rest)도 알려 준다"
 assert [c[0] for c in s.calls] == [INFO_URL] and s.calls[0][1] == {"titleId": "1"}
 finished = raw("822640"); finished["finished"] = True; finished["publishDayOfWeekList"] = []
-s = site(info=FakeResponse(200, finished)); assert look(s) == TitlePage(status=200, days=[], finished=True) and [c[0] for c in s.calls] == [INFO_URL], "완결은 요일이 없어도 페이지를 더 보지 않는다(요청도 안 한다)"
+s = site(info=FakeResponse(200, finished)); assert look(s) == TitlePage(status=200, days=[], finished=True, paused=True) and [c[0] for c in s.calls] == [INFO_URL], "완결은 요일이 없어도 페이지를 더 보지 않는다(요청도 안 한다)"
 print("2) 정보 API 우선 OK")
 
 # Scenario 3: 폴백 — 정보 API가 200인데 요일이 비어 있고 완결도 아니면, 모바일 페이지로 한 번 더. 정보 API가 실패(HTTP 오류/예외/JSON 아님)해도 페이지로
 empty = raw("822640"); empty["publishDayOfWeekList"] = []
-s = site(info=FakeResponse(200, empty), page=FakeResponse(200, text=PAGE)); assert look(s) == TitlePage(status=200, days=["sat"], finished=False) and [c[0] for c in s.calls] == [INFO_URL, PAGE_URL]
-assert look(site(info=FakeResponse(403), page=FakeResponse(200, text=PAGE))) == TitlePage(status=200, days=["sat"], finished=False)
+s = site(info=FakeResponse(200, empty), page=FakeResponse(200, text=PAGE)); assert look(s) == TitlePage(status=200, days=["sat"], finished=False, paused=True) and [c[0] for c in s.calls] == [INFO_URL, PAGE_URL]
+assert look(site(info=FakeResponse(403), page=FakeResponse(200, text=PAGE))) == TitlePage(status=200, days=["sat"], finished=False, paused=None), "정보 API가 실패하면 휴재 여부는 모른다(None)"
 assert look(site(info=ConnectionError("끊김"), page=FakeResponse(200, text=PAGE))).days == ["sat"]
 class BadJson(FakeResponse):
     async def json(self, *a, **k): raise ValueError("JSON 아님")
@@ -57,7 +57,7 @@ print("3) 폴백 OK")
 # Scenario 4: 둘 다 못 얻으면 정보 API의 상태를 남긴다(진단용): 정보 403 + 페이지 503 → 403, 둘 다 예외 → 상태 없음. 페이지가 200이지만 요일이 없으면(정보도 비어 있음) 요일 없음(200)
 assert look(site(info=FakeResponse(403), page=FakeResponse(503))) == TitlePage(status=403, days=[], finished=None)
 assert look(site(info=ConnectionError("a"), page=ConnectionError("b"))) == TitlePage(status=None, days=[], finished=None)
-assert look(site(info=FakeResponse(200, empty), page=FakeResponse(200, text="<html>요일 없는 페이지</html>"))) == TitlePage(status=200, days=[], finished=False), "정보 API가 말한 완결 여부를 유지"
+assert look(site(info=FakeResponse(200, empty), page=FakeResponse(200, text="<html>요일 없는 페이지</html>"))) == TitlePage(status=200, days=[], finished=False, paused=True), "정보 API가 말한 완결/휴재 여부를 유지"
 print("4) 상태 남기기 OK")
 
 # Scenario 5: 정보를 받는 곳(enrich_one)이 요일도 조회 결과에 저장한다 — 요일별 목록에 없는 휴재 작품의 요일을 전체 재동기화/신작 스캔이 한 번에 채운다. 완결 여부와 HTTP 200도 함께(진단용)

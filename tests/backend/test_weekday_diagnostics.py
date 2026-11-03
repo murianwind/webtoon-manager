@@ -2,13 +2,10 @@
 네이버: 완결 / 작품 페이지에 요일 없음 / 확인 실패(HTTP 상태별, 네트워크 오류) / 확인 대기. 카카오: 완결 / 서비스 종료 / 휴재 / 연재 중인데 요일 목록에 없음 / 확인 실패 / 확인 대기.
 이미 요일을 아는 작품(목록 또는 조회 결과)은 세지 않는다. 구독해제 목록은 구독한 적 있는 작품만(화면과 같은 규칙).
 """
-import asyncio
 
-import httpx
 
 from app import db, kakao_catalog, kakao_status, repository, weekdays, weekday_diagnostics
 db.get_connection()
-import app.main as m
 
 # ── 네이버 작품 ──
 def naver(tid, name, status):
@@ -51,6 +48,16 @@ allr = weekday_diagnostics.summarize(None)
 assert allr["naver"]["total"] == 5 + 2 and allr["naver"]["reasons"]["pending"] == 3, allr["naver"]          # 대기: n5(제외됨) + n7(구독해제) + n8(구독중)
 print("2) 전체 상태 OK")
 
+# Scenario 2b: 실행 이력에 남길 한 줄 문장(describe) — 플랫폼별 개수와 원인별 개수, 확인 실패는 HTTP 상태까지. 개수가 0인 플랫폼은 뺀다. 설명할 게 없으면 빈 문자열
+text = weekday_diagnostics.describe(weekday_diagnostics.summarize(EX))
+assert text == ("기타 원인 — 네이버 5개: 완결 1 · 요일 정보 없음 1 · 확인 실패 2(HTTP 403 1, 네트워크 오류 1) · 요일 확인 대기 1"
+                " / 카카오 7개: 완결 1 · 서비스 종료 1 · 판매 중지 1 · 휴재 1 · 연재 중이지만 요일 목록에 없음 1 · 확인 실패 1(HTTP 503 1) · 상태 확인 대기 1"), text
+empty = {"status": None, "naver": {"total": 0, "reasons": {}, "samples": {}, "failed_http": {}}, "kakao": {"total": 0, "reasons": {}, "samples": {}, "failed_http": {}}}
+assert weekday_diagnostics.describe(empty) == "" and "네이버" not in weekday_diagnostics.describe({**empty, "kakao": weekday_diagnostics.summarize(EX)["kakao"]})
+# 제외됨 목록에서 가려지는(완결·서비스 종료·판매 중지) 작품 수 — 네이버는 DB 완결, 카카오는 DB 완결 또는 상태 확인 결과(완결/종료/판매 중지)
+assert weekday_diagnostics.hidden_excluded_count() == 4, weekday_diagnostics.hidden_excluded_count()          # 네이버 n1 + 카카오 완결/서비스 종료/판매 중지
+print("2b) 이력용 문장/숨긴 수 OK")
+
 # Scenario 3: 샘플은 원인마다 최대 5개
 for i in range(10): naver(f"many{i}", f"많음{i}", EX)
 r = weekday_diagnostics.summarize(EX); assert r["naver"]["reasons"]["pending"] == 11 and len(r["naver"]["samples"]["pending"]) == 5
@@ -62,12 +69,4 @@ r = weekday_diagnostics.summarize(EX); assert "serving_not_listed" not in r["kak
 CATALOG.extend([{"title_id": 7, "weekdays": ["wed"]}])
 print("4) 목록 미확인 OK")
 
-# Scenario 5: API — /api/diagnostics/weekday-gaps?status=..., 잘못된 상태는 400
-async def api():
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=m.app), base_url="http://test") as c:
-        ok = await c.get("/api/diagnostics/weekday-gaps", params={"status": "excluded"}); assert ok.status_code == 200
-        body = ok.json(); assert body["status"] == "excluded" and body["naver"]["reasons"]["finished"] == 1 and body["kakao"]["reasons"]["ended"] == 1
-        assert (await c.get("/api/diagnostics/weekday-gaps")).json()["status"] is None
-        assert (await c.get("/api/diagnostics/weekday-gaps", params={"status": "엉뚱"})).status_code == 400
-asyncio.run(api())
 print("ALL OK")

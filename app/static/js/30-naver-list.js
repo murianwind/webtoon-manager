@@ -165,9 +165,7 @@ function renderNaverList() {
   rows = rows.filter((w) => matchesSearch(w, query, false));
 
   // 요일 탭 — 검색 중에는 요일과 상관없이 전체에서 찾는다(탭은 "전체"로 보이고, 검색을 지우면 보던 탭으로 돌아간다). 탭 옆 개수는 다른 필터를 적용한 뒤 기준이다.
-  rows = applyWeekdayTabs("naver-list", rows, {
-    query, tabsEl: document.getElementById("naver-list-weekday-tabs"), etcNoteEl: document.getElementById("naver-list-etc-note"), etcStatus: null, onChange: renderNaverList,
-  });
+  rows = applyWeekdayTabs("naver-list", rows, { query, tabsEl: document.getElementById("naver-list-weekday-tabs"), onChange: renderNaverList });
 
   rows = [...rows];
   if (sortBy === "author") {
@@ -182,7 +180,7 @@ function renderNaverList() {
   emptyMsg.classList.toggle("hidden", rows.length > 0);
   const shown = windowRows("naver-list", grid, rows, () => renderNaverList()); // 한 번에 다 그리면 브라우저가 멎는다 — 보이는 만큼만 만들고 이어서 그린다
   const built = reconcileGrid(grid, shown, "naver-list", naverListCache);
-  syncViewerRows(grid); // 지금 보이는 목록 기준으로 버튼 줄 수를 맞춘다(필터를 바꿀 때마다)
+  syncCardActionRows(grid); // 지금 보이는 목록 기준으로 뷰어/분석 줄을 맞춘다(필터를 바꿀 때마다)
   updateNaverListBulkBar(); // 남아 있는 카드의 체크 상태는 유지되므로, 선택 수만 다시 센다
   if (built > 0) {
     naverListBulkSelectStartScrollY = null; // 카드 구성이 바뀌었으니 "선택을 시작한 위치"도 다시 잡아야 함
@@ -235,7 +233,7 @@ async function pruneMissingViewerIcons() {
       }
     })
   );
-  syncViewerRows(document.getElementById("naver-list-grid")); // 뷰어에 있는 작품이 하나도 없으면 줄이 접힌다
+  syncCardActionRows(document.getElementById("naver-list-grid")); // 뷰어에 있는 작품이 하나도 없으면 줄이 접힌다
 }
 
 function updateNaverListBulkBar() {
@@ -343,7 +341,51 @@ function patchWebtoonListCard(titleId, webtoon, newStatus, everSubscribed, platf
   renderNaverList();
 }
 
-document.getElementById("btn-refresh-naver-list").addEventListener("click", () => loadNaverList(true));
+// "새로고침" — 목록을 다시 받은 뒤, 오늘/선택한 요일/기타만 범위로 빠른 상태 스캔(완결/휴재/요일)을 요청하고, 스캔이 끝나면 목록을 한 번 더 불러와 알아낸 요일/완결이 바로 보이게 한다.
+// 제외됨은 이 새로고침이 아니라 수동 실행의 "빠른 상태 스캔"(전체)과 매일 새벽 자동 스캔으로 갱신된다.
+const QUICK_SCAN_POLL_MS = 2000;
+const QUICK_SCAN_MAX_POLLS = 60; // 최대 2분
+let quickScanWatchToken = 0;
+
+function priorityScanScope() {
+  const scope = new Set(["etc", weekdayKeyOf(currentDate())]);
+  const selected = listWindow("naver-list").tab;
+  if (WEEKDAY_TABS.some((tab) => tab.key === selected && tab.key !== "etc" && tab.key !== "all")) scope.add(selected);
+  return [...scope];
+}
+
+async function refreshNaverListWithPriorityScan() {
+  await loadNaverList(true);
+  let previousStartedAt = null;
+  try {
+    previousStartedAt = ((await apiCall("/api/jobs/status")).quick_scan || {}).started_at || null;
+    await apiCall("/api/jobs/quick-scan/run", { method: "POST", body: JSON.stringify({ scope: priorityScanScope() }) });
+  } catch (e) {
+    return; // 스캔 요청이 안 돼도 새로고침 자체는 끝났다
+  }
+  watchQuickScanThenReload(previousStartedAt);
+}
+
+// 새로 시작한 스캔(시작 시각이 바뀜)이 끝나면 목록을 한 번 다시 불러온다. 연달아 누르면 앞의 감시는 버린다.
+async function watchQuickScanThenReload(previousStartedAt) {
+  const token = ++quickScanWatchToken;
+  for (let poll = 0; poll < QUICK_SCAN_MAX_POLLS; poll++) {
+    await new Promise((resolve) => setTimeout(resolve, QUICK_SCAN_POLL_MS));
+    if (token !== quickScanWatchToken) return;
+    let job;
+    try {
+      job = (await apiCall("/api/jobs/status")).quick_scan;
+    } catch (e) {
+      continue;
+    }
+    if (job && job.started_at !== previousStartedAt && job.status !== "running") {
+      if (job.status === "success") await loadNaverList(true);
+      return;
+    }
+  }
+}
+
+document.getElementById("btn-refresh-naver-list").addEventListener("click", refreshNaverListWithPriorityScan);
 // 검색/필터/정렬을 바꾸면 다시 처음 쪽부터 그린다(resetListWindow). 검색 입력은 멈춘 뒤에 한 번만(debounce) — 글자마다 다시 걸러서 그리면 멎는다.
 document.getElementById("naver-list-search").addEventListener("input", debounce(() => {
   resetListWindow("naver-list");

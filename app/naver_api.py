@@ -163,7 +163,7 @@ async def fetch_title_weekdays(session: aiohttp.ClientSession, title_id: str, ti
     """작품의 연재 요일/완결 표시를 알아낸다 — 작품 정보 API(publishDayOfWeekList)가 먼저다. 휴재 중인 성인(18세) 작품은 요일별 목록에서도 빠지고 로그인 없이 읽는
     모바일 작품 페이지에도 요일 칸이 없어서 "기타"에 남았는데, 정보 API는 요일을 준다(실제 응답으로 확인). 정보 API가 실패했거나(HTTP 오류/예외/JSON 아님)
     요일이 비어 있는데 완결도 아니면 모바일 작품 페이지(fetch_title_page)로 한 번 더 확인한다. 둘 다 요일을 못 얻으면 정보 API의 상태를 남긴다(진단용)."""
-    info_status, days, finished = None, [], None
+    info_status, days, finished, paused = None, [], None, None
     try:
         async with session.get(
             NAVER_INFO_URL, params={"titleId": title_id}, headers=DEFAULT_HEADERS, timeout=aiohttp.ClientTimeout(total=timeout_seconds)
@@ -173,18 +173,19 @@ async def fetch_title_weekdays(session: aiohttp.ClientSession, title_id: str, ti
                 raw = await response.json()
                 days = weekdays.from_naver(raw.get("publishDayOfWeekList"))
                 finished = bool(raw.get("finished"))
+                paused = bool(raw.get("rest"))
     except Exception as e:
         log.warning("작품 정보(요일) 요청 실패 (titleId=%s): %s", title_id, e)
-        info_status, days, finished = None, [], None
+        info_status, days, finished, paused = None, [], None, None
     if days or finished:
-        return TitlePage(status=200, days=days, finished=finished)
+        return TitlePage(status=200, days=days, finished=finished, paused=paused)
     page = await fetch_title_page(session, title_id, timeout_seconds)  # 정보 API가 실패했거나 요일이 비어 있다
     if page.status == 200 and page.days:
-        return TitlePage(status=200, days=page.days, finished=finished if finished is not None else page.finished)
+        return TitlePage(status=200, days=page.days, finished=finished if finished is not None else page.finished, paused=paused)
     if page.status == 200 and info_status != 200:
         return TitlePage(status=200, days=[], finished=page.finished)  # 정보 API는 실패했고 페이지는 읽었지만 요일이 없다
     if info_status == 200:
-        return TitlePage(status=200, days=[], finished=finished)  # 정보 API도 페이지도 요일이 없다(완결 아님) — "요일 없음"
+        return TitlePage(status=200, days=[], finished=finished, paused=paused)  # 정보 API도 페이지도 요일이 없다(완결 아님) — "요일 없음"
     return TitlePage(status=info_status if info_status is not None else page.status, days=[], finished=None)
 
 

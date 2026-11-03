@@ -165,5 +165,13 @@ async def main():
         await weekday_lookup.run(["9801"], 5)
         assert weekdays._get_lookup()["9801"]["ok"] is False and weekdays._get_lookup()["9801"]["http"] == 403, "실패는 HTTP 상태를 남긴다"
         print("10) 조회 결과의 상태/완결 저장 OK")
+
+        # Scenario 11: 결과를 적용하는 공용 함수(apply_page — 빠른 상태 스캔과 백그라운드 조회가 같이 쓴다) — 휴재(paused)도 추적 작품에 저장한다(True/False 그대로, 모르면 None이라 건드리지 않는다). 추적하지 않는 작품은 조회 결과만 남긴다
+        repository.upsert_new("9811", "작품9811"); repository.set_status("9811", repository.STATUS_EXCLUDED)
+        weekday_lookup.apply_page("9811", TitlePage(status=200, days=["thu"], finished=False, paused=True)); assert repository.get("9811").is_paused is True and weekdays._get_lookup()["9811"]["days"] == ["thu"]
+        weekday_lookup.apply_page("9811", TitlePage(status=200, days=["thu"], finished=False, paused=False)); assert repository.get("9811").is_paused is False, "휴재가 풀리면 해제"
+        weekday_lookup.apply_page("9811", TitlePage(status=200, days=["thu"], finished=False, paused=None)); assert repository.get("9811").is_paused is False, "모르면(None) 그대로"
+        weekday_lookup.apply_page("never-tracked", TitlePage(status=200, days=["mon"], finished=True, paused=True)); assert weekdays._get_lookup()["never-tracked"]["days"] == ["mon"] and repository.get("never-tracked") is None
+        print("11) 결과 적용(휴재 포함) OK")
 asyncio.run(main())
 print("ALL OK")

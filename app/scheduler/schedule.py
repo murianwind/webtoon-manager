@@ -16,6 +16,7 @@ from app.scheduler.archive_job import (
 from app.scheduler.common import (
     DEFAULT_SCHEDULES,
 )
+from app.scheduler.quick_scan_job import run_quick_scan_nightly
 from app.scheduler.discovery_job import (
     run_discovery_job,
     run_kakao_catalog_refresh_job,
@@ -99,6 +100,8 @@ def create_scheduler() -> AsyncIOScheduler:
     # 다운로드 리포트 발송 확인(1분마다, 저장된 상태만 봄) — 다운로드 후 모으기/발송하지 않는 시간/뷰어 스캔을 처리한다(report_tick.run_report_tick)
     scheduler.add_job(run_report_tick, trigger=IntervalTrigger(minutes=1), id="report_tick", max_instances=1)
     # 사용자가 설정하는 스케줄이 아니라 고정된 내부 작업 — 설정 화면의 스케줄 저장/재등록과 무관하게 항상 돈다
+    # 매일 새벽 0시 30분(한국시간)에 빠른 상태 스캔 — 시간이 지나면서 바뀌는 완결/휴재/요일을 요일별 목록에서 빠진 작품까지 매일 확인한다(설정 화면에는 따로 두지 않는다)
+    scheduler.add_job(run_quick_scan_nightly, trigger=CronTrigger(hour=0, minute=30, timezone="Asia/Seoul"), id="quick_scan_nightly", max_instances=1)
     scheduler.add_job(
         run_kakao_catalog_refresh_job, trigger=IntervalTrigger(minutes=kakao_catalog.REFRESH_INTERVAL_MINUTES),
         id="kakao_catalog_refresh",

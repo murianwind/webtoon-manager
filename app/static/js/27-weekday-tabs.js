@@ -74,12 +74,11 @@ function renderWeekdayTabs(container, counts, active, onSelect) {
   if (selected && container.scrollWidth > container.clientWidth) container.scrollLeft = selected.offsetLeft - (container.clientWidth - selected.offsetWidth) / 2;
 }
 
-// 요일 탭을 적용한다 — rows(다른 필터를 이미 적용한 목록)로 탭 개수를 세고, 탭 줄을 그리고, 고른 탭의 작품만 돌려준다. 검색 중이면 "전체". 기타를 볼 때는 원인 안내도 보여 준다.
+// 요일 탭을 적용한다 — rows(다른 필터를 이미 적용한 목록)로 탭 개수를 세고, 탭 줄을 그리고, 고른 탭의 작품만 돌려준다. 검색 중이면 "전체".
 // ctx: 화면 이름(화면마다 고른 탭을 따로 기억한다). 탭을 누르면 고른 탭을 기억하고 그리는 개수를 처음으로 돌린 뒤 onChange()로 다시 그리게 한다.
-function applyWeekdayTabs(ctx, rows, { query, tabsEl, etcNoteEl, etcStatus, onChange }) {
+function applyWeekdayTabs(ctx, rows, { query, tabsEl, onChange }) {
   const counts = weekdayTabCounts(rows);
   const activeTab = resolveActiveWeekdayTab(ctx, query, counts);
-  showEtcDiagnostics(etcNoteEl, etcStatus, activeTab); // 기타를 볼 때만 "왜 요일을 모르는지" 원인을 보여 준다
   renderWeekdayTabs(tabsEl, counts, activeTab, (key) => {
     listWindow(ctx).tab = key;
     resetListWindow(ctx);

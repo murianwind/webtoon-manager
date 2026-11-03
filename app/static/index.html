@@ -62,7 +62,6 @@
         <button id="btn-bulk-exclude-naver-list">선택 항목 제외됨으로 이동</button>
       </div>
     </div>
-    <p id="naver-list-etc-note" class="hint hidden"></p>
     <div id="naver-list-grid" class="webtoon-grid"></div>
     <p id="naver-list-empty" class="hidden empty-message">불러온 목록이 없습니다.</p>
   </section>
@@ -107,8 +106,6 @@
       </div>
       <div id="excluded-weekday-tabs" class="weekday-tabs" role="tablist"></div>
     </div>
-    <p id="excluded-finished-note" class="hint hidden"></p>
-    <p id="excluded-etc-note" class="hint hidden"></p>
     <div id="excluded-list" class="webtoon-grid"></div>
     <p id="excluded-empty" class="hidden empty-message">목록에서 제외한 웹툰이 없습니다.</p>
   </section>
@@ -569,6 +566,7 @@
     <div class="settings-card">
       <div class="manual-run-buttons">
         <button id="btn-run-discovery">신작 스캔 실행</button>
+  <button id="btn-run-quick-scan">빠른 상태 스캔</button>
         <select id="run-download-target" class="run-target-select">
             <option value="">스케줄에 등록된 대상</option>
             <option value="naver">네이버만</option>
@@ -579,11 +577,17 @@
         <button id="btn-run-metadata-sync">메타 동기화</button>
         <button id="btn-run-report">리포트 발송</button>
       </div>
-      <p class="hint">메타 동기화: 받은 작품 폴더의 info.xml과 커버 이미지를 최신 정보로 <strong>새로 교체</strong>합니다(이미 있어도 덮어씀 — 받기 실패 시 기존 파일은 그대로 남습니다). 카카오웹툰 관리를 켰으면 카카오페이지 작품도 함께 처리하므로, 예전 카카오웹툰에서 받은 커버와 info.xml도 카카오페이지 것으로 바뀝니다.</p>
+      <p class="hint">빠른 상태 스캔: 완결·휴재·판매 중지·요일만 가볍게 확인합니다(작가/태그 등록 같은 무거운 일은 안 합니다). <strong>요일을 모르는 작품("기타")을 먼저</strong>, 이어서 오늘 요일부터 요일별로 차례로 확인하고, 최근에 확인한 작품은 건너뜁니다. 요일별 목록에 없는 작품(장기 휴재, 판매 중지 등)이 대상이며 <strong>매일 새벽 0시 30분에도 자동으로 실행</strong>됩니다. 결과와 "기타에 남은 이유"는 아래 상태 로그와 설정의 실행 이력에 남습니다. 제외됨 목록은 이 버튼이나 자동 실행으로 갱신됩니다.</p>
+
+  <p class="hint">메타 동기화: 받은 작품 폴더의 info.xml과 커버 이미지를 최신 정보로 <strong>새로 교체</strong>합니다(이미 있어도 덮어씀 — 받기 실패 시 기존 파일은 그대로 남습니다). 카카오웹툰 관리를 켰으면 카카오페이지 작품도 함께 처리하므로, 예전 카카오웹툰에서 받은 커버와 info.xml도 카카오페이지 것으로 바뀝니다.</p>
 
       <div class="job-status-block">
         <h3>신작 스캔 상태 <span id="discovery-status-badge" class="badge">idle</span></h3>
         <div id="discovery-log" class="job-log"></div>
+      </div>
+      <div class="job-status-block">
+        <h3>빠른 상태 스캔 <span id="quick_scan-status-badge" class="badge">idle</span></h3>
+        <div id="quick_scan-log" class="job-log"></div>
       </div>
       <div class="job-status-block">
         <h3>다운로드 상태 <span id="download-status-badge" class="badge">idle</span></h3>
@@ -785,7 +789,6 @@
   <script src="/js/10-tabs.js"></script>
   <script src="/js/20-cards.js"></script>
   <script src="/js/25-list-view.js"></script>
-  <script src="/js/26-etc-diagnostics.js"></script>
   <script src="/js/27-weekday-tabs.js"></script>
   <script src="/js/28-list-filters.js"></script>
   <script src="/js/30-naver-list.js"></script>

@@ -10,6 +10,14 @@ from app import kakao_catalog, kakao_status, repository, weekdays
 
 SAMPLE_LIMIT = 5
 
+# 이력(작업 로그)에 남길 문장의 원인 이름 — 화면에는 보여 주지 않고 빠른 상태 스캔 로그에 한 줄로 남긴다
+REASON_LABELS = {
+    "naver": {"finished": "완결", "no_weekday_on_page": "요일 정보 없음", "check_failed": "확인 실패", "pending": "요일 확인 대기"},
+    "kakao": {"finished": "완결", "ended": "서비스 종료", "sale_stopped": "판매 중지", "hiatus": "휴재", "serving_not_listed": "연재 중이지만 요일 목록에 없음",
+              "check_failed": "확인 실패", "pending": "상태 확인 대기", "catalog_not_loaded": "요일 목록 미확인"},
+}
+PLATFORM_NAMES = {"naver": "네이버", "kakao": "카카오"}
+
 
 def _failed_label(http: int | None) -> str:
     return "network" if http is None else str(http)
@@ -81,6 +89,34 @@ def _kakao_entries(wanted: str | None) -> list[tuple[str, str, int | None]]:
         else:
             entries.append(("check_failed", title, entry.get("http")))
     return entries
+
+
+def _failed_detail(failed_http: dict[str, int]) -> str:
+    return ", ".join(f"{'네트워크 오류' if key == 'network' else 'HTTP ' + key} {count}" for key, count in failed_http.items())
+
+
+def describe(summary: dict) -> str:
+    """summarize 결과를 한 줄 문장으로 — 개수가 0인 플랫폼은 뺀다. 설명할 게 없으면 빈 문자열."""
+    parts = []
+    for platform in ("naver", "kakao"):
+        side = summary[platform]
+        if not side["total"]:
+            continue
+        items = []
+        for reason, label in REASON_LABELS[platform].items():
+            if side["reasons"].get(reason):
+                detail = _failed_detail(side["failed_http"]) if reason == "check_failed" else ""
+                items.append(f"{label} {side['reasons'][reason]}" + (f"({detail})" if detail else ""))
+        parts.append(f"{PLATFORM_NAMES[platform]} {side['total']}개: {' · '.join(items)}")
+    return f"기타 원인 — {' / '.join(parts)}" if parts else ""
+
+
+def hidden_excluded_count() -> int:
+    """제외됨 목록에서 가려지는 작품 수 — 완결(네이버: DB 완결, 카카오: DB 완결 또는 상태 확인의 완결·서비스 종료·판매 중지)."""
+    naver = sum(1 for wt in repository.list_all() if wt.status == repository.STATUS_EXCLUDED and wt.is_finished)
+    hidden = kakao_status.hidden_ids()
+    kakao = sum(1 for row in repository.get_kakao_webtoons_map().values() if row["status"] == repository.STATUS_EXCLUDED and (row["is_finished"] or row["title_id"] in hidden))
+    return naver + kakao
 
 
 def summarize(status: str | None = None) -> dict:

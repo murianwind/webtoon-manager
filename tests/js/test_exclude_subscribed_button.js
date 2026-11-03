@@ -17,8 +17,8 @@ const { naver, kakao } = require("./factories");
   const buttons = (c) => [...c.querySelectorAll(".webtoon-card-actions button")].map((b) => b.textContent);
 
   // Scenario 1: 구독 중 카드에는 "구독해제"와 "제외됨으로"가 있고, 구독하지 않은 카드에는 "제외됨으로"가 없다(거긴 "구독"/"목록제외")
-  ok(JSON.stringify(buttons(card("네이버 구독 중"))) === JSON.stringify(["구독해제", "제외됨으로"]), "네이버 구독 중: " + buttons(card("네이버 구독 중")));
-  ok(JSON.stringify(buttons(card("카카오 구독 중"))) === JSON.stringify(["구독해제", "제외됨으로"]), "카카오 구독 중: " + buttons(card("카카오 구독 중")));
+  ok(JSON.stringify(buttons(card("네이버 구독 중"))) === JSON.stringify(["구독해제", "제외됨으로", "분석"]), "네이버 구독 중(뷰어 서버가 없으면 아래 줄 분석): " + buttons(card("네이버 구독 중")));
+  ok(JSON.stringify(buttons(card("카카오 구독 중"))) === JSON.stringify(["구독해제", "제외됨으로", "분석"]), "카카오 구독 중: " + buttons(card("카카오 구독 중")));
   ok(!buttons(card("네이버 미등록")).includes("제외됨으로") && !buttons(card("카카오 미등록")).includes("제외됨으로"), "미등록 카드에는 없다");
 
   // Scenario 2: 확인 창을 취소하면 요청이 나가지 않고, 안내에 다운로드 중단/다시 구독 안 함/받은 파일 유지가 들어 있다

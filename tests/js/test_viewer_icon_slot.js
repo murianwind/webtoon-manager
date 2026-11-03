@@ -1,5 +1,4 @@
-// 웹툰 전체목록 카드: 뷰어에 없는 작품도 뷰어 아이콘 자리를 비워 두어서(숨김), 뷰어가 있든 없든 "구독해제" 버튼이 같은 줄에 정렬된다.
-// (예전엔 뷰어에 없는 작품의 아이콘을 지워서 카드마다 버튼 줄 수가 달랐고, 카드 아래쪽 정렬이라 "구독해제"가 위아래로 어긋났다)
+// 웹툰 전체목록 카드: 뷰어에 없는 작품의 뷰어 아이콘은 지우지 않고 숨기며(눌리지 않음, 줄도 안 차지함), 그 카드의 셋째 줄은 분석 버튼이 차지해서 뷰어가 있든 없든 "구독해제" 버튼이 같은 줄에 정렬된다.
 const { makeApp, sleep, idle, ok, done } = require("./harness");
 const { naver: plainNaver, kakao: plainKakao, subscribed } = require("./factories");
 const naver = subscribed(plainNaver), kakao = subscribed(plainKakao); // 이 테스트의 작품은 기본이 구독 중(뷰어 아이콘은 구독 중 카드에만 붙는다)
@@ -17,16 +16,17 @@ const naver = subscribed(plainNaver), kakao = subscribed(plainKakao); // 이 테
   const viewer = (c) => c.querySelector("[data-viewer-check-title]");
 
   const withViewer = card("뷰어에 있는 작품"), noNaver = card("뷰어에 없는 네이버 작품"), noKakao = card("뷰어에 없는 카카오 작품");
-  // Scenario 1: 뷰어에 있든 없든 카드마다 버튼 줄 수가 같다(구독해제 … 뷰어 자리)
-  const counts = [withViewer, noNaver, noKakao].map((c) => rows(c).length);
-  ok(counts[0] >= 2 && counts.every((n) => n === counts[0]), "카드마다 버튼 줄 수가 같다: " + counts);
-  // Scenario 2: 구독해제는 모든 카드에서 첫 줄이고, 뷰어 아이콘은 모든 카드에서 마지막 줄 — 위아래로 같은 줄에 정렬된다
-  ok([withViewer, noNaver, noKakao].every((c) => rows(c)[0].textContent === "구독해제" && rows(c)[rows(c).length - 1] === viewer(c)), "구독해제는 첫 줄, 뷰어 자리는 마지막 줄");
-  // Scenario 3: 뷰어에 없는 작품의 아이콘은 지우지 않고 자리만 남긴다(눈에 안 보이고 눌리지 않음), 있는 작품의 아이콘은 그대로 보인다
+  // Scenario 1: 뷰어에 있든 없든 카드마다 보이는 줄 수가 같다(구독해제 / 제외됨으로 / 뷰어+분석 또는 분석) — 숨긴 아이콘은 줄을 차지하지 않는다
+  const visibleRows = (c) => rows(c).filter((el) => el.style.display !== "none");
+  const counts = [withViewer, noNaver, noKakao].map((c) => visibleRows(c).length);
+  ok(counts[0] === 3 && counts.every((n) => n === counts[0]), "카드마다 보이는 줄 수가 같다: " + counts);
+  // Scenario 2: 구독해제는 모든 카드에서 첫 줄이고, 셋째 줄에는 분석 버튼이 있다(뷰어에 있는 카드는 아이콘 옆, 없는 카드는 단독) — 위아래로 같은 줄에 정렬된다
+  ok([withViewer, noNaver, noKakao].every((c) => visibleRows(c)[0].textContent === "구독해제" && (visibleRows(c)[2].dataset.analyze === "1" || visibleRows(c)[2].querySelector("[data-analyze]") !== null)), "구독해제는 첫 줄, 셋째 줄에 분석");
+  // Scenario 3: 뷰어에 없는 작품의 아이콘은 지우지 않되 눈에 안 보이고 눌리지 않으며 줄도 차지하지 않는다, 있는 작품의 아이콘은 그대로 보인다
   ok(viewer(withViewer).style.visibility !== "hidden" && !viewer(withViewer).disabled, "뷰어에 있는 작품: 아이콘이 보이고 눌린다");
   for (const c of [noNaver, noKakao]) {
     const b = viewer(c);
-    ok(!!b && b.style.visibility === "hidden" && b.disabled === true && b.getAttribute("aria-hidden") === "true" && b.tabIndex === -1, "뷰어에 없는 작품: 자리만 남고 숨김/비활성");
+    ok(!!b && b.style.visibility === "hidden" && b.disabled === true && b.getAttribute("aria-hidden") === "true" && b.tabIndex === -1 && b.style.display === "none", "뷰어에 없는 작품: 숨김/비활성, 줄 없음");
   }
   done();
 })();

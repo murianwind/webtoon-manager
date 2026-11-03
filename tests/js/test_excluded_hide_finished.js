@@ -1,5 +1,5 @@
 // 제외됨 화면은 완결 웹툰을 보여 주지 않는다 — 완결 작품은 수동 다운로드에서 분석해서 구독할 수 있으니 제외됨 목록에 쌓아 둘 필요가 없다.
-// (요일별 탭의 개수, 검색, "기타" 탭 모두에서 빠지고, 안내 줄에 몇 개를 숨겼는지 알려 준다. 구독해제 화면과 전체목록은 그대로.)
+// (요일별 탭의 개수, 검색, "기타" 탭 모두에서 빠진다. 몇 개를 숨겼는지는 화면이 아니라 실행 이력에 남긴다. 구독해제 화면과 전체목록은 그대로.)
 const { makeApp, sleep, idle, ok, done } = require("./harness");
 const { listItem } = require("./factories");
 (async () => {
@@ -35,10 +35,9 @@ const { listItem } = require("./factories");
   $("excluded-search").value = ""; $("excluded-search").dispatchEvent(new w.Event("input")); await wait(350); await idle();
   showExcluded(rows);
 
-  // Scenario 2: 안내 줄 — 몇 개를 숨겼는지(수동 다운로드에서 구독할 수 있다는 안내와 함께). 숨길 게 없으면 줄도 숨긴다. 검색/필터와 상관없이 숨긴 전체 개수
-  ok(note() && !note().classList.contains("hidden") && /완결 웹툰 3개/.test(note().textContent) && /수동 다운로드/.test(note().textContent), "안내 줄: " + (note() && note().textContent.trim()));
-  showExcluded(rows.filter((r) => !r.is_finished)); ok(note().classList.contains("hidden"), "숨긴 것이 없으면 안내 줄도 없다");
-  showExcluded([mk("naver", 9, "완결뿐", [], { is_finished: true })]); ok(titles("excluded-list").length === 0 && !$("excluded-empty").classList.contains("hidden") && /완결 웹툰 1개/.test(note().textContent), "완결만 있으면 빈 목록 + 안내");
+  // Scenario 2: 몇 개를 숨겼는지는 화면에 띄우지 않는다(빠른 상태 스캔의 실행 이력에 남긴다) — 안내 줄 칸 자체가 없다. 완결만 있으면 빈 목록 안내
+  ok(!note(), "안내 줄 칸이 없다");
+  showExcluded([mk("naver", 9, "완결뿐", [], { is_finished: true })]); ok(titles("excluded-list").length === 0 && !$("excluded-empty").classList.contains("hidden"), "완결만 있으면 빈 목록 + 안내");
 
   // Scenario 3: 구독해제 화면과 전체목록은 그대로 — 완결이어도 보인다
   w.__unsub = [mk("naver", 21, "구독해제 완결", [], { status: "unsubscribed", ever_subscribed: true, is_finished: true })];
