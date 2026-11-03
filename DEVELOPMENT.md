@@ -319,3 +319,9 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - **상단 메뉴 높이**: 툴바는 `top: var(--nav-h, 41px)`에 고정된다. 창이 좁으면 상단 메뉴(`.main-tabs`)가 두 줄로 접혀 높이가 달라지므로(41px → 85px) **`syncStickyOffsets`가 실제 높이를 재서 `--nav-h`에 넣고** 창 크기가 바뀔 때(`resize`)와 `ResizeObserver`(글꼴이 늦게 불러와질 때)마다 갱신한다 — 41px로 가정하면 검색창/요일 탭이 메뉴 뒤에 가려진다. 모바일은 메뉴가 한 줄 고정 높이(`--m-nav-h`)라 CSS가 따로 계산한다.
 - **요일 탭 줄의 작은 스크롤바/끌면 움직이는 문제**: 원인은 `overflow-x: auto`(→ `overflow-y`도 auto가 된다)인 줄 안에서 탭 버튼이 `margin-bottom: -1px`로 아래 선 위에 겹쳐 줄이 세로로 1px 넘친 것이다. `overflow-y: hidden`으로 세로 스크롤을 막고, 음수 마진 대신 **아래 선을 안쪽 그림자(`box-shadow: inset 0 -1px 0`)로** 그려서 겹침 자체를 없앴고, 가로 밀기가 페이지로 번지지 않게 `overscroll-behavior-x: contain`을 줬다. 브라우저 측정: 탭 줄 세로 넘침 0, 세로로 끌어도 움직이지 않음(PC 1232/900/700px, 모바일 390px). 테스트: `tests/js/test_list_header_and_sticky.js`.
 
+## 설정에 JSON 한 덩어리로 저장하는 상태는 잠금으로 보호한다 (CI 실패 사례)
+
+- **무슨 일이 있었나**: GitHub Actions에서 `test_naver_weekday_lookup`이 `KeyError: '9701'`로 실패했다(로컬에서는 통과). 원인은 **동시 저장 때 앞의 결과가 사라지는 경쟁 상태**였다. 요일 조회 결과(`weekdays.save_lookup`)는 작품 전체를 JSON 한 덩어리로 저장해서 "읽고 → 바꾸고 → 쓰기"를 하는데, 스레드(`asyncio.to_thread`)에서 동시에 저장하면 뒤에 쓴 쪽이 앞의 결과를 덮어쓴다. 앞 시나리오의 백그라운드 조회가 아직 도는 중에 다음 시나리오가 저장하면서 CI(느린 환경)에서 겹친 것이다. 로컬 재현: 8개 스레드로 120건을 동시에 저장하면 29~46건만 남았다.
+- **고친 것**: `weekdays.save_lookup`(`_lookup_lock`), `report_dispatch.update_state`/`finish_cycle`/`note_download_finished`(`_state_lock`, 서로를 부르므로 `RLock`), `viewer_scan.update_state`/`request`(`_state_lock`)를 잠금으로 한 덩어리로 보호한다. 운영에서는 요일 조회가 한 번에 하나씩(`_weekday_lookup_task`)이라 드물지만, 리포트/스캔 상태는 작업 종료 리스너나 알림이 서로 다른 스레드에서 올 수 있어 같은 위험이 있었다(동시 갱신 36/120 유실을 재현). 테스트: 세 곳 모두 8개 스레드로 120건을 동시에 갱신해서 하나도 안 사라지는지 확인한다(잠금을 빼면 실패). 요일 조회 테스트의 "작품 하나 실패" 시나리오는 앞 시나리오의 백그라운드 조회가 끝난 뒤에 시작하도록 해서 결정적으로 만들었다.
+- **새로 만들 때 규칙**: 설정(`repository.set_setting`)에 여러 항목을 JSON 한 덩어리로 넣고 일부만 바꾸는 상태를 만들면, 두 스레드가 동시에 바꿀 수 있는지 따져 보고 읽고-바꾸고-쓰기 전체를 같은 잠금으로 감싼다(이벤트 루프 한 스레드에서만 부르면 필요 없다).
+

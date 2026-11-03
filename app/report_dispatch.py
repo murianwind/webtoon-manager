@@ -10,6 +10,7 @@
   scan_requested: 이 묶음에서 뷰어 스캔을 이미 요청했다 / scan_started_at: 리포트가 스캔을 기다리기 시작한 시각(최대 대기 계산용) / scan_done: 기다림이 끝났다(스캔 반영/실패/시간 초과).
 """
 import json
+import threading
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -112,6 +113,11 @@ def set_batch_minutes(minutes: int) -> None:
 
 # ── 발송 상태 ─────────────────────────────────────────────────────────
 
+# 상태는 JSON 한 덩어리를 "읽고 → 바꾸고 → 쓰기"로 갱신한다. 다른 스레드에서 동시에 갱신하면(작업 종료 리스너 등) 뒤에 쓴 쪽이 앞의 갱신을 지우므로 잠금으로 한 덩어리로 보호한다
+# (같은 스레드에서 update_state를 다시 부르는 finish_cycle/note_download_finished가 있어서 다시 잠글 수 있는 RLock).
+_state_lock = threading.RLock()
+
+
 def _empty_state() -> dict:
     return {"last_download_at": None, "cutoff": None, "scan_requested": False, "scan_started_at": None, "scan_done": False}
 
@@ -126,9 +132,10 @@ def load_state() -> dict:
 
 def update_state(**fields) -> dict:
     """저장된 상태에 이 칸들만 덮어쓴다(다운로드가 끝났다는 기록 같은 다른 칸을 건드리지 않게 읽고-바꾸고-쓰기를 한 번에 한다)."""
-    state = {**load_state(), **fields}
-    repository.set_setting(STATE_KEY, json.dumps(state))
-    return state
+    with _state_lock:
+        state = {**load_state(), **fields}
+        repository.set_setting(STATE_KEY, json.dumps(state))
+        return state
 
 
 def clear_state() -> None:
@@ -137,11 +144,12 @@ def clear_state() -> None:
 
 def finish_cycle(cutoff: str) -> None:
     """cutoff까지의 묶음을 보냈거나 보낼 것이 없어서 끝낸다. 그 사이에 새 다운로드가 끝났으면(cutoff보다 뒤) 다음 묶음으로 남겨 두고, 아니면 상태를 비운다."""
-    latest = load_state()
-    if latest["last_download_at"] and latest["last_download_at"] > cutoff:
-        repository.set_setting(STATE_KEY, json.dumps({**_empty_state(), "last_download_at": latest["last_download_at"]}))
-    else:
-        clear_state()
+    with _state_lock:
+        latest = load_state()
+        if latest["last_download_at"] and latest["last_download_at"] > cutoff:
+            repository.set_setting(STATE_KEY, json.dumps({**_empty_state(), "last_download_at": latest["last_download_at"]}))
+        else:
+            clear_state()
 
 
 def note_download_finished(now: datetime | None = None, started_at: str | None = None) -> None:
@@ -150,12 +158,13 @@ def note_download_finished(now: datetime | None = None, started_at: str | None =
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     if repository.get_setting(LAST_SENT_KEY) is None and started_at:
         repository.set_setting(LAST_SENT_KEY, started_at)
-    state = load_state()
-    fields = {"last_download_at": now.isoformat()}
-    # 묶음이 확정됐어도 아직 스캔이 진행 중이 아니면(시작 전이거나, 끝나고 발송하지 않는 시간을 기다리는 중) 다시 열어서 새로 끝난 다운로드까지 한 통으로 보낸다.
-    if state["cutoff"] and not (state["scan_started_at"] and not state["scan_done"]):
-        fields.update(cutoff=None, scan_requested=False, scan_started_at=None, scan_done=False)
-    update_state(**fields)
+    with _state_lock:
+        state = load_state()
+        fields = {"last_download_at": now.isoformat()}
+        # 묶음이 확정됐어도 아직 스캔이 진행 중이 아니면(시작 전이거나, 끝나고 발송하지 않는 시간을 기다리는 중) 다시 열어서 새로 끝난 다운로드까지 한 통으로 보낸다.
+        if state["cutoff"] and not (state["scan_started_at"] and not state["scan_done"]):
+            fields.update(cutoff=None, scan_requested=False, scan_started_at=None, scan_done=False)
+        update_state(**fields)
 
 
 def on_job_finished(job_name: str) -> None:

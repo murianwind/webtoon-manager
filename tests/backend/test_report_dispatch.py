@@ -162,4 +162,11 @@ add_row("둘째묶음실패", T0 + MIN(20), status="failed"); rd.note_download_f
 add_row("셋째묶음", T0 + MIN(40)); rd.note_download_finished(T0 + MIN(40)); tick(T0 + MIN(50)); assert len(SCAN["start"]) == 2, SCAN             # 새로 받은 것이 있으면 다시
 discord_config.set_webhook_url("https://discord.com/api/webhooks/1/test")
 print("11) 공용 스캔/실패만/수동 다운로드/워터마크 OK")
+# Scenario 12: 상태 저장은 동시에 일어나도 서로 덮어쓰지 않는다 — 상태는 JSON 한 덩어리를 읽고-바꾸고-쓰는 방식이라, 다른 스레드에서 동시에 갱신하면(작업 종료 리스너 등) 보호하지 않으면 앞의 갱신이 사라진다
+from concurrent.futures import ThreadPoolExecutor
+repository.set_setting(rd.STATE_KEY, None)
+with ThreadPoolExecutor(8) as pool: list(pool.map(lambda i: rd.update_state(**{f"k{i}": i}), range(120)))
+assert all(f"k{i}" in rd.load_state() for i in range(120)), f"동시에 갱신하면 사라진다: {sum(1 for i in range(120) if f'k{i}' in rd.load_state())}/120"
+repository.set_setting(rd.STATE_KEY, None)
+print("12) 동시 갱신 OK")
 print("ALL OK")

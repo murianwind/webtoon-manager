@@ -8,6 +8,7 @@
 """
 import json
 import re
+import threading
 import time
 
 from app import repository
@@ -79,11 +80,16 @@ def _get_lookup() -> dict[str, dict]:
     return data if isinstance(data, dict) else {}
 
 
+# 조회 결과는 작품 전체를 한 덩어리 JSON으로 저장해서 "읽고 → 바꾸고 → 쓰기"를 한다. 스레드(asyncio.to_thread)에서 동시에 저장하면 뒤에 쓴 쪽이 앞의 결과를 지워 버리므로 잠금으로 한 덩어리로 보호한다.
+_lookup_lock = threading.Lock()
+
+
 def save_lookup(title_id: str, days: list[str] | None, now: float | None = None) -> None:
-    """작품 하나를 알아본 결과를 저장한다. days=None이면 요청이 실패한 것(요일이 없는 것과 구분해서 하루 뒤에 다시 시도)."""
-    lookup = _get_lookup()
-    lookup[title_id] = {"ok": days is not None, "days": days or [], "at": now if now is not None else time.time()}
-    repository.set_setting(LOOKUP_KEY, json.dumps(lookup, ensure_ascii=False))
+    """작품 하나를 알아본 결과를 저장한다. days=None이면 요청이 실패한 것(요일이 없는 것과 구분해서 하루 뒤에 다시 시도). 동시에 불려도 서로의 결과를 덮어쓰지 않는다."""
+    with _lookup_lock:
+        lookup = _get_lookup()
+        lookup[title_id] = {"ok": days is not None, "days": days or [], "at": now if now is not None else time.time()}
+        repository.set_setting(LOOKUP_KEY, json.dumps(lookup, ensure_ascii=False))
 
 
 def pending_lookup_ids(title_ids: list[str], now: float | None = None) -> list[str]:

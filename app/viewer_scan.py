@@ -12,6 +12,7 @@
 """
 import json
 import logging
+import threading
 from datetime import datetime, timedelta, timezone
 
 from app import job_status, repository, webtoon_server_client
@@ -64,6 +65,8 @@ def is_ready() -> bool:
 # ── 요청/진행 상태 ───────────────────────────────────────────────────
 
 STATE_KEY = "viewer_scan_state"
+# 상태는 JSON 한 덩어리를 "읽고 → 바꾸고 → 쓰기"로 갱신한다 — 아카이빙 쪽 알림(request)과 1분 확인(tick)이 다른 스레드에서 겹쳐도 서로의 갱신을 지우지 않게 잠금으로 보호한다.
+_state_lock = threading.RLock()
 
 
 def _empty_state() -> dict:
@@ -86,9 +89,10 @@ def load_state() -> dict:
 
 
 def update_state(**fields) -> dict:
-    state = {**load_state(), **fields}
-    repository.set_setting(STATE_KEY, json.dumps(state))
-    return state
+    with _state_lock:
+        state = {**load_state(), **fields}
+        repository.set_setting(STATE_KEY, json.dumps(state))
+        return state
 
 
 def _iso(when: datetime) -> str:
@@ -107,12 +111,13 @@ def request(when: datetime) -> None:
     """when 시각에 뷰어가 훑어야 할 변경(새로 받거나 옮긴 파일)이 생겼다고 기록한다 — 연동이 준비돼 있을 때만."""
     if not is_ready():
         return
-    state = load_state()
-    when_iso = _iso(when)
-    if state["started_at"] and state["started_at"] >= when_iso:
-        return  # 이미 그 변경 뒤에 시작한 스캔이 있다 — 그 스캔이 덮는다
-    if state["requested_at"] is None or state["requested_at"] < when_iso:
-        update_state(requested_at=when_iso)
+    with _state_lock:
+        state = load_state()
+        when_iso = _iso(when)
+        if state["started_at"] and state["started_at"] >= when_iso:
+            return  # 이미 그 변경 뒤에 시작한 스캔이 있다 — 그 스캔이 덮는다
+        if state["requested_at"] is None or state["requested_at"] < when_iso:
+            update_state(requested_at=when_iso)
 
 
 def note_library_changed(count: int, when: datetime | None = None) -> None:

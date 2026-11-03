@@ -126,4 +126,11 @@ async def api():
         reset(); api_archive.archiver.bulk_move_folder = lambda *a, **k: 7; await c.post("/api/archive/bulk-move", json=body); await wait_idle(); assert state()["requested_at"] is not None
 asyncio.run(api())
 print("9) 수동 아카이빙/일괄 이동 OK")
+# Scenario 10: 상태 저장은 동시에 일어나도 서로 덮어쓰지 않는다(JSON 한 덩어리를 읽고-바꾸고-쓰기) — 아카이빙이 끝났다는 알림과 1분 확인이 서로 다른 스레드에서 겹쳐도 요청이 사라지지 않아야 한다
+from concurrent.futures import ThreadPoolExecutor
+reset()
+with ThreadPoolExecutor(8) as pool: list(pool.map(lambda i: viewer_scan.update_state(**{f"k{i}": i}), range(120)))
+assert all(f"k{i}" in state() for i in range(120)), f"동시에 갱신하면 사라진다: {sum(1 for i in range(120) if f'k{i}' in state())}/120"
+reset()
+print("10) 동시 갱신 OK")
 print("ALL OK")

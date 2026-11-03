@@ -60,6 +60,16 @@ weekdays.save_naver_map({"A": ["mon"], "E": ["sun"]}); assert weekdays.get_naver
 weekdays.save_naver_map({"E": ["sun"]}); assert weekdays.get_naver_map() == {"A": ["thu"], "E": ["sun"]}
 print("3) 저장/다시 묻기 시점 OK")
 
+# Scenario 3b: 저장은 동시에 일어나도 서로 덮어쓰지 않는다 — 조회 결과는 한 덩어리 JSON을 읽고-바꾸고-쓰는 방식이라 보호하지 않으면 동시에 저장한 쪽이 앞의 결과를 지운다
+# (운영에서는 조회가 한 번에 하나씩이라 드물지만, 이전 조회가 아직 도는 중에 다음 조회가 시작되면 생긴다 — GitHub Actions에서 실제로 걸렸다)
+from concurrent.futures import ThreadPoolExecutor
+repository.set_setting(weekdays.LOOKUP_KEY, None)
+many = [f"c{i}" for i in range(120)]
+with ThreadPoolExecutor(8) as pool: list(pool.map(lambda tid: weekdays.save_lookup(tid, ["fri"]), many))
+assert all(tid in weekdays._get_lookup() for tid in many), f"동시에 저장하면 결과가 사라진다: {len(weekdays._get_lookup())}/120"
+repository.set_setting(weekdays.LOOKUP_KEY, None)
+print("3b) 동시 저장 OK")
+
 # ── 네이버 목록/작품 페이지 가짜 응답 ──
 LIVE = [NaverListItem(title_id="9504", title_name="목록에 있는 작품", thumbnail_url="u", weekdays=["MONDAY"], author_summary="가")]
 async def fake_full_list(session, timeout): return list(LIVE)
@@ -127,6 +137,7 @@ async def main():
         # Scenario 9: 작품 하나의 조회가 예외로 실패해도 나머지는 계속한다(실패한 건 못 알아낸 것으로 기록 → 하루 뒤 재시도).
         # (공용 테스트 DB에 다른 테스트의 작품이 많아서 엔드포인트의 배치 순서에 기대지 않고 조회 루프를 직접 부른다)
         import app.api.webtoons as api_webtoons
+        if api_webtoons._weekday_lookup_task is not None: await api_webtoons._weekday_lookup_task                                      # 앞 시나리오의 백그라운드 조회가 끝난 뒤에 시작한다
         for key in (weekdays.LOOKUP_KEY, weekdays.NAVER_MAP_KEY): repository.set_setting(key, None)
         async def half(session, title_id, timeout):
             if title_id == "9701": raise RuntimeError("이 작품만 이상")
