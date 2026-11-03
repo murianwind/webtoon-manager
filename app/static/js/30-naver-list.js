@@ -194,6 +194,7 @@ function renderNaverList() {
     naverListBulkSelectStartScrollY = null; // 카드 구성이 바뀌었으니 "선택을 시작한 위치"도 다시 잡아야 함
     pruneMissingViewerIcons(); // 새로 만든 카드의 뷰어 아이콘만 확인하면 된다
   }
+  updateFilterToggleLabels(); // 모바일의 접힌 "필터" 버튼에 적용된 필터 수를 맞춘다
 }
 
 let naverListBulkSelectStartScrollY = null;

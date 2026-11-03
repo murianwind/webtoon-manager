@@ -131,3 +131,29 @@ function debounce(fn, ms) {
     timer = setTimeout(() => fn(...args), ms);
   };
 }
+
+// ── 모바일: 필터 접기/펴기 ─────────────────────────────────────────
+// 모바일에서는 검색창 아래에 "필터" 버튼만 두고 필터 선택들과 마지막 확인 시각은 접어 둔다(CSS가 .filters-open일 때만 펼친다). 데스크톱에서는 이 버튼이 안 보인다.
+// 접힌 상태에서도 어떤 필터가 걸려 있는지 알 수 있게 버튼에 "N개 적용"을 보여 준다 — 정렬은 필터가 아니라서 세지 않고(data-filter-ignore), 숨겨진 선택(예: 네이버가 아닐 때의 태그)도 세지 않는다.
+function updateFilterToggleLabels() {
+  document.querySelectorAll(".page").forEach((page) => {
+    const button = page.querySelector(".filter-toggle");
+    if (!button) return;
+    const applied = [...page.querySelectorAll(".list-filters select")].filter(
+      (select) => !select.hasAttribute("data-filter-ignore") && !select.classList.contains("hidden") && select.value !== "" && select.value !== "all"
+    ).length;
+    const open = page.classList.contains("filters-open");
+    button.querySelector(".filter-toggle-label").textContent = applied > 0 ? `필터 · ${applied}개 적용` : "필터";
+    button.querySelector(".filter-toggle-arrow").textContent = open ? "▴" : "▾";
+    button.setAttribute("aria-expanded", String(open));
+  });
+}
+
+document.querySelectorAll(".filter-toggle").forEach((button) => {
+  button.addEventListener("click", () => {
+    button.closest(".page").classList.toggle("filters-open");
+    updateFilterToggleLabels();
+  });
+});
+document.querySelectorAll(".list-filters").forEach((box) => box.addEventListener("change", updateFilterToggleLabels));
+

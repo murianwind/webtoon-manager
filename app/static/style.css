@@ -1004,7 +1004,45 @@ select {
 .help-toc li ul { columns: 1; margin: 2px 0 4px 14px; font-size: 0.92em; }
 .help-toc a { text-decoration: none; }
 .help-toc a:hover { text-decoration: underline; }
-@media (max-width: 640px) { .help-toc ul { columns: 1; } }
+/* ── 목록 화면의 필터 접기 버튼/묶음 — 데스크톱은 예전 그대로(버튼 없음, 필터는 툴바에 펼쳐진 채) ─────────────── */
+.filter-toggle { display: none; }
+.list-filters { display: contents; }
+
+/* ── 모바일(화면 폭 640px 이하) 전용 레이아웃 ──────────────────────────────────────────────────────────────
+   위에서부터: ① 한 줄 메뉴바(좌우로 스와이프) ② 검색창 ③ 접었다 펼 수 있는 필터와 마지막 확인 시각 ④ 요일 탭.
+   고정되는 것: 메뉴바 → 검색창 → 요일 탭이 차례로 쌓여서 고정된다(필터는 스크롤하면 위로 올라간다 — 고정 영역이 화면을 너무 차지하지 않게).
+   고정 위치는 각 줄의 높이로 계산하므로 높이를 변수로 고정해 둔다. */
+:root { --m-nav-h: 44px; --m-search-h: 54px; --m-tabs-h: 44px; }
+@media (max-width: 640px) {
+  .help-toc ul { columns: 1; }
+  body { padding: 10px 12px 28px; }
+  header { margin-bottom: 8px; }
+  h1 { font-size: 17px; }
+
+  /* ① 메뉴바: 한 줄, 가로 스와이프 */
+  .main-tabs { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: none; gap: 0; margin: 0 -12px 0; padding: 0 12px; height: var(--m-nav-h); box-sizing: border-box; }
+  .main-tabs::-webkit-scrollbar { display: none; }
+  .main-tab { flex: 0 0 auto; white-space: nowrap; padding: 0 13px; height: calc(var(--m-nav-h) - 1px); }
+
+  /* ② 검색창: 툴바 상자를 없애서(contents) 페이지 전체에서 메뉴바 바로 아래에 고정되게 한다 */
+  .list-toolbar { display: contents; }
+  .list-toolbar > .clearable-wrap { display: flex; width: 100%; flex: none; position: sticky; top: var(--m-nav-h); z-index: 16; background: var(--bg); box-sizing: border-box; height: var(--m-search-h); padding: 8px 0; }
+  .list-toolbar input { font-size: 16px; } /* 16px 미만이면 iOS가 입력창을 눌렀을 때 화면을 확대한다 */
+
+  /* ③ 필터: 접기 버튼 + 접히는 묶음(선택들), 마지막 확인 시각도 같이 접힌다 */
+  .filter-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; box-sizing: border-box; margin: 2px 0 8px; padding: 10px 12px; font-size: 14px; font-weight: 600; background: var(--card); }
+  .filter-toggle-arrow { color: var(--muted); }
+  .list-filters { display: none; flex-wrap: wrap; gap: 8px; width: 100%; margin-bottom: 8px; }
+  .filters-open .list-filters { display: flex; }
+  .list-filters select, .list-filters button { flex: 1 1 calc(50% - 8px); min-width: 0; font-size: 14px; padding: 10px 10px; }
+  .list-head-status { display: none; margin: 0 0 8px; }
+  .filters-open .list-head-status { display: block; }
+
+  /* ④ 요일 탭: 검색창 바로 아래에 고정 */
+  .weekday-tabs { position: sticky; top: calc(var(--m-nav-h) + var(--m-search-h)); z-index: 15; background: var(--bg); box-sizing: border-box; height: var(--m-tabs-h); margin: 0 -12px 10px; padding: 0 12px; align-items: stretch; }
+  .weekday-tab { padding: 0 13px; }
+  #naver-list-bulk-bar { top: calc(var(--m-nav-h) + var(--m-search-h) + var(--m-tabs-h)); }
+}
 
 /* 자주 묻는 질문 — 질문만 보이고 눌러서 펼친다 */
 .markdown-body details {
