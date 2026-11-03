@@ -87,7 +87,7 @@ ANSWERS = {}; calls = []; DELAY = [0.3]                                         
 FINISHED = set()                                                                                                                     # 페이지에 완결로 표시된 작품
 def page_of(days, title_id): return TitlePage(status=None, days=[], finished=None) if days is None else TitlePage(status=200, days=days, finished=title_id in FINISHED)
 async def fake_lookup(session, title_id, timeout): calls.append(title_id); await asyncio.sleep(DELAY[0]); return page_of(ANSWERS.get(title_id, []), title_id)
-naver_api.fetch_title_page = fake_lookup
+naver_api.fetch_title_weekdays = fake_lookup
 def reset(ids):
     for key in (weekdays.LOOKUP_KEY, weekdays.NAVER_MAP_KEY): repository.set_setting(key, None)
     calls.clear(); ANSWERS.clear(); hidden.clear()
@@ -132,9 +132,9 @@ async def main():
         # Scenario 8: 조회가 실패해도(예외) 전체목록은 정상이고 다음에 다시 시도한다
         reset([])
         async def boom(session, title_id, timeout): raise RuntimeError("네이버 응답 이상")
-        naver_api.fetch_title_page = boom
+        naver_api.fetch_title_weekdays = boom
         r = await c.get("/api/naver-list"); assert r.status_code == 200; await wait()
-        naver_api.fetch_title_page = fake_lookup
+        naver_api.fetch_title_weekdays = fake_lookup
         r = await c.get("/api/naver-list"); assert r.status_code == 200
         print("8) 조회 실패에도 목록은 정상 OK")
 
@@ -146,7 +146,7 @@ async def main():
         async def half(session, title_id, timeout):
             if title_id == "9701": raise RuntimeError("이 작품만 이상")
             return page_of(["fri"], title_id)
-        naver_api.fetch_title_page = half
+        naver_api.fetch_title_weekdays = half
         await weekday_lookup.run(["9701", "9702"], 5)
         saved = weekdays._get_lookup()
         assert saved["9701"]["ok"] is False and saved["9702"]["ok"] is True and saved["9702"]["days"] == ["fri"], saved
@@ -161,7 +161,7 @@ async def main():
         assert repository.get("9801").is_finished and repository.get("9802").is_finished, "제외됨/구독해제 완결은 저장"
         assert not repository.get("9803").is_finished and not repository.get("9804").is_finished, "구독 중이거나 연재 중이면 그대로"
         async def fails(session, title_id, timeout): return TitlePage(status=403, days=[], finished=None)
-        naver_api.fetch_title_page = fails
+        naver_api.fetch_title_weekdays = fails
         await weekday_lookup.run(["9801"], 5)
         assert weekdays._get_lookup()["9801"]["ok"] is False and weekdays._get_lookup()["9801"]["http"] == 403, "실패는 HTTP 상태를 남긴다"
         print("10) 조회 결과의 상태/완결 저장 OK")

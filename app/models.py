@@ -42,6 +42,7 @@ class TitleInfo:
     age_description: str = ""
     is_paused: bool = False
     is_new: bool = False
+    weekdays: list[str] = field(default_factory=list)  # 연재 요일(mon~sun) — 작품 정보 API의 publishDayOfWeekList. 요일별 목록에서 빠진 휴재작도 이 값은 있다
 
 
 @dataclass

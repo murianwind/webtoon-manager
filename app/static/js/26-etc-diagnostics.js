@@ -4,7 +4,7 @@
 
 const ETC_REASON_LABELS = {
   naver: { finished: "완결", no_weekday_on_page: "작품 페이지에 요일 없음", check_failed: "확인 실패", pending: "요일 확인 대기" },
-  kakao: { finished: "완결", ended: "서비스 종료", hiatus: "휴재", serving_not_listed: "연재 중이지만 요일 목록에 없음", check_failed: "확인 실패", pending: "상태 확인 대기", catalog_not_loaded: "요일 목록 미확인" },
+  kakao: { finished: "완결", ended: "서비스 종료", sale_stopped: "판매 중지", hiatus: "휴재", serving_not_listed: "연재 중이지만 요일 목록에 없음", check_failed: "확인 실패", pending: "상태 확인 대기", catalog_not_loaded: "요일 목록 미확인" },
 };
 const ETC_PLATFORM_NAMES = { naver: "네이버", kakao: "카카오" };
 const etcDiagnosticsCache = {}; // 상태("excluded"/"all") → 요청(Promise) — 같은 결과를 다시 그릴 때마다 요청하지 않는다

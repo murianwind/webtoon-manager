@@ -1,0 +1,145 @@
+{
+ "titleId": 847905,
+ "thumbnailUrl": "https://image-comic.pstatic.net/webtoon/847905/thumbnail/thumbnail_IMAG21_52d4cf0a-320e-43e7-a1f8-b8d5ea60f260.jpg",
+ "posterThumbnailUrl": "https://image-comic.pstatic.net/webtoon/847905/thumbnail/thumbnail_IMAG21_52d4cf0a-320e-43e7-a1f8-b8d5ea60f260.jpg",
+ "sharedThumbnailUrl": "https://shared-comic.pstatic.net/thumb/webtoon/847905/thumbnail/thumbnail_IMAG21_52d4cf0a-320e-43e7-a1f8-b8d5ea60f260.jpg",
+ "titleName": "화스트 페이스",
+ "contentsNo": 687241,
+ "webtoonLevelCode": "WEBTOON",
+ "rest": true,
+ "finished": false,
+ "dailyPass": false,
+ "exceptBmInfo": false,
+ "publishDayOfWeekList": [
+  "SUNDAY"
+ ],
+ "chargeBestChallenge": false,
+ "communityArtists": [
+  {
+   "artistId": 403218,
+   "name": "NO_Teamkill",
+   "artistTypeList": [
+    "ARTIST_WRITER",
+    "ARTIST_PAINTER"
+   ],
+   "profileBadge": "WEBTOON",
+   "profileImageUrl": "https://kw-wcommunity-phinf.pstatic.net/20240413_10/1712993780416FTYlj_PNG/%B7%B9%BD%C4_%C0%CF%B7%AF7.png",
+   "profilePageUrl": "https://comic.naver.com/community/u/noteamkill?lastPage=EpisodeList",
+   "profilePageScheme": "comickr://browser?version=1&url=https%3A%2F%2Fm.comic.naver.com%2Fcommunity%2Fapp%2Fu%2Fnoteamkill%3FlastPage%3DEpisodeList&target=inweb&navibar=hide",
+   "postDescription": "4일 전 새소식"
+  }
+ ],
+ "synopsis": "화스트 페이스! 상황 발생! 상황 발생!\n\n현재 적 대규모 도발로 인해 준전시상태 돌입!\n전 병력 전투 장비 구비하고 즉각 출동 준비할 수 있도록!\n\n제1부 화스트페이스!\n제2부 20XX년 XX월 XX일 21시44분!\n제3부 발령권자 군단장!\n제4부 단독군장 착용, 탄 분배 후 대대 기동준비!",
+ "favoriteCount": 30614,
+ "age": {
+  "type": "RATE_18",
+  "description": "18세 이용가"
+ },
+ "publishDescription": "일요웹툰",
+ "curationTagList": [
+  {
+   "id": 847905,
+   "tagName": "액션",
+   "urlPath": "/webtoon?tab=genre&genre=ACTION",
+   "curationType": "GENRE_ACTION"
+  },
+  {
+   "id": 398,
+   "tagName": "독자PICK",
+   "urlPath": "/curation/list?type=CUSTOM_TAG&id=398",
+   "curationType": "CUSTOM_TAG"
+  },
+  {
+   "id": 361,
+   "tagName": "시리어스",
+   "urlPath": "/curation/list?type=CUSTOM_TAG&id=361",
+   "curationType": "CUSTOM_TAG"
+  },
+  {
+   "id": 349,
+   "tagName": "현대",
+   "urlPath": "/curation/list?type=CUSTOM_TAG&id=349",
+   "curationType": "CUSTOM_TAG"
+  },
+  {
+   "id": 342,
+   "tagName": "생존",
+   "urlPath": "/curation/list?type=CUSTOM_TAG&id=342",
+   "curationType": "CUSTOM_TAG"
+  },
+  {
+   "id": 332,
+   "tagName": "전쟁",
+   "urlPath": "/curation/list?type=CUSTOM_TAG&id=332",
+   "curationType": "CUSTOM_TAG"
+  },
+  {
+   "id": 240,
+   "tagName": "스릴러",
+   "urlPath": "/curation/list?type=CUSTOM_TAG&id=240",
+   "curationType": "CUSTOM_TAG"
+  },
+  {
+   "id": 186,
+   "tagName": "서바이벌",
+   "urlPath": "/curation/list?type=CUSTOM_TAG&id=186",
+   "curationType": "CUSTOM_TAG"
+  },
+  {
+   "id": 116,
+   "tagName": "밀리터리",
+   "urlPath": "/curation/list?type=CUSTOM_TAG&id=116",
+   "curationType": "CUSTOM_TAG"
+  },
+  {
+   "id": 847905,
+   "tagName": "성인웹툰",
+   "urlPath": "/curation/list?type=ADULT",
+   "curationType": "ADULT"
+  }
+ ],
+ "thumbnailBadgeList": [
+  "ADULT"
+ ],
+ "firstArticle": {
+  "no": 1,
+  "subtitle": "00화: 전쟁의 정의",
+  "charge": false
+ },
+ "gfpAdCustomParam": {
+  "titleId": 847905,
+  "cid": 687241,
+  "webtoonLevelCode": "WEBTOON",
+  "titleName": "화스트 페이스",
+  "displayAuthor": "NO_Teamkill",
+  "cpid": "CO6137",
+  "cpName": "최영찬(NO_Teamkill)_화스트페이스",
+  "sellingWuid": "695fae93e413ac1c0d5dec17u100sp",
+  "genreTypes": [
+   "ACTION"
+  ],
+  "rankGenreTypes": [
+   "ACTION"
+  ],
+  "tags": [
+   "밀리터리",
+   "서바이벌",
+   "전쟁",
+   "독자PICK",
+   "시리어스",
+   "현대",
+   "성인웹툰",
+   "스릴러",
+   "액션",
+   "생존"
+  ],
+  "weekdays": [
+   "일"
+  ],
+  "finishedYn": "N",
+  "adultYn": "Y",
+  "dailyPlusYn": "N",
+  "dailyFreeYn": "N"
+ },
+ "new": false
+}

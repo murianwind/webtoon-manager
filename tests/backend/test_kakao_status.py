@@ -8,7 +8,7 @@ import asyncio
 
 import httpx
 
-from app import db, kakao_page_download as kp, kakao_status, repository, tracker
+from app import db, kakao_catalog, kakao_page_download as kp, kakao_status, repository, tracker
 from app.config import get_settings
 db.get_connection()
 import app.main as m
@@ -99,6 +99,47 @@ failed = asyncio.run(asyncio.wait_for(tracker.refresh_inactive_kakao_status(get_
 assert failed == 0 and len(kakao_status.get_lookup()) == total and len(messages) == batches, "전부 실패해도 끝난다(실패도 기록돼 다시 안 묻는다)"
 tracker.asyncio.sleep = _real_sleep
 print("6) 전체 재동기화용 끝까지 이어 확인 OK")
+
+# Scenario 7: 요일/판매 상태 — 요일별 목록에 없는 연재(Y)/휴재(P) 작품은 작품 개요에서 연재 요일을 알아내 저장하고(요일별 목록에 있는 작품과 완결/종료/판매 중지는 개요를 묻지 않는다),
+# 판매 중지(state ST62 — 실제 사례 록사나: on_issue는 Y 그대로)는 완결처럼 가린다. 개요를 못 받으면 요일 없음(상태 확인은 그대로 성공)
+repository.set_setting(kakao_status.LOOKUP_KEY, None)
+for tid, name in ((301, "연재-목록에없음"), (302, "판매중지"), (303, "휴재-목록에없음"), (304, "연재-목록에있음"), (305, "완결"), (306, "서비스종료"), (307, "연재-개요실패")):
+    repository.upsert_new_kakao_webtoon(tid, name, status=repository.STATUS_EXCLUDED)
+inactive_all = [r["title_id"] for r in repository.get_kakao_webtoons_map().values() if r["status"] != repository.STATUS_ACTIVE]
+only = {301, 302, 303, 304, 305, 306, 307}
+STATUS = {301: (200, {"on_issue": "Y", "state": "ST61"}), 302: (200, {"on_issue": "Y", "state": "ST62"}), 303: (200, {"on_issue": "P", "state": "ST61"}), 304: (200, {"on_issue": "Y", "state": "ST61"}),
+          305: (200, {"on_issue": "N", "state": "ST61"}), 306: (404, None), 307: (200, {"on_issue": "Y", "state": "ST61"})}
+OVERVIEW = {301: {"pub_period": "월, 목"}, 303: {"pub_period": "화"}, 307: None}
+status_asked, overview_asked = [], []
+async def fake_status7(self, series_id): status_asked.append(series_id); return STATUS.get(series_id, (200, {"on_issue": "Y", "state": "ST61"}))
+async def fake_overview(self, series_id): overview_asked.append(series_id); return OVERVIEW.get(series_id, {"pub_period": "금"})
+kp.KakaoPageClient.fetch_series_status = fake_status7; kp.KakaoPageClient.fetch_overview = fake_overview
+kakao_catalog.snapshot = lambda: ([{"title_id": 304, "weekdays": ["wed"], "is_new": False, "is_paused": False, "has_update": False, "author_names": []}], None)
+# 이 시나리오는 위 새 작품 7개만 보도록 이전 작품은 이미 확인한 것으로 기록해 둔다
+for tid in inactive_all:
+    if tid not in only: kakao_status.save(tid, on_issue="Y", http=200)
+async def overview_that_raises(self, series_id):
+    overview_asked.append(series_id)
+    if series_id == 301: raise RuntimeError("개요 서버 오류")                                                             # 한 작품의 개요 요청이 예외여도 그 작품의 상태 확인과 나머지 작품은 계속된다
+    return OVERVIEW.get(series_id, {"pub_period": "금"})
+kp.KakaoPageClient.fetch_overview = overview_that_raises
+asyncio.run(tracker.refresh_inactive_kakao_status(get_settings()))
+assert kakao_status.get_lookup()["301"]["on_issue"] == "Y" and kakao_status.weekdays_of(301) == [] and kakao_status.weekdays_of(303) == ["tue"], "개요 예외 격리"
+kp.KakaoPageClient.fetch_overview = fake_overview; repository.set_setting(kakao_status.LOOKUP_KEY, None); overview_asked.clear()
+for tid in inactive_all:
+    if tid not in only: kakao_status.save(tid, on_issue="Y", http=200)
+asyncio.run(tracker.refresh_inactive_kakao_status(get_settings()))
+assert sorted(overview_asked) == [301, 303, 307], f"개요는 요일 목록에 없는 연재/휴재 작품만: {overview_asked}"
+assert kakao_status.weekdays_of(301) == ["mon", "thu"] and kakao_status.weekdays_of(303) == ["tue"] and kakao_status.weekdays_of(307) == [] and kakao_status.weekdays_of(304) == [] and kakao_status.weekdays_of(302) == []
+saved = kakao_status.get_lookup(); assert saved["302"]["state"] == "ST62" and saved["301"]["state"] == "ST61" and saved["302"]["on_issue"] == "Y", saved["302"]
+assert {302, 305, 306} <= kakao_status.hidden_ids() and not ({301, 303, 304, 307} & kakao_status.hidden_ids()), kakao_status.hidden_ids()
+async def api7():
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=m.app), base_url="http://test") as c:
+        rows7 = {w["title_id"]: w for w in (await c.get("/api/kakao-webtoons", params={"status": "excluded"})).json()}
+        assert rows7[301]["weekdays"] == ["mon", "thu"] and rows7[303]["weekdays"] == ["tue"] and rows7[304]["weekdays"] == ["wed"] and rows7[307]["weekdays"] == [], "요일: 요일별 목록 → 없으면 개요에서 알아낸 요일"
+        assert rows7[302]["is_finished"] is True and rows7[301]["is_finished"] is False, "판매 중지는 가린다"
+asyncio.run(api7())
+print("7) 요일/판매 중지 OK")
 
 # Scenario 5: 제외됨/구독해제 목록 API가 완결 또는 서비스 종료를 is_finished로 알려 준다(화면이 가린다)
 repository.set_setting(kakao_status.LOOKUP_KEY, None); kakao_status.save(11, on_issue="N", http=200); kakao_status.save(13, on_issue=None, http=404); kakao_status.save(12, on_issue="Y", http=200)

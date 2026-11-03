@@ -199,6 +199,11 @@ async def list_kakao_webtoons(status: str | None = None):
             if fresh_author_summary and fresh_author_summary != r["author_summary"]:
                 await asyncio.to_thread(repository.refresh_kakao_webtoon_author_summary, r["title_id"], fresh_author_summary)
                 r = {**r, "author_summary": fresh_author_summary}
+        else:
+            # 요일별 목록에 없는 작품(연재 중인데 목록에 안 나오는 것 등)은 작품 개요에서 알아낸 연재 요일을 쓴다(없으면 "기타")
+            days = kakao_status.weekdays_of(r["title_id"])
+            if days:
+                extra = {"weekdays": days}
         # 완결이거나 서비스가 끝난 작품은 is_finished로 알려 화면(제외됨/구독해제)이 가리게 한다 — 받지 않는 작품은 DB 완결 표시가 비어 있어서 상태 확인 결과(kakao_status)를 합친다
         result.append(KakaoWebtoonOut(**{**r, **extra, "is_finished": bool(r["is_finished"]) or r["title_id"] in hidden_ids}))
     return result

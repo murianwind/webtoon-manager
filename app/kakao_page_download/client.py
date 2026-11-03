@@ -14,6 +14,7 @@ from app import kakao_api, kakao_page_auth
 
 from app.kakao_page_download.models import (
     ABOUT_URL,
+    OVERVIEW_URL,
     Episode,
     PRODUCT_LIST_URL,
     PROFILE_URL,
@@ -225,6 +226,13 @@ class KakaoPageClient:
         if not data or data.get("result_code") != 0:
             return None
         return data.get("result") or None
+
+    async def fetch_overview(self, series_id: int) -> dict | None:
+        """작품 개요(content) — 연재 요일(pub_period "월, 목"), 판매 상태(state) 등. 요일별 목록에 없는 작품의 요일을 알아내는 데 쓴다. 못 받으면 None."""
+        _, data = await self._request_json("GET", OVERVIEW_URL, params={"series_id": series_id}, label=f"작품 개요 series_id={series_id}")
+        if not data or data.get("result_code") != 0:
+            return None
+        return (data.get("result") or {}).get("content") or None
 
     async def viewer_image_urls(self, series_id: int, product_id: int) -> list[str] | None:
         status, data = await self._request_json(

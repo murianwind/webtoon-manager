@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from typing import NamedTuple
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -37,6 +38,7 @@ TICKET_USE_URL = f"{_API}/v1/ticket/use"
 
 
 ABOUT_URL = f"{_API}/v1/content/about"
+OVERVIEW_URL = f"{_API}/v1/content/overview"  # 작품 개요 — content.pub_period가 연재 요일("월, 목")
 
 
 WAITFREE_TICKET_TYPE = "RT05"  # 기다무 대여권
@@ -304,49 +306,16 @@ def plan_by_folder_rules(
     센다(화면에는 무료가 되는 날짜가 보인다). 받을 수는 없다."""
     visible = sorted((e for e in episodes if e.number > 0), key=lambda e: e.number)
     pending = pending or set()  # 사용자가 "받지 않은 것으로" 기록한 회차 — 시작 지점보다 앞이어도 받을 대상(받은 것이 이긴다)
-    marker: MarkerInfo | None = None
+    start = _decide_start(visible, existing, series_title, recorded)
+
     folder_numbers = {f.number for f in existing}
-    archived_numbers: set[int] = set()
-
-    lower_bound = 0  # 이 번호보다 앞 회차는 자동으로 받지 않는다
-    if not existing and recorded:
-        # 폴더가 비어 있거나 없어도(전체를 아카이빙한 뒤 연재를 재개한 경우 등) 받은 회차 기록은 그대로 믿는다 — 기록에 없는 회차만 받는다.
-        # 기록은 날짜로도 폴더 상태로도 지워지지 않는다(처음부터 다시 받으려면 "받지 않은 것으로 기록"으로 직접 지정한다).
-        mode = "recorded_only"
-        archived_numbers = set(recorded)
-        lower_bound = min(recorded)
-    elif not existing:
-        mode = "new_folder"
-    elif recorded:
-        mode = "compare"
-        archived_numbers = recorded - folder_numbers
-        lower_bound = min(folder_numbers | recorded)
-    elif len(existing) == 1:
-        mode = "single_marker"
-        only = existing[0]
-        resolved, warning = only.number, False
-        only_key = _subtitle_key(only.subtitle, series_title)
-        at_number = next((e for e in visible if e.number == only.number), None)
-        if at_number is None or normalize_subtitle(at_number.subtitle) != only_key:
-            # 번호가 사이트와 안 맞으면 부제목으로 위치를 다시 찾는다(예전 도구와 번호가 밀려 있는 경우)
-            same_title = [e for e in visible if normalize_subtitle(e.subtitle) == only_key]
-            if len(same_title) == 1:
-                resolved = same_title[0].number
-            else:
-                warning = True
-        marker = MarkerInfo(number=only.number, subtitle=only.subtitle, resolved_number=resolved, warning=warning)
-        lower_bound = resolved
-    else:
-        mode = "compare"
-        lower_bound = min(folder_numbers)
-
-    have_numbers = folder_numbers | archived_numbers
+    have_numbers = folder_numbers | start.archived_numbers
     have_subtitles = {_subtitle_key(f.subtitle, series_title) for f in existing}
-    plan = DownloadPlan(mode=mode, marker=marker, existing_count=len(existing))
+    plan = DownloadPlan(mode=start.mode, marker=start.marker, existing_count=len(existing))
     for episode in visible:
         in_folder = episode.number in folder_numbers or normalize_subtitle(episode.subtitle) in have_subtitles
         done = in_folder or episode.number in have_numbers
-        skipped = not done and episode.number < lower_bound and episode.number not in pending
+        skipped = not done and episode.number < start.lower_bound and episode.number not in pending
         plan.rows.append(EpisodeRow(episode=episode, downloaded=done, before_start=skipped, archived=done and not in_folder))
         if done or skipped:
             continue
@@ -355,6 +324,47 @@ def plan_by_folder_rules(
         else:
             plan.locked.append(episode)
     return plan
+
+
+class _StartPoint(NamedTuple):
+    """어디서부터 자동으로 받을지의 판단 — mode: 어떤 규칙으로 정했는가, marker: 폴더에 파일이 하나뿐일 때의 표식, archived_numbers: 기록에만 있는(아카이빙으로 옮겨진) 회차,
+    lower_bound: 이 번호보다 앞 회차는 자동으로 받지 않는다."""
+    mode: str
+    marker: MarkerInfo | None
+    archived_numbers: set[int]
+    lower_bound: int
+
+
+def _resolve_marker(only: ExistingFile, visible: list[Episode], series_title: str) -> MarkerInfo:
+    """폴더에 파일이 하나뿐이면 그 파일이 "여기까지 받았다"는 표식이다 — 사이트의 회차와 맞춰 실제 위치를 정한다. 번호가 사이트와 안 맞으면
+    부제목으로 위치를 다시 찾고(예전 도구와 번호가 밀려 있는 경우), 그것도 하나로 정해지지 않으면 경고(warning)로 표시한다."""
+    resolved, warning = only.number, False
+    only_key = _subtitle_key(only.subtitle, series_title)
+    at_number = next((e for e in visible if e.number == only.number), None)
+    if at_number is None or normalize_subtitle(at_number.subtitle) != only_key:
+        same_title = [e for e in visible if normalize_subtitle(e.subtitle) == only_key]
+        if len(same_title) == 1:
+            resolved = same_title[0].number
+        else:
+            warning = True
+    return MarkerInfo(number=only.number, subtitle=only.subtitle, resolved_number=resolved, warning=warning)
+
+
+def _decide_start(visible: list[Episode], existing: list[ExistingFile], series_title: str, recorded: set[int] | None) -> _StartPoint:
+    """폴더 상태와 받은 회차 기록으로 시작 지점을 정한다(plan_by_folder_rules의 설명 참고)."""
+    folder_numbers = {f.number for f in existing}
+    if not existing and recorded:
+        # 폴더가 비어 있거나 없어도(전체를 아카이빙한 뒤 연재를 재개한 경우 등) 받은 회차 기록은 그대로 믿는다 — 기록에 없는 회차만 받는다.
+        # 기록은 날짜로도 폴더 상태로도 지워지지 않는다(처음부터 다시 받으려면 "받지 않은 것으로 기록"으로 직접 지정한다).
+        return _StartPoint("recorded_only", None, set(recorded), min(recorded))
+    if not existing:
+        return _StartPoint("new_folder", None, set(), 0)
+    if recorded:
+        return _StartPoint("compare", None, recorded - folder_numbers, min(folder_numbers | recorded))
+    if len(existing) == 1:
+        marker = _resolve_marker(existing[0], visible, series_title)
+        return _StartPoint("single_marker", marker, set(), marker.resolved_number)
+    return _StartPoint("compare", None, set(), min(folder_numbers))
 
 
 def effective_download_root(default_root: str) -> str:

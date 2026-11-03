@@ -19,7 +19,7 @@ from pathlib import Path
 
 import aiohttp
 
-from app import kakao_status, daily_plus, download_roots, comicinfo, discord_notify, job_status, kakao_api, kakao_cover, kakao_page_download, naver_api, repository
+from app import kakao_catalog, kakao_status, weekdays, daily_plus, download_roots, comicinfo, discord_notify, job_status, kakao_api, kakao_cover, kakao_page_download, naver_api, repository
 from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
 from app.config import Settings
 from app.discord_notify import send_webhook_notification
@@ -181,6 +181,9 @@ async def enrich_one(
     repository.update_genres_and_tags(title_id, info.genres_ko, info.tags)
     repository.update_is_paused(title_id, info.is_paused)
     repository.update_is_new(title_id, info.is_new)
+    # 연재 요일(작품 정보 API)도 조회 결과로 저장한다 — 요일별 목록에서 빠진 휴재 작품의 요일을 전체 재동기화/신작 스캔이 한 번에 채운다(목록에 있으면 목록의 요일이 우선).
+    if info.weekdays or info.is_finished:  # 요일이 비어 있고 완결도 아니면 저장하지 않는다 — "요일 없음"으로 기록하면 요일 조회(모바일 페이지 폴백)가 일주일 동안 다시 안 묻는다
+        weekdays.save_lookup(title_id, info.weekdays, http=200, finished=info.is_finished)
     tracked = repository.get(title_id)
     if tracked is not None and tracked.status != repository.STATUS_ACTIVE:
         # 제외됨/구독해제 작품의 완결 여부 — 예전엔 구독 중인 작품만 저장해서 완결 작품이 제외됨에 그대로 보이고 요일 조회도 완결 작품에 헛수고를 했다.
@@ -455,12 +458,13 @@ async def refresh_inactive_kakao_status(settings: Settings, *, all_batches: bool
     if not pending:
         return 0
     resolved = done = 0
+    listed_ids = {item["title_id"] for item in kakao_catalog.snapshot()[0] if item.get("weekdays")}  # 요일별 목록에 있는 작품은 요일을 이미 안다 — 개요를 묻지 않는다
     async with kakao_page_download.new_session() as kakao_session:
         client = kakao_page_download.client_or_anonymous(kakao_session, settings.request_timeout_seconds)
         while pending:
             batch = pending[: kakao_status.LOOKUP_BATCH]
             for series_id in batch:
-                resolved += await _refresh_one_kakao_status(client, series_id)
+                resolved += await _refresh_one_kakao_status(client, series_id, listed_ids)
                 await asyncio.sleep(kakao_status.LOOKUP_PAUSE_SECONDS)
             done += len(batch)
             if progress is not None:
@@ -473,15 +477,23 @@ async def refresh_inactive_kakao_status(settings: Settings, *, all_batches: bool
     return resolved
 
 
-async def _refresh_one_kakao_status(client, series_id: int) -> int:
-    """작품 하나의 상태를 확인해 저장한다. 알아냈으면 1, 못 알아냈으면 0(일시 오류 — 하루 뒤에 다시). 한 작품이 예외로 실패해도 밖으로 던지지 않는다."""
+async def _refresh_one_kakao_status(client, series_id: int, listed_ids: set[int]) -> int:
+    """작품 하나의 상태(연재/휴재/완결/서비스 종료/판매 중지)를 확인해 저장한다. 알아냈으면 1, 못 알아냈으면 0(일시 오류 — 하루 뒤에 다시). 한 작품이 예외로 실패해도 밖으로 던지지 않는다.
+    요일별 목록(listed_ids)에 없는 연재/휴재 작품은 작품 개요에서 연재 요일도 알아낸다(판매 중지/완결/종료는 요일이 의미 없어 묻지 않는다)."""
     try:
         http, series_item = await client.fetch_series_status(series_id)
     except Exception as e:
         log.warning("카카오 작품 상태 확인 실패 (series_id=%s): %s", series_id, e)
         http, series_item = None, None
     on_issue = (series_item or {}).get("on_issue")
-    kakao_status.save(series_id, on_issue=on_issue, http=http)
+    state = (series_item or {}).get("state")
+    days: list[str] = []
+    if on_issue in ("Y", "P") and not kakao_status.is_sale_stopped(state) and series_id not in listed_ids:
+        try:
+            days = kakao_status.parse_pub_period(((await client.fetch_overview(series_id)) or {}).get("pub_period"))
+        except Exception as e:
+            log.warning("카카오 작품 개요 확인 실패 (series_id=%s): %s", series_id, e)
+    kakao_status.save(series_id, on_issue=on_issue, http=http, state=state, weekdays=days)
     if on_issue is not None:
         repository.set_kakao_finished(series_id, on_issue == "N")
     return 1 if on_issue is not None or http in kakao_status.ENDED_HTTP else 0

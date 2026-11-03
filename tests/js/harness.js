@@ -58,12 +58,14 @@ function makeApp(routes, { timeScale = 1, now = null } = {}) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// idle(): 진행 중인 fetch가 모두 끝나고, 그 결과로 이어지는 비동기 후속 처리(그리기 등)까지 흘러간 뒤에 돌아온다 — "몇 ms 기다리면 되겠지" 대신 "다 끝났을 때" 진행.
+// idle(timeout): 진행 중인 fetch가 모두 끝나고, 그 결과로 이어지는 비동기 후속 처리(그리기 등)까지 흘러간 뒤에 돌아온다 — "몇 ms 기다리면 되겠지" 대신 "다 끝났을 때" 진행.
 // (화면이 타이머로 미루는 동작(검색 지연, 폴링)은 기다리지 않는다 — 그런 것은 timeScale과 wait를 쓴다)
-async function idle() {
+async function idle(timeout = 5000) {
   const tick = () => new Promise((r) => setImmediate(r));
+  const start = Date.now();
   for (let quiet = 0; quiet < 3; ) {
     await tick();
+    if (Date.now() - start > timeout) throw new Error(`진행 중인 요청 ${pendingFetches}개가 끝나지 않았습니다(${timeout}ms 기다림) — 일부러 느리게 둔 요청을 idle로 기다리고 있지 않은지 확인하세요`);
     quiet = pendingFetches === 0 ? quiet + 1 : 0;
   }
 }

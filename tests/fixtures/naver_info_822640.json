@@ -1,0 +1,151 @@
+{
+ "titleId": 822640,
+ "thumbnailUrl": "https://image-comic.pstatic.net/webtoon/822640/thumbnail/thumbnail_IMAG21_009dd859-91d1-4682-862b-bace6d93fc79.jpg",
+ "posterThumbnailUrl": "https://image-comic.pstatic.net/webtoon/822640/thumbnail/thumbnail_IMAG21_009dd859-91d1-4682-862b-bace6d93fc79.jpg",
+ "sharedThumbnailUrl": "https://shared-comic.pstatic.net/thumb/webtoon/822640/thumbnail/thumbnail_IMAG21_009dd859-91d1-4682-862b-bace6d93fc79.jpg",
+ "titleName": "소꿉친구 컴플렉스",
+ "contentsNo": 555479,
+ "webtoonLevelCode": "WEBTOON",
+ "rest": true,
+ "finished": false,
+ "dailyPass": false,
+ "exceptBmInfo": false,
+ "publishDayOfWeekList": [
+  "THURSDAY"
+ ],
+ "chargeBestChallenge": false,
+ "communityArtists": [
+  {
+   "artistId": 376564,
+   "name": "은하이",
+   "artistTypeList": [
+    "ARTIST_WRITER",
+    "ARTIST_PAINTER"
+   ],
+   "profileBadge": "WEBTOON",
+   "profileImageUrl": "https://kw-wcommunity-phinf.pstatic.net/20240314_70/17104060291326HhhM_PNG/%C0%CF%B7%AF%BD%BA%C6%AE2.png",
+   "profilePageUrl": "https://comic.naver.com/community/u/_uxi7a?lastPage=EpisodeList",
+   "profilePageScheme": "comickr://browser?version=1&url=https%3A%2F%2Fm.comic.naver.com%2Fcommunity%2Fapp%2Fu%2F_uxi7a%3FlastPage%3DEpisodeList&target=inweb&navibar=hide"
+  }
+ ],
+ "synopsis": "20살에 20년지기, 평생을 함께한 소꿉친구 하늘과 민철.\n그런 소꿉친구의 알고 싶지 않은 은밀한 사정을 알아버렸다?!\n서로를 이성으로 생각한 적이 결코 없는 두사람이지만,\n오해가 오해를 낳고 착각이 착각을 낳는 상황들 속에서 점점 서로가 의식되기 시작한다.\n서로를 너무 잘 알기 때문에 오히려 고난을 겪는 두 남녀의 술래잡기 같은 로맨스 코미디!",
+ "favoriteCount": 658552,
+ "age": {
+  "type": "RATE_18",
+  "description": "18세 이용가"
+ },
+ "publishDescription": "목요웹툰",
+ "curationTagList": [
+  {
+   "id": 822640,
+   "tagName": "로맨스",
+   "urlPath": "/webtoon?tab=genre&genre=PURE",
+   "curationType": "GENRE_PURE"
+  },
+  {
+   "id": 365,
+   "tagName": "리얼로맨스",
+   "urlPath": "/curation/list?type=CUSTOM_TAG&id=365",
+   "curationType": "CUSTOM_TAG"
+  },
+  {
+   "id": 360,
+   "tagName": "설렘폭발",
+   "urlPath": "/curation/list?type=CUSTOM_TAG&id=360",
+   "curationType": "CUSTOM_TAG"
+  },
+  {
+   "id": 299,
+   "tagName": "능글남",
+   "urlPath": "/curation/list?type=CUSTOM_TAG&id=299",
+   "curationType": "CUSTOM_TAG"
+  },
+  {
+   "id": 294,
+   "tagName": "나쁜남자",
+   "urlPath": "/curation/list?type=CUSTOM_TAG&id=294",
+   "curationType": "CUSTOM_TAG"
+  },
+  {
+   "id": 285,
+   "tagName": "명랑녀",
+   "urlPath": "/curation/list?type=CUSTOM_TAG&id=285",
+   "curationType": "CUSTOM_TAG"
+  },
+  {
+   "id": 270,
+   "tagName": "로맨틱코미디",
+   "urlPath": "/curation/list?type=CUSTOM_TAG&id=270",
+   "curationType": "CUSTOM_TAG"
+  },
+  {
+   "id": 246,
+   "tagName": "가벼운",
+   "urlPath": "/curation/list?type=CUSTOM_TAG&id=246",
+   "curationType": "CUSTOM_TAG"
+  },
+  {
+   "id": 182,
+   "tagName": "고자극로맨스",
+   "urlPath": "/curation/list?type=CUSTOM_TAG&id=182",
+   "curationType": "CUSTOM_TAG"
+  },
+  {
+   "id": 88,
+   "tagName": "친구>연인",
+   "urlPath": "/curation/list?type=CUSTOM_TAG&id=88",
+   "curationType": "CUSTOM_TAG"
+  },
+  {
+   "id": 822640,
+   "tagName": "성인웹툰",
+   "urlPath": "/curation/list?type=ADULT",
+   "curationType": "ADULT"
+  }
+ ],
+ "thumbnailBadgeList": [
+  "ADULT"
+ ],
+ "firstArticle": {
+  "no": 1,
+  "subtitle": "1화",
+  "charge": false
+ },
+ "gfpAdCustomParam": {
+  "titleId": 822640,
+  "cid": 555479,
+  "webtoonLevelCode": "WEBTOON",
+  "titleName": "소꿉친구 컴플렉스",
+  "displayAuthor": "은하이",
+  "cpid": "CO4420",
+  "cpName": "(주)해스튜디오_소꿉친구컴플렉스",
+  "sellingWuid": "66065fce07b9940998e42a7ev100sp",
+  "genreTypes": [
+   "PURE"
+  ],
+  "rankGenreTypes": [
+   "ROMANCE"
+  ],
+  "tags": [
+   "나쁜남자",
+   "로맨스",
+   "고자극로맨스",
+   "가벼운",
+   "명랑녀",
+   "리얼로맨스",
+   "능글남",
+   "성인웹툰",
+   "설렘폭발",
+   "로맨틱코미디",
+   "친구>연인"
+  ],
+  "weekdays": [
+   "목"
+  ],
+  "finishedYn": "N",
+  "adultYn": "Y",
+  "dailyPlusYn": "N",
+  "dailyFreeYn": "N"
+ },
+ "new": false
+}

@@ -237,13 +237,85 @@ async def _download_locked_with_rental(
     return used, remaining, None
 
 
+class _LockedEpisodeOpener:
+    """수동 다운로드에서 고른 잠긴 회차를 기다무/대여권으로 여는 규칙. 이용권 정보는 처음 필요할 때 한 번만 조회하고, 기다무는 한 장이라
+    고른 잠긴 회차 중 번호가 가장 앞선 하나만 연다. 결과(기다무/대여권 사용, 건너뜀)와 진행 문구는 여기서 남긴다."""
+
+    def __init__(self, client: KakaoPageClient, series_id: int, series_item: dict, result: SelectedResult, use_rental_tickets: bool, on_progress=None) -> None:
+        self.client, self.series_id, self.series_item = client, series_id, series_item
+        self.result, self.use_rental_tickets, self.on_progress = result, use_rental_tickets, on_progress
+        self.ticket = None  # 잠긴 회차를 고른 경우에만 조회한다
+        self.waitfree_spent = False
+
+    def _say(self, message: str) -> None:
+        if self.on_progress:
+            self.on_progress(message)
+
+    async def open(self, row, number: int) -> bool:
+        """잠긴 회차를 열 수 있으면 열고 True(받으러 간다), 못 열면 이유와 함께 건너뛴 것으로 기록하고 False."""
+        opened, reason = await self._try_waitfree(row)
+        rental_opened = False
+        if not opened and self.use_rental_tickets and rental_eligible(row.episode, self.series_item):
+            # 확인을 받은 경우에만: 기다무로 못 여는 회차를 대여권으로 연다(보유 수를 넘으면 나머지는 건너뜀)
+            if self.result.rental_remaining == 0:
+                reason = "대여권이 부족합니다"
+            else:
+                rental_opened, reason, left = await self.client.use_rental_ticket(row.episode.product_id)
+                if left is not None:
+                    self.result.rental_remaining = left
+                opened = rental_opened
+        if not opened:
+            self.result.skipped_locked.append(number)
+            self._say(f"{number}번 회차: {reason} — 건너뜀")
+            return False
+        if rental_opened:
+            self.result.rental_used.append(number)
+            self._say(f"{number}번 회차를 대여권으로 열었습니다 (남은 대여권 {self.result.rental_remaining}장)")
+        else:
+            self.result.ticket_used.append(number)
+            self._say(f"{number}번 회차를 기다무로 열었습니다")
+        return True
+
+    async def _try_waitfree(self, row) -> tuple[bool, str]:
+        """기다무로 열어 본다 → (열었는가, 못 열었을 때의 이유). 이미 못 연다고 아는 경우(한 장을 썼거나, 기다무가 없거나, 기다무 불가 회차)는 이용권 조회도 하지 않는다."""
+        if self.waitfree_spent:
+            return False, "기다무는 한 장이라 하나만 열 수 있습니다"
+        if not waitfree_supported(self.series_item):
+            return False, "이 작품은 기다무가 없습니다"
+        if row.episode.waitfree_blocked:
+            return False, "기다무로 열 수 없는 회차입니다"
+        self.ticket = self.ticket or await self.client.ticket_info(self.series_id) or TicketInfo()
+        if not self.ticket.waitfree_ready:
+            return False, "잠김(대여권 필요)"
+        opened, reason = await self.client.use_waitfree_ticket(row.episode.product_id)
+        self.waitfree_spent = True
+        return opened, reason
+
+
+async def _download_selected_episode(client: KakaoPageClient, series_id: int, row, number: int, folder: Path, result: SelectedResult, on_progress=None) -> None:
+    """고른 회차 하나를 받아 결과에 남긴다. 다시 받다가 실패하면 원래 파일은 그대로 남는다."""
+    path = await download_episode(client, series_id, row.episode, folder)
+    if path is None:
+        result.failed.append(number)
+        if on_progress:
+            on_progress(f"❌ {number}번 회차 받기 실패" + (" (기존 파일은 그대로 둡니다)" if row.downloaded and not row.archived else ""))
+        return
+    result.downloaded.append(number)
+    result.downloaded_items.append((number, row.episode.subtitle))
+    replaced = row.downloaded and not row.archived  # 보관 폴더로 옮겨진 회차를 다시 받는 것은 폴더의 파일을 바꾸는 게 아니다
+    if replaced:
+        result.replaced.append(number)
+    if on_progress:
+        on_progress(f"✅ {number}번 회차 {'다시 받아 교체' if replaced else '완료'} ({path.name})")
+
+
 async def download_selected(
     client: KakaoPageClient, *, series_id: int, title: str | None, numbers: list[int], download_root: str, on_progress=None,
     use_rental_tickets: bool = False,
 ) -> SelectedResult:
     """수동 다운로드 — 분석 표에서 고른 회차들을 번호순으로 받는다. 이미 받은 회차도 고르면 다시 받아 교체한다
-    (자동 다운로드와 달리 수동은 "다시 받기"가 목적일 수 있다). 잠긴 회차는 건너뛰고, 하나가 실패해도 나머지는
-    계속한다(직접 고른 것이라 순서를 끊을 이유가 없다). 다시 받다가 실패하면 원래 파일은 그대로 남는다."""
+    (자동 다운로드와 달리 수동은 "다시 받기"가 목적일 수 있다). 잠긴 회차는 기다무/대여권으로 열 수 있을 때만 열고(_LockedEpisodeOpener) 못 열면 건너뛰고,
+    하나가 실패해도 나머지는 계속한다(직접 고른 것이라 순서를 끊을 이유가 없다). 다시 받다가 실패하면 원래 파일은 그대로 남는다."""
     result = SelectedResult()
     listing = await client.list_episodes(series_id)
     if listing is None:
@@ -257,63 +329,15 @@ async def download_selected(
         repository.get_kakao_pending_numbers(series_id),
     )
     rows = {row.episode.number: row for row in plan.rows}
-    ticket = None  # 잠긴 회차를 고른 경우에만 조회한다
-    waitfree_spent = False  # 기다무는 한 장이라 고른 잠긴 회차 중 번호가 가장 앞선 하나만 연다
+    opener = _LockedEpisodeOpener(client, series_id, series_item, result, use_rental_tickets, on_progress)
     for number in sorted(set(numbers)):
         row = rows.get(number)
         if row is None:
             result.not_found.append(number)
             continue
-        if not row.episode.accessible:
-            opened = False
-            reason = "잠김(대여권 필요)"
-            if waitfree_spent:
-                reason = "기다무는 한 장이라 하나만 열 수 있습니다"
-            elif not waitfree_supported(series_item):
-                reason = "이 작품은 기다무가 없습니다"
-            elif row.episode.waitfree_blocked:
-                reason = "기다무로 열 수 없는 회차입니다"
-            else:
-                ticket = ticket or await client.ticket_info(series_id) or TicketInfo()
-                if ticket.waitfree_ready:
-                    opened, reason = await client.use_waitfree_ticket(row.episode.product_id)
-                    waitfree_spent = True
-            rental_opened = False
-            if not opened and use_rental_tickets and rental_eligible(row.episode, series_item):
-                # 확인을 받은 경우에만: 기다무로 못 여는 회차를 대여권으로 연다(보유 수를 넘으면 나머지는 건너뜀)
-                if result.rental_remaining == 0:
-                    reason = "대여권이 부족합니다"
-                else:
-                    rental_opened, reason, left = await client.use_rental_ticket(row.episode.product_id)
-                    if left is not None:
-                        result.rental_remaining = left
-                    opened = rental_opened
-            if not opened:
-                result.skipped_locked.append(number)
-                if on_progress:
-                    on_progress(f"{number}번 회차: {reason} — 건너뜀")
-                continue
-            if rental_opened:
-                result.rental_used.append(number)
-                if on_progress:
-                    on_progress(f"{number}번 회차를 대여권으로 열었습니다 (남은 대여권 {result.rental_remaining}장)")
-            else:
-                result.ticket_used.append(number)
-                if on_progress:
-                    on_progress(f"{number}번 회차를 기다무로 열었습니다")
-        path = await download_episode(client, series_id, row.episode, folder)
-        if path is None:
-            result.failed.append(number)
-            if on_progress:
-                on_progress(f"❌ {number}번 회차 받기 실패" + (" (기존 파일은 그대로 둡니다)" if row.downloaded and not row.archived else ""))
-        else:
-            result.downloaded.append(number)
-            result.downloaded_items.append((number, row.episode.subtitle))
-            replaced = row.downloaded and not row.archived  # 보관 폴더로 옮겨진 회차를 다시 받는 것은 폴더의 파일을 바꾸는 게 아니다
-            if replaced:
-                result.replaced.append(number)
-            if on_progress:
-                on_progress(f"✅ {number}번 회차 {'다시 받아 교체' if replaced else '완료'} ({path.name})")
+        if not row.episode.accessible and not await opener.open(row, number):
+            continue
+        await _download_selected_episode(client, series_id, row, number, folder, result, on_progress)
     if result.downloaded:
         await write_series_metadata(series_item, series_id, folder, on_progress, await client.fetch_about(series_id))
     return result

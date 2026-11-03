@@ -259,35 +259,312 @@ function _invalidateAllRcloneCacheForRemote(remote) {
   }
 }
 
+// ── 폴더 선택기 그리기 ─────────────────────────────────────────────────────────────────────
+// 단계적으로 펼쳐진다: 접힘(요약) → 로컬/rclone 선택 → (로컬 루트가 둘 이상이면) 루트 선택 → (rclone이면) 원격 선택 → 폴더 목록.
+// 처음부터 다 펼쳐놓으면 아직 고르지도 않은 다음 단계 UI(그리고 곧바로 시작되는 목록 조회 API 호출)까지 화면을 차지해서 공간도 낭비되고,
+// 뭘 먼저 눌러야 하는지도 헷갈린다는 문제가 있었다. 그래서 한 단계씩만 보여 준다. 각 단계는 아래의 작은 함수가 맡고,
+// renderFolderPickerContents는 순서만 정한다(동작은 tests/js/test_folder_picker.js가 고정한다).
+// ctx = { containerId, state, onSelect, rerender } — 한 번 그릴 때의 상태와 "다시 그리기".
+
+// 탐색 상태를 새로 만든다 — 호출자가 정한 설정(skipExistingCheck/favorites/localRoots)은 그대로 두고, 골라 둔 폴더 표시(selectedLabel)는 비운다.
+function freshPickerState(state, overrides) {
+  return {
+    mode: state.mode, path: "", remote: "", skipExistingCheck: state.skipExistingCheck, favorites: state.favorites,
+    localRoots: state.localRoots, localRoot: state.localRoot, expanded: true,
+    modeConfirmed: state.modeConfirmed, rootConfirmed: state.rootConfirmed,
+    ...overrides,
+  };
+}
+
+// 접힌 상태 — 지금 뭐가 골라져 있는지 한 줄로만 보여주고, 실제 폴더 목록은 눌러야 나온다.
+// 폴더 선택기가 여러 개 세로로 쌓인 화면에서 전부 펼쳐진 채로 나오면 스크롤이 끔찍하게 길어진다는 문제가 실제로 있었다.
+function renderPickerSummary(container, ctx) {
+  const { state } = ctx;
+  container.innerHTML = "";
+  const summary = document.createElement("div");
+  summary.className = "folder-picker-summary";
+  const label = document.createElement("span");
+  label.className = "folder-picker-summary-text";
+  label.textContent = state.selectedLabel ? `선택됨: ${state.selectedLabel}` : "폴더를 선택하지 않았습니다.";
+  const expandBtn = makeButton(state.selectedLabel ? "변경" : "폴더 선택하기", () => {
+    state.expanded = true;
+    ctx.rerender();
+  });
+  summary.appendChild(label);
+  summary.appendChild(expandBtn);
+  container.appendChild(summary);
+}
+
+// 로컬 폴더 / rclone 원격 전환 버튼 줄 — 이 함수가 그리는 줄은 목록 조회가 실패하더라도 항상 살아있어야 한다(로컬이 미설정이라 목록 조회가 실패해도
+// 최소한 rclone으로 바꿀 방법은 남아있어야 한다 — 실제로 이게 막혀서 오도가도 못하는 문제가 있었다). 이미 펼쳐진 쪽을 다시 누르면 접는다.
+function renderPickerModeRow(container, ctx) {
+  const { state, containerId } = ctx;
+  const modeRow = document.createElement("div");
+  modeRow.className = "folder-picker-mode-row";
+  for (const [mode, label] of [["local", "로컬 폴더"], ["rclone", "rclone 원격"]]) {
+    const active = state.mode === mode && state.modeConfirmed;
+    const btn = makeButton(label, () => {
+      if (active) {
+        state.modeConfirmed = false; // 그 아래 단계(루트 선택/폴더 목록)까지 같이 접힌다
+        ctx.rerender();
+        return;
+      }
+      archiveFolderPickerState[containerId] = freshPickerState(state, { mode, localRoot: state.localRoots[0], modeConfirmed: true, rootConfirmed: false });
+      ctx.rerender();
+    });
+    if (active) btn.classList.add("folder-picker-choice-active");
+    modeRow.appendChild(btn);
+  }
+  container.appendChild(modeRow);
+}
+
+// 로컬 루트가 2개 이상이면(예: 일괄 이동에서 ARCHIVE_ROOT/DOWNLOAD_ROOT 둘 다 고를 수 있는 경우) 로컬 모드일 때만 어느 루트 기준으로 찾아볼지 전환 버튼을 보여 준다.
+const LOCAL_ROOT_LABELS = { archive: "보관 폴더(ARCHIVE_ROOT)", download: "다운로드 폴더(네이버)", kakao_download: "카카오페이지 다운로드 폴더" };
+
+function renderPickerRootRow(container, ctx) {
+  const { state } = ctx;
+  const rootRow = document.createElement("div");
+  rootRow.className = "folder-picker-mode-row";
+  for (const rootName of state.localRoots) {
+    const btn = makeButton(LOCAL_ROOT_LABELS[rootName] || rootName, () => {
+      if (state.localRoot === rootName && state.rootConfirmed) {
+        state.rootConfirmed = false; // 이미 펼쳐진 걸 다시 누르면 접는다 — 그 아래 폴더 목록이 같이 접힘
+        ctx.rerender();
+        return;
+      }
+      state.localRoot = rootName;
+      state.path = ""; // 루트가 바뀌면 경로 기준이 달라지므로 처음부터 다시 찾아봄
+      state.rootConfirmed = true;
+      ctx.rerender();
+    });
+    if (state.localRoot === rootName && state.rootConfirmed) btn.classList.add("folder-picker-choice-active");
+    rootRow.appendChild(btn);
+  }
+  container.appendChild(rootRow);
+}
+
+// 고른 모드를 쓸 수 없는 환경이면 이유를 알려 주는 문구(쓸 수 있으면 null)
+function pickerUnavailableMessage(state, archiveSettings) {
+  if (state.mode === "local" && !archiveSettings.local_available) return "로컬 아카이빙 경로(ARCHIVE_ROOT)가 설정되어 있지 않습니다.";
+  if (state.mode === "rclone" && !archiveSettings.rclone_available) return "rclone 설정 파일이 등록되어 있지 않습니다.";
+  return null;
+}
+
+// rclone 원격을 아직 안 골랐으면 원격 선택 드롭다운부터
+async function renderRemoteChooser(listArea, ctx) {
+  const { state } = ctx;
+  listArea.innerHTML = '<p class="hint-inline">⏳ 원격 목록을 불러오는 중입니다...</p>';
+  const remotesData = await getRcloneRemotesCached();
+  listArea.innerHTML = "";
+  const remoteRow = document.createElement("div");
+  remoteRow.className = "registry-add-row";
+  const select = document.createElement("select");
+  select.innerHTML = remotesData.remotes.map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join("");
+  const chooseBtn = makeButton("이 원격 사용", () => {
+    state.remote = select.value;
+    _invalidateAllRcloneCacheForRemote(state.remote);
+    ctx.rerender();
+  });
+  remoteRow.appendChild(select);
+  remoteRow.appendChild(chooseBtn);
+  listArea.appendChild(remoteRow);
+}
+
+// 폴더 목록 — 한 번 받은 경로는 기억해 두고(_folderListCache) 없으면 요청한다. 로딩 중에도 무한정 기다리지 않고 벗어날 수 있게 취소 버튼을 로딩 문구와 함께 바로 보여 준다
+// (예전엔 요청이 오래 걸리는 동안 — 특히 원격 저장소가 느리거나 응답이 없을 때 — 화면에 아무 것도 못 누르고 새로고침하는 수밖에 없었다.
+// 요청 자체(백엔드의 rclone 실행)를 강제로 멈추진 못하지만 화면은 바로 이전 상태로 돌아갈 수 있다).
+async function loadFolderList(listArea, ctx, isRclone, currentPath) {
+  const { state } = ctx;
+  const cacheKey = _folderListCacheKey(isRclone, isRclone ? state.remote : state.localRoot, currentPath);
+  let data = _folderListCache[cacheKey];
+  if (data) return data;
+  const controller = new AbortController();
+  listArea.innerHTML = "";
+  listArea.appendChild(Object.assign(document.createElement("p"), { className: "hint-inline", textContent: "⏳ 폴더 목록을 불러오는 중입니다... (원격 저장소는 응답이 느릴 수 있습니다)" }));
+  listArea.appendChild(makeButton("취소하고 돌아가기", () => {
+    controller.abort();
+    ctx.rerender();
+  }));
+  const url = isRclone
+    ? `/api/archive/rclone/folders?remote=${encodeURIComponent(state.remote)}&path=${encodeURIComponent(currentPath)}`
+    : `/api/archive/folders?path=${encodeURIComponent(currentPath)}&local_root=${encodeURIComponent(state.localRoot)}`;
+  data = await apiCall(url, { signal: controller.signal });
+  _folderListCache[cacheKey] = data;
+  return data;
+}
+
+// 폴더를 고른다 — 고른 값/종류(/로컬이면 루트)를 알리고, 접어서 공간을 돌려준다(선택 요약은 접힌 화면에 그대로 보임). 방금 고른 걸 화면에서도 바로 보이게 다시 그린다
+// (예전엔 onSelect를 호출만 하고 화면엔 아무 표시가 없어서 실제로 선택이 됐는지 눈으로 확인할 방법이 없었다).
+function selectPickerFolder(ctx, value, destType, label) {
+  const { state } = ctx;
+  state.selectedLabel = label;
+  state.expanded = false;
+  ctx.onSelect(value, destType, destType === "local" ? state.localRoot : undefined);
+  ctx.rerender();
+}
+
+// "이 폴더 선택"을 눌렀을 때 — 폴더가 비어있는지 확인은 목록을 그릴 때 전부 미리 하지 않고 사용자가 실제로 선택을 누른 폴더 딱 하나에 대해서만 그 자리에서 확인한다
+// (예전엔 목록 조회 시점에 하위 폴더 전부를 확인해서, 폴더가 많으면 — 특히 rclone 원격은 폴더 개수만큼 원격에 개별 요청을 보내야 해서 — 몇 분씩 걸렸다).
+// 일괄 이동용 선택기는 애초에 "이미 파일이 있는 폴더"를 다루는 게 목적이라 이 확인 자체가 불필요하다.
+async function trySelectPickerFolder(ctx, btn, warnHost, folderName, folderPath, destValue, destType) {
+  const { state } = ctx;
+  if (state.skipExistingCheck) {
+    selectPickerFolder(ctx, destValue, destType, folderPath);
+    return;
+  }
+  const originalText = btn.textContent;
+  btn.textContent = "확인 중...";
+  btn.disabled = true;
+  try {
+    const checkResult = await apiCall(
+      `/api/archive/folder-check?dest_type=${destType}&remote=${encodeURIComponent(state.remote || "")}&path=${encodeURIComponent(folderPath)}`
+    );
+    if (checkResult.selectable) {
+      selectPickerFolder(ctx, destValue, destType, folderPath);
+      return;
+    }
+    // 그 자리에서 경고 + "그래도 선택"으로 전환한다 (팝업 없이)
+    btn.remove();
+    const warnWrap = document.createElement("div");
+    warnWrap.className = "folder-picker-warn";
+    const warnText = document.createElement("span");
+    warnText.textContent = `⚠ "${folderName}"엔 이미 파일이 있습니다.`;
+    warnWrap.appendChild(warnText);
+    warnWrap.appendChild(makeButton("그래도 선택", () => selectPickerFolder(ctx, destValue, destType, folderPath)));
+    warnHost.appendChild(warnWrap);
+  } catch (e) {
+    btn.textContent = originalText;
+    btn.disabled = false;
+    alert(`확인 실패: ${e.message}`);
+  }
+}
+
+// 현재 위치 줄(즐겨찾기를 쓰는 선택기는 옆에 별 버튼)
+async function renderPickerPathRow(listArea, ctx, isRclone, currentPath) {
+  const { state } = ctx;
+  const pathRow = document.createElement("div");
+  pathRow.className = "folder-picker-path";
+  pathRow.textContent = isRclone ? `현재 위치: ${state.remote}:/${currentPath}` : `현재 위치: /${currentPath}`;
+  if (!state.favorites) {
+    listArea.appendChild(pathRow);
+    return;
+  }
+  const pathWrap = document.createElement("div");
+  pathWrap.className = "folder-picker-path-row";
+  pathWrap.appendChild(pathRow);
+  pathWrap.appendChild(await makeFolderFavoriteStar(ctx.containerId, state, isRclone, currentPath, ctx.onSelect));
+  listArea.appendChild(pathWrap);
+}
+
+// 폴더 목록 상자 — (rclone이면) 원격 다시 선택, (하위면) 상위 폴더, 폴더마다 이름(누르면 그 안으로)과 "이 폴더 선택"
+function renderPickerFolderList(ctx, data, isRclone, currentPath) {
+  const { state } = ctx;
+  const listBox = document.createElement("div");
+  listBox.className = "folder-picker-list";
+  if (isRclone) {
+    listBox.appendChild(makeButton("⬅ 원격 다시 선택", () => {
+      state.remote = "";
+      state.path = "";
+      ctx.rerender();
+    }));
+  }
+  if (currentPath) {
+    listBox.appendChild(makeButton("⬆ 상위 폴더", () => {
+      state.path = currentPath.split("/").slice(0, -1).join("/");
+      ctx.rerender();
+    }));
+  }
+  for (const folder of data.folders) {
+    const row = document.createElement("div");
+    row.className = "folder-picker-row";
+    const isSelected = state.selectedLabel === folder.path;
+    if (isSelected) row.classList.add("folder-picker-row-selected");
+    row.appendChild(makeButton(`📁 ${folder.name}${isSelected ? " ✅" : ""}`, () => {
+      state.path = folder.path;
+      ctx.rerender();
+    }));
+    const destValue = isRclone ? `${state.remote}:${folder.path}` : folder.path;
+    const selectBtn = makeButton("이 폴더 선택", () => {
+      trySelectPickerFolder(ctx, selectBtn, row, folder.name, folder.path, destValue, isRclone ? "rclone" : "local");
+    });
+    row.appendChild(selectBtn);
+    listBox.appendChild(row);
+  }
+  return listBox;
+}
+
+// 새 폴더 만들기 줄 — 만든 뒤에도 같은 위치(상위 목록)에 그대로 머물러서 방금 만든 폴더를 목록에서 바로 선택할 수 있게 한다
+// (예전엔 만들자마자 그 폴더 안으로 들어가버려서 그 폴더 자체를 고르려면 다시 상위로 나와야 하는 불편함이 있었다).
+function renderPickerNewFolderRow(ctx, isRclone, currentPath) {
+  const { state } = ctx;
+  const newFolderRow = document.createElement("div");
+  newFolderRow.className = "registry-add-row folder-picker-new-row";
+  const newFolderInput = document.createElement("input");
+  newFolderInput.type = "text";
+  newFolderInput.placeholder = "새 폴더 이름";
+  const newFolderBtn = makeButton("새 폴더 만들기", async () => {
+    const name = newFolderInput.value.trim();
+    if (!name) return;
+    const newPath = currentPath ? `${currentPath}/${name}` : name;
+    const originalText = newFolderBtn.textContent;
+    newFolderBtn.textContent = "만드는 중...";
+    newFolderBtn.disabled = true;
+    newFolderInput.disabled = true;
+    try {
+      if (isRclone) {
+        await apiCall("/api/archive/rclone/folders", { method: "POST", body: JSON.stringify({ remote: state.remote, path: newPath }) });
+      } else {
+        await apiCall("/api/archive/folders", { method: "POST", body: JSON.stringify({ path: newPath, root: state.localRoot }) });
+      }
+      _invalidateFolderListCache(isRclone, isRclone ? state.remote : state.localRoot, currentPath); // 새 폴더가 생겼으니 이 경로는 다시 조회해야 함
+      newFolderInput.value = "";
+      ctx.rerender();
+    } catch (e) {
+      newFolderBtn.textContent = originalText;
+      newFolderBtn.disabled = false;
+      newFolderInput.disabled = false;
+      alert(e.message);
+    }
+  });
+  newFolderRow.appendChild(newFolderInput);
+  newFolderRow.appendChild(newFolderBtn);
+  return newFolderRow;
+}
+
+// 목록 조회 등이 실패했을 때 — 직접 취소(AbortError)는 에러로 취급 안 한다. 조회에 실패한 위치를 계속 기억하고 있으면 새로고침해도 매번 똑같이 고장난 위치를
+// 다시 열려다 또 실패하는 문제가 실제로 있었다(예: OneDrive의 Personal Vault처럼 API로 접근 자체가 원천적으로 안 되는 특수 폴더) —
+// 그래서 실패하면 저장해둔 위치를 지우고, 처음으로 되돌아갈 방법을 준다.
+function showPickerError(listArea, ctx, e) {
+  if (e.name === "AbortError") return;
+  try {
+    sessionStorage.removeItem(_folderPickerStorageKey(ctx.containerId));
+  } catch (_) {
+    // 조용히 무시
+  }
+  listArea.innerHTML = "";
+  const errorMsg = document.createElement("p");
+  errorMsg.className = "error";
+  errorMsg.textContent = e.message;
+  listArea.appendChild(errorMsg);
+  listArea.appendChild(makeButton("⬅ 처음으로 돌아가기", () => {
+    archiveFolderPickerState[ctx.containerId] = freshPickerState(ctx.state, {});
+    ctx.rerender();
+  }));
+}
+
 async function renderFolderPickerContents(containerId, onSelect) {
   const container = document.getElementById(containerId);
   const state = archiveFolderPickerState[containerId];
   saveFolderPickerState(containerId);
+  const ctx = { containerId, state, onSelect, rerender: () => renderFolderPickerContents(containerId, onSelect) };
 
   if (!state.expanded) {
-    // 접힌 상태 — 지금 뭐가 골라져 있는지 한 줄로만 보여주고, 실제 폴더 목록은
-    // 눌러야 나온다. 폴더 선택기가 여러 개 세로로 쌓인 화면에서 전부 펼쳐진
-    // 채로 나오면 스크롤이 끔찍하게 길어진다는 문제가 실제로 있었다.
-    container.innerHTML = "";
-    const summary = document.createElement("div");
-    summary.className = "folder-picker-summary";
-    const label = document.createElement("span");
-    label.className = "folder-picker-summary-text";
-    label.textContent = state.selectedLabel ? `선택됨: ${state.selectedLabel}` : "폴더를 선택하지 않았습니다.";
-    const expandBtn = makeButton(state.selectedLabel ? "변경" : "폴더 선택하기", () => {
-      state.expanded = true;
-      renderFolderPickerContents(containerId, onSelect);
-    });
-    summary.appendChild(label);
-    summary.appendChild(expandBtn);
-    container.appendChild(summary);
+    renderPickerSummary(container, ctx);
     return;
   }
 
-  // 폴더를 선택하면 목록 전체를 다시 그리는데, 그때마다 스크롤이 맨 위로
-  // 돌아가버리면 방금 고른 게 지금 보이는 위치에서 벗어나 있을 수 있어서
-  // "선택이 제대로 됐는지" 눈으로 바로 확인하기 어려웠다 — 다시 그리기 전의
-  // 스크롤 위치를 기억해뒀다가 그대로 복원한다.
+  // 폴더를 선택하면 목록 전체를 다시 그리는데, 그때마다 스크롤이 맨 위로 돌아가버리면 방금 고른 게 지금 보이는 위치에서 벗어나 있을 수 있어서
+  // "선택이 제대로 됐는지" 눈으로 바로 확인하기 어려웠다 — 다시 그리기 전의 스크롤 위치를 기억해뒀다가 그대로 복원한다.
   const prevScrollTop = container.querySelector(".folder-picker-list")?.scrollTop || 0;
   container.innerHTML = '<p class="hint-inline">불러오는 중...</p>';
 
@@ -301,311 +578,39 @@ async function renderFolderPickerContents(containerId, onSelect) {
   container.innerHTML = "";
   if (state.favorites) await renderFolderFavoritesRow(container, containerId, state, archiveSettings, onSelect);
 
-  // 모드 전환 버튼은 이 함수 안에서 무슨 일이 있어도(목록 조회가 실패하더라도)
-  // 항상 살아있어야 한다 — 로컬이 미설정이라 목록 조회가 실패해도, 최소한
-  // rclone으로 바꿀 방법은 남아있어야 하기 때문 (실제로 이게 막혀서 오도가도
-  // 못하는 문제가 있었다).
-  //
-  // 로컬 폴더/rclone 원격 -> (로컬이면) 보관 폴더/다운로드 폴더 -> 실제 폴더 목록,
-  // 이 순서로 한 단계씩만 펼쳐서 보여준다 — 처음부터 다 펼쳐놓으면 아직 고르지도
-  // 않은 다음 단계 UI(그리고 곧바로 시작되는 목록 조회 API 호출)까지 화면을
-  // 차지해서 공간도 낭비되고, 뭘 먼저 눌러야 하는지도 헷갈린다는 문제가 있었다.
+  // 로컬 폴더/rclone 원격 → (로컬이면) 보관 폴더/다운로드 폴더 → 실제 폴더 목록, 이 순서로 한 단계씩만 펼쳐서 보여준다.
   const needsModeChoice = archiveSettings.rclone_available && archiveSettings.local_available;
-  if (needsModeChoice) {
-    const modeRow = document.createElement("div");
-    modeRow.className = "folder-picker-mode-row";
-    const localBtn = makeButton("로컬 폴더", () => {
-      if (state.mode === "local" && state.modeConfirmed) {
-        // 이미 펼쳐진 걸 다시 누르면 접는다 — 그 아래 단계(루트 선택/폴더 목록)까지 같이 접힘
-        state.modeConfirmed = false;
-        renderFolderPickerContents(containerId, onSelect);
-        return;
-      }
-      archiveFolderPickerState[containerId] = {
-        mode: "local", path: "", remote: "", skipExistingCheck: state.skipExistingCheck, favorites: state.favorites,
-        localRoots: state.localRoots, localRoot: state.localRoots[0], expanded: true,
-        modeConfirmed: true, rootConfirmed: false,
-      };
-      renderFolderPickerContents(containerId, onSelect);
-    });
-    const rcloneBtn = makeButton("rclone 원격", () => {
-      if (state.mode === "rclone" && state.modeConfirmed) {
-        state.modeConfirmed = false;
-        renderFolderPickerContents(containerId, onSelect);
-        return;
-      }
-      archiveFolderPickerState[containerId] = {
-        mode: "rclone", path: "", remote: "", skipExistingCheck: state.skipExistingCheck, favorites: state.favorites,
-        localRoots: state.localRoots, localRoot: state.localRoots[0], expanded: true,
-        modeConfirmed: true, rootConfirmed: false,
-      };
-      renderFolderPickerContents(containerId, onSelect);
-    });
-    if (state.mode === "local" && state.modeConfirmed) localBtn.classList.add("folder-picker-choice-active");
-    if (state.mode === "rclone" && state.modeConfirmed) rcloneBtn.classList.add("folder-picker-choice-active");
-    modeRow.appendChild(localBtn);
-    modeRow.appendChild(rcloneBtn);
-    container.appendChild(modeRow);
-  }
-  if (needsModeChoice && !state.modeConfirmed) {
-    return; // 로컬/rclone을 아직 안 골랐으면 그 다음 단계는 아직 안 보여줌
-  }
+  if (needsModeChoice) renderPickerModeRow(container, ctx);
+  if (needsModeChoice && !state.modeConfirmed) return; // 로컬/rclone을 아직 안 골랐으면 그 다음 단계는 아직 안 보여줌
 
-  // localRoots가 2개 이상이면(예: 일괄 이동에서 ARCHIVE_ROOT/DOWNLOAD_ROOT 둘 다
-  // 고를 수 있는 경우), 로컬 모드일 때만 어느 루트를 기준으로 찾아볼지 전환 버튼을 보여준다.
-  const localRootLabels = { archive: "보관 폴더(ARCHIVE_ROOT)", download: "다운로드 폴더(네이버)", kakao_download: "카카오페이지 다운로드 폴더" };
   const needsRootChoice = state.mode === "local" && state.localRoots.length > 1;
-  if (needsRootChoice) {
-    const rootRow = document.createElement("div");
-    rootRow.className = "folder-picker-mode-row";
-    for (const rootName of state.localRoots) {
-      const btn = makeButton(localRootLabels[rootName] || rootName, () => {
-        if (state.localRoot === rootName && state.rootConfirmed) {
-          // 이미 펼쳐진 걸 다시 누르면 접는다 — 그 아래 폴더 목록이 같이 접힘
-          state.rootConfirmed = false;
-          renderFolderPickerContents(containerId, onSelect);
-          return;
-        }
-        state.localRoot = rootName;
-        state.path = ""; // 루트가 바뀌면 경로 기준이 달라지므로 처음부터 다시 찾아봄
-        state.rootConfirmed = true;
-        renderFolderPickerContents(containerId, onSelect);
-      });
-      if (state.localRoot === rootName && state.rootConfirmed) btn.classList.add("folder-picker-choice-active");
-      rootRow.appendChild(btn);
-    }
-    container.appendChild(rootRow);
-  }
-  if (needsRootChoice && !state.rootConfirmed) {
-    return; // 보관/다운로드 폴더를 아직 안 골랐으면 실제 폴더 목록은 아직 안 보여줌
-  }
+  if (needsRootChoice) renderPickerRootRow(container, ctx);
+  if (needsRootChoice && !state.rootConfirmed) return; // 보관/다운로드 폴더를 아직 안 골랐으면 실제 폴더 목록은 아직 안 보여줌
 
   const listArea = document.createElement("div");
   container.appendChild(listArea);
-
-  if (state.mode === "local" && !archiveSettings.local_available) {
-    listArea.innerHTML = '<p class="error">로컬 아카이빙 경로(ARCHIVE_ROOT)가 설정되어 있지 않습니다.</p>';
+  const unavailable = pickerUnavailableMessage(state, archiveSettings);
+  if (unavailable) {
+    listArea.innerHTML = `<p class="error">${unavailable}</p>`;
     return;
   }
-  if (state.mode === "rclone" && !archiveSettings.rclone_available) {
-    listArea.innerHTML = '<p class="error">rclone 설정 파일이 등록되어 있지 않습니다.</p>';
-    return;
-  }
-
-  const backToStartBtn = () =>
-    makeButton("⬅ 처음으로 돌아가기", () => {
-      archiveFolderPickerState[containerId] = {
-        mode: state.mode, path: "", remote: "", skipExistingCheck: state.skipExistingCheck, favorites: state.favorites,
-        localRoots: state.localRoots, localRoot: state.localRoot, expanded: true,
-        modeConfirmed: state.modeConfirmed, rootConfirmed: state.rootConfirmed,
-      };
-      renderFolderPickerContents(containerId, onSelect);
-    });
 
   try {
     if (state.mode === "rclone" && !state.remote) {
-      // 원격을 아직 안 골랐으면 원격 선택 드롭다운부터
-      listArea.innerHTML = '<p class="hint-inline">⏳ 원격 목록을 불러오는 중입니다...</p>';
-      const remotesData = await getRcloneRemotesCached();
-      listArea.innerHTML = "";
-      const remoteRow = document.createElement("div");
-      remoteRow.className = "registry-add-row";
-      const select = document.createElement("select");
-      select.innerHTML = remotesData.remotes.map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join("");
-      const chooseBtn = makeButton("이 원격 사용", () => {
-        state.remote = select.value;
-        _invalidateAllRcloneCacheForRemote(state.remote);
-        renderFolderPickerContents(containerId, onSelect);
-      });
-      remoteRow.appendChild(select);
-      remoteRow.appendChild(chooseBtn);
-      listArea.appendChild(remoteRow);
+      await renderRemoteChooser(listArea, ctx);
       return;
     }
-
     const isRclone = state.mode === "rclone";
     const currentPath = state.path || "";
-    const cacheKey = _folderListCacheKey(isRclone, isRclone ? state.remote : state.localRoot, currentPath);
-
-    let data = _folderListCache[cacheKey];
-    if (!data) {
-      // 로딩 중에도 무한정 기다리지 않고 벗어날 수 있게, 취소 버튼을 로딩 문구와
-      // 함께 바로 보여준다 — 예전엔 요청이 오래 걸리는 동안(특히 원격 저장소가
-      // 느리거나 응답이 없을 때) 화면에 아무 것도 못 누르고 새로고침하는 수밖에
-      // 없었다. 요청 자체(백엔드의 rclone 실행)를 강제로 멈추진 못하지만, 최소한
-      // 화면은 바로 이전 상태로 돌아갈 수 있게 한다.
-      const controller = new AbortController();
-      listArea.innerHTML = "";
-      listArea.appendChild(Object.assign(document.createElement("p"), { className: "hint-inline", textContent: "⏳ 폴더 목록을 불러오는 중입니다... (원격 저장소는 응답이 느릴 수 있습니다)" }));
-      const cancelBtn = makeButton("취소하고 돌아가기", () => {
-        controller.abort();
-        renderFolderPickerContents(containerId, onSelect);
-      });
-      listArea.appendChild(cancelBtn);
-
-      const url = isRclone
-        ? `/api/archive/rclone/folders?remote=${encodeURIComponent(state.remote)}&path=${encodeURIComponent(currentPath)}`
-        : `/api/archive/folders?path=${encodeURIComponent(currentPath)}&local_root=${encodeURIComponent(state.localRoot)}`;
-      data = await apiCall(url, { signal: controller.signal });
-      _folderListCache[cacheKey] = data;
-    }
+    const data = await loadFolderList(listArea, ctx, isRclone, currentPath);
     listArea.innerHTML = "";
-
-    const pathRow = document.createElement("div");
-    pathRow.className = "folder-picker-path";
-    pathRow.textContent = isRclone ? `현재 위치: ${state.remote}:/${currentPath}` : `현재 위치: /${currentPath}`;
-    if (state.favorites) {
-      const pathWrap = document.createElement("div");
-      pathWrap.className = "folder-picker-path-row";
-      pathWrap.appendChild(pathRow);
-      pathWrap.appendChild(await makeFolderFavoriteStar(containerId, state, isRclone, currentPath, onSelect));
-      listArea.appendChild(pathWrap);
-    } else {
-      listArea.appendChild(pathRow);
-    }
-
-    const listBox = document.createElement("div");
-    listBox.className = "folder-picker-list";
-
-    if (isRclone) {
-      const backBtn = makeButton("⬅ 원격 다시 선택", () => {
-        state.remote = "";
-        state.path = "";
-        renderFolderPickerContents(containerId, onSelect);
-      });
-      listBox.appendChild(backBtn);
-    }
-    if (currentPath) {
-      const upBtn = makeButton("⬆ 상위 폴더", () => {
-        state.path = currentPath.split("/").slice(0, -1).join("/");
-        renderFolderPickerContents(containerId, onSelect);
-      });
-      listBox.appendChild(upBtn);
-    }
-
-    function selectAndShow(value, destType, label) {
-      state.selectedLabel = label;
-      state.expanded = false; // 골랐으면 접어서 공간을 돌려준다 — 선택 요약은 접힌 화면에 그대로 보임
-      onSelect(value, destType, destType === "local" ? state.localRoot : undefined);
-      // 방금 고른 걸 화면에서도 바로 보이게 다시 그린다 — 예전엔 onSelect를
-      // 호출만 하고 화면엔 아무 표시가 없어서, 실제로 선택이 됐는지 눈으로
-      //확인할 방법이 없었다.
-      renderFolderPickerContents(containerId, onSelect);
-    }
-
-    // 폴더가 비어있는지 확인은, 목록을 그릴 때 전부 미리 하지 않고 사용자가
-    // 실제로 "선택"을 누른 폴더 딱 하나에 대해서만 그 자리에서 확인한다 —
-    // 예전엔 목록 조회 시점에 하위 폴더 전부를 확인해서, 폴더가 많으면(특히
-    // rclone 원격은 폴더 개수만큼 원격에 개별 요청을 보내야 해서) 몇 분씩
-    //걸리는 문제가 실제로 있었다.
-    async function trySelectFolder(btn, warnHost, folderName, folderPath, destValue, destType) {
-      // 일괄 이동(bulk-move)용 선택기는 애초에 "이미 파일이 있는 폴더"를 다루는
-      // 게 목적이라 이 확인 절차 자체가 불필요하다 — 바로 선택되게 한다.
-      if (state.skipExistingCheck) {
-        selectAndShow(destValue, destType, folderPath);
-        return;
-      }
-      const originalText = btn.textContent;
-      btn.textContent = "확인 중...";
-      btn.disabled = true;
-      try {
-        const checkResult = await apiCall(
-          `/api/archive/folder-check?dest_type=${destType}&remote=${encodeURIComponent(state.remote || "")}&path=${encodeURIComponent(folderPath)}`
-        );
-        if (checkResult.selectable) {
-          selectAndShow(destValue, destType, folderPath);
-          return;
-        }
-        // 그 자리에서 경고 + "그래도 선택"으로 전환한다 (팝업 없이)
-        btn.remove();
-        const warnWrap = document.createElement("div");
-        warnWrap.className = "folder-picker-warn";
-        const warnText = document.createElement("span");
-        warnText.textContent = `⚠ "${folderName}"엔 이미 파일이 있습니다.`;
-        const proceedBtn = makeButton("그래도 선택", () => selectAndShow(destValue, destType, folderPath));
-        warnWrap.appendChild(warnText);
-        warnWrap.appendChild(proceedBtn);
-        warnHost.appendChild(warnWrap);
-      } catch (e) {
-        btn.textContent = originalText;
-        btn.disabled = false;
-        alert(`확인 실패: ${e.message}`);
-      }
-    }
-
-    for (const folder of data.folders) {
-      const row = document.createElement("div");
-      row.className = "folder-picker-row";
-      const isSelected = state.selectedLabel === folder.path;
-      if (isSelected) row.classList.add("folder-picker-row-selected");
-      const nameBtn = makeButton(`📁 ${folder.name}${isSelected ? " ✅" : ""}`, () => {
-        state.path = folder.path;
-        renderFolderPickerContents(containerId, onSelect);
-      });
-      row.appendChild(nameBtn);
-      const destValue = isRclone ? `${state.remote}:${folder.path}` : folder.path;
-
-      const selectBtn = makeButton("이 폴더 선택", () => {
-        trySelectFolder(selectBtn, row, folder.name, folder.path, destValue, isRclone ? "rclone" : "local");
-      });
-      row.appendChild(selectBtn);
-      listBox.appendChild(row);
-    }
+    await renderPickerPathRow(listArea, ctx, isRclone, currentPath);
+    const listBox = renderPickerFolderList(ctx, data, isRclone, currentPath);
     listArea.appendChild(listBox);
     listBox.scrollTop = prevScrollTop;
-
-    const newFolderRow = document.createElement("div");
-    newFolderRow.className = "registry-add-row folder-picker-new-row";
-    const newFolderInput = document.createElement("input");
-    newFolderInput.type = "text";
-    newFolderInput.placeholder = "새 폴더 이름";
-    const newFolderBtn = makeButton("새 폴더 만들기", async () => {
-      const name = newFolderInput.value.trim();
-      if (!name) return;
-      const newPath = currentPath ? `${currentPath}/${name}` : name;
-      const originalText = newFolderBtn.textContent;
-      newFolderBtn.textContent = "만드는 중...";
-      newFolderBtn.disabled = true;
-      newFolderInput.disabled = true;
-      try {
-        if (isRclone) {
-          await apiCall("/api/archive/rclone/folders", { method: "POST", body: JSON.stringify({ remote: state.remote, path: newPath }) });
-        } else {
-          await apiCall("/api/archive/folders", { method: "POST", body: JSON.stringify({ path: newPath, root: state.localRoot }) });
-        }
-        _invalidateFolderListCache(isRclone, isRclone ? state.remote : state.localRoot, currentPath); // 새 폴더가 생겼으니 이 경로는 다시 조회해야 함
-        // 예전엔 만들자마자 그 폴더 안으로 들어가버려서, 그 폴더 자체를 고르려면
-        // 다시 상위로 나와야 하는 불편함이 있었다 — 생성 후에도 같은 위치(상위
-        // 목록)에 그대로 머물러서, 방금 만든 폴더를 목록에서 바로 선택할 수 있게 한다.
-        newFolderInput.value = "";
-        renderFolderPickerContents(containerId, onSelect);
-      } catch (e) {
-        newFolderBtn.textContent = originalText;
-        newFolderBtn.disabled = false;
-        newFolderInput.disabled = false;
-        alert(e.message);
-      }
-    });
-    newFolderRow.appendChild(newFolderInput);
-    newFolderRow.appendChild(newFolderBtn);
-    listArea.appendChild(newFolderRow);
+    listArea.appendChild(renderPickerNewFolderRow(ctx, isRclone, currentPath));
   } catch (e) {
-    if (e.name === "AbortError") return; // 사용자가 직접 취소한 것 — 에러로 취급 안 함
-    // 조회에 실패한 위치를 계속 기억하고 있으면, 새로고침해도 매번 똑같이
-    // 고장난 위치를 다시 열려다 또 실패하는 문제가 실제로 있었다(예: OneDrive의
-    // Personal Vault처럼 API로 접근 자체가 원천적으로 안 되는 특수 폴더) —
-    // 그래서 실패하면 저장해둔 위치를 지우고, 처음으로 되돌아갈 방법을 준다.
-    try {
-      sessionStorage.removeItem(_folderPickerStorageKey(containerId));
-    } catch (_) {
-      // 조용히 무시
-    }
-    listArea.innerHTML = "";
-    const errorMsg = document.createElement("p");
-    errorMsg.className = "error";
-    errorMsg.textContent = e.message;
-    listArea.appendChild(errorMsg);
-    listArea.appendChild(backToStartBtn());
+    showPickerError(listArea, ctx, e);
   }
 }
 

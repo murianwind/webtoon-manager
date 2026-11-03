@@ -1,4 +1,4 @@
-"""요일별 목록에서 빠진 추적 작품(장기 휴재 등)의 요일을 작품 페이지에서 백그라운드로 알아낸다.
+"""요일별 목록에서 빠진 추적 작품(장기 휴재 등)의 요일을 백그라운드로 알아낸다(작품 정보 API 우선, 없으면 모바일 작품 페이지 — naver_api.fetch_title_weekdays).
 
 네이버의 요일별 목록은 오래 쉬는 작품을 빼서, 그런 작품은 요일을 몰라 "기타"에 남는다. 전체목록을 불러올 때(naver_list_service) 알아볼 작품을 골라 여기서 시작하면
 응답을 늦추지 않게 백그라운드로 한 번에 weekdays.LOOKUP_BATCH개까지 작품 페이지를 읽어 저장한다(알아낸 요일은 다음에 목록을 불러올 때부터 나온다).
@@ -40,7 +40,7 @@ async def run(title_ids: list[str], timeout_seconds: int) -> None:
         async with aiohttp.ClientSession() as session:
             for title_id in title_ids:
                 try:
-                    page = await naver_api.fetch_title_page(session, title_id, timeout_seconds)
+                    page = await naver_api.fetch_title_weekdays(session, title_id, timeout_seconds)
                 except Exception as e:
                     log.warning("작품 요일 조회 실패 (titleId=%s): %s", title_id, e)
                     page = TitlePage(status=None)

@@ -36,5 +36,12 @@ const { makeApp, sleep, idle, waitFor, ok, done } = require("./harness");
   ok(clock.w.__explicit === 2020 && clock.w.__parsed === "2021-05-05T00:00:00.000Z", "인자가 있는 Date는 그대로");
   ok(clock.w.__day === "tue", "앱이 계산한 오늘 요일은 화요일(실제 날짜와 무관): " + clock.w.__day);
   ok(new Date().getTime() !== Date.parse("2026-11-03T03:00:00Z"), "테스트 프로세스의 Date는 영향받지 않는다");
+  // Scenario 5: idle에도 제한 시간 — 끝나지 않는 요청이 있으면(일부러 느리게 둔 요청을 기다리는 실수 등) 무한히 멈추지 않고 몇 개가 남았는지 알려 주며 실패한다.
+  // (끝나지 않는 요청이 프로세스 전체의 진행 중 개수에 남으므로 이 시나리오는 맨 마지막에 둔다)
+  const quick = makeApp({ "/api/ok": {} }); quick.run("window.__q = apiCall('/api/ok');"); await idle(300); ok(true, "정상 요청은 제한 시간 안에 끝난다");
+  const hung = makeApp({ "/api/never": () => new Promise(() => {}) });
+  hung.run("window.__never = apiCall('/api/never');");
+  let idleMessage = ""; try { await idle(300); } catch (e) { idleMessage = e.message; }
+  ok(/끝나지 않았습니다/.test(idleMessage) && /1개/.test(idleMessage) && /300ms/.test(idleMessage), "끝나지 않는 요청이 있으면 제한 시간 뒤 실패: " + idleMessage);
   done();
 })();

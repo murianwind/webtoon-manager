@@ -1,0 +1,122 @@
+{
+ "61658950": {
+  "simple": {
+   "series_type": "P",
+   "business_model": "T",
+   "series_sale_state": "ST61",
+   "age_grade": 15
+  },
+  "overview": {
+   "title": "유치원 WARS",
+   "on_issue": "Y",
+   "pub_period": "목",
+   "state": "ST61",
+   "is_waitfree": false,
+   "series_id": 61658950,
+   "on_sale_count": 145,
+   "last_slide_added_dt": "2026-10-29T00:01:07+09:00"
+  }
+ },
+ "61328034": {
+  "simple": {
+   "series_type": "W",
+   "business_model": "T",
+   "series_sale_state": "ST61",
+   "age_grade": 0
+  },
+  "overview": {
+   "title": "악녀님에겐 새 남편 따위 필요하지 않아요!",
+   "on_issue": "Y",
+   "pub_period": "수",
+   "state": "ST61",
+   "is_waitfree": false,
+   "series_id": 61328034,
+   "on_sale_count": 52,
+   "last_slide_added_dt": "2024-02-27T22:00:10+09:00"
+  },
+  "product_series_item": {
+   "title": "악녀님에겐 새 남편 따위 필요하지 않아요!",
+   "on_issue": "Y",
+   "state": "ST61",
+   "on_sale_count": 52,
+   "last_slide_added_dt": "2024-02-27T22:00:10+09:00",
+   "series_id": 61328034,
+   "is_waitfree": false
+  },
+  "product_list_len": 6
+ },
+ "58672424": {
+  "simple": {
+   "series_type": "P",
+   "business_model": "T",
+   "series_sale_state": "ST61",
+   "age_grade": 0
+  },
+  "overview": {
+   "title": "만고지존",
+   "on_issue": "Y",
+   "pub_period": "월, 목",
+   "state": "ST61",
+   "is_waitfree": false,
+   "series_id": 58672424,
+   "on_sale_count": 531,
+   "last_slide_added_dt": "2026-11-02T00:01:04+09:00"
+  },
+  "product_series_item": {
+   "title": "만고지존",
+   "on_issue": "Y",
+   "state": "ST61",
+   "on_sale_count": 531,
+   "last_slide_added_dt": "2026-11-02T00:01:04+09:00",
+   "series_id": 58672424,
+   "is_waitfree": false
+  },
+  "product_list_len": 6
+ },
+ "66707967": {
+  "simple": {
+   "series_type": "P",
+   "business_model": "T",
+   "series_sale_state": "ST61",
+   "age_grade": 0
+  },
+  "overview": {
+   "title": "마왕 왕녀님",
+   "on_issue": "Y",
+   "pub_period": null,
+   "state": "ST61",
+   "is_waitfree": true,
+   "series_id": 66707967,
+   "on_sale_count": 61,
+   "last_slide_added_dt": "2026-05-11T22:01:04+09:00"
+  }
+ },
+ "56434854": {
+  "simple": {
+   "series_type": "P",
+   "business_model": "T",
+   "series_sale_state": "ST62",
+   "age_grade": 15
+  },
+  "overview": {
+   "title": "록사나 : 여주인공의 오빠를 지키는 방법",
+   "on_issue": "Y",
+   "pub_period": "화",
+   "state": "ST62",
+   "is_waitfree": true,
+   "series_id": 56434854,
+   "on_sale_count": 44,
+   "last_slide_added_dt": "2022-08-29T22:00:18+09:00"
+  },
+  "product_series_item": {
+   "title": "록사나 : 여주인공의 오빠를 지키는 방법",
+   "on_issue": "Y",
+   "state": "ST62",
+   "on_sale_count": 44,
+   "last_slide_added_dt": "2022-08-29T22:00:18+09:00",
+   "series_id": 56434854,
+   "is_waitfree": true
+  },
+  "product_list_len": 0
+ }
+}

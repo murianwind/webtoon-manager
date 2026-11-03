@@ -31,6 +31,8 @@ def kakao(tid, name, status):
 for tid, name in ((1, "카카오완결"), (2, "카카오종료"), (3, "카카오휴재"), (4, "카카오연재인데목록에없음"), (5, "카카오대기"), (6, "카카오503"), (7, "카카오요일앎")): kakao(tid, name, EX)
 kakao_status.save(1, on_issue="N", http=200); kakao_status.save(2, on_issue=None, http=404); kakao_status.save(3, on_issue="P", http=200)
 kakao_status.save(4, on_issue="Y", http=200); kakao_status.save(6, on_issue=None, http=503)
+kakao(8, "카카오판매중지", EX); kakao_status.save(8, on_issue="Y", http=200, state="ST62")                                         # 연재(Y) 그대로지만 판매 중지(ST62) — 실제 사례
+kakao(9, "카카오개요에서요일앎", EX); kakao_status.save(9, on_issue="Y", http=200, state="ST61", weekdays=["mon"])                 # 요일별 목록엔 없지만 개요에서 요일을 알아낸 작품은 세지 않는다
 CATALOG = [{"title_id": 7, "weekdays": ["wed"]}, {"title_id": 99, "weekdays": ["mon"]}]
 kakao_catalog.snapshot = lambda: (CATALOG, None, False)
 
@@ -40,7 +42,7 @@ nv, kk = result["naver"], result["kakao"]
 assert nv["total"] == 5 and nv["reasons"] == {"finished": 1, "no_weekday_on_page": 1, "check_failed": 2, "pending": 1}, nv
 assert nv["failed_http"] == {"403": 1, "network": 1}, nv["failed_http"]
 assert sorted(nv["samples"]["check_failed"]) == ["네이버403", "네이버네트워크오류"], nv["samples"]
-assert kk["total"] == 6 and kk["reasons"] == {"finished": 1, "ended": 1, "hiatus": 1, "serving_not_listed": 1, "pending": 1, "check_failed": 1}, kk
+assert kk["total"] == 7 and kk["reasons"] == {"finished": 1, "ended": 1, "sale_stopped": 1, "hiatus": 1, "serving_not_listed": 1, "pending": 1, "check_failed": 1}, kk
 assert kk["failed_http"] == {"503": 1} and kk["samples"]["ended"] == ["카카오종료"]
 print("1) 제외됨 요약 OK")
 
@@ -56,7 +58,7 @@ print("3) 샘플 상한 OK")
 
 # Scenario 4: 카카오 목록(요일별 목록 캐시)을 아직 못 받았으면 "연재인데 목록에 없음"으로 단정하지 않는다(목록 미확인)
 CATALOG.clear()
-r = weekday_diagnostics.summarize(EX); assert "serving_not_listed" not in r["kakao"]["reasons"] and r["kakao"]["reasons"].get("catalog_not_loaded") == 1 and r["kakao"]["reasons"]["pending"] == 2 and r["kakao"]["total"] == 7, r["kakao"]        # 목록이 비면 요일 아는 작품(7)도 모르는 쪽(대기)으로
+r = weekday_diagnostics.summarize(EX); assert "serving_not_listed" not in r["kakao"]["reasons"] and r["kakao"]["reasons"].get("catalog_not_loaded") == 1 and r["kakao"]["reasons"]["pending"] == 2 and r["kakao"]["total"] == 8, r["kakao"]        # 목록이 비면 요일 아는 작품(7)도 모르는 쪽(대기)으로
 CATALOG.extend([{"title_id": 7, "weekdays": ["wed"]}])
 print("4) 목록 미확인 OK")
 

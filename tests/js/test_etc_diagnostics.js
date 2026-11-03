@@ -6,7 +6,7 @@ const { listItem } = require("./factories");
   const gaps = {
     status: "excluded",
     naver: { total: 6, reasons: { finished: 1, no_weekday_on_page: 1, check_failed: 2, pending: 2 }, failed_http: { "403": 1, network: 1 }, samples: { pending: ["대기작A", "대기작B"], check_failed: ["실패작"], finished: ["완결작"], no_weekday_on_page: ["요일없음작"] } },
-    kakao: { total: 3, reasons: { ended: 1, hiatus: 1, serving_not_listed: 1 }, failed_http: {}, samples: { ended: ["종료작"], hiatus: ["휴재작"], serving_not_listed: ["연재작"] } },
+    kakao: { total: 4, reasons: { ended: 1, sale_stopped: 1, hiatus: 1, serving_not_listed: 1 }, failed_http: {}, samples: { ended: ["종료작"], sale_stopped: ["중지작"], hiatus: ["휴재작"], serving_not_listed: ["연재작"] } },
   };
   let gapData = gaps;
   const excludedRows = [listItem("naver", 1, "기타작품", [], { status: "excluded" }), listItem("naver", 2, "화요일작품", ["tue"], { status: "excluded" })];
@@ -25,10 +25,10 @@ const { listItem } = require("./factories");
   const text = w.eval("describeEtcDiagnostics")(gaps);
   ok(text.includes("네이버 6개") && text.includes("완결 1") && text.includes("작품 페이지에 요일 없음 1") && text.includes("요일 확인 대기 2"), "네이버 원인: " + text);
   ok(text.includes("확인 실패 2(HTTP 403 1, 네트워크 오류 1)"), "확인 실패는 상태별: " + text);
-  ok(text.includes("카카오 3개") && text.includes("서비스 종료 1") && text.includes("휴재 1") && text.includes("연재 중이지만 요일 목록에 없음 1"), "카카오 원인: " + text);
+  ok(text.includes("카카오 4개") && text.includes("서비스 종료 1") && text.includes("판매 중지 1") && text.includes("휴재 1") && text.includes("연재 중이지만 요일 목록에 없음 1"), "카카오 원인: " + text);
   ok(w.eval("describeEtcDiagnostics")({ status: "excluded", naver: { total: 0, reasons: {}, failed_http: {}, samples: {} }, kakao: { total: 0, reasons: {}, failed_http: {}, samples: {} } }) === "", "원인이 없으면 빈 문자열");
   const onlyKakao = w.eval("describeEtcDiagnostics")({ status: null, naver: { total: 0, reasons: {}, failed_http: {}, samples: {} }, kakao: gaps.kakao });
-  ok(!onlyKakao.includes("네이버") && onlyKakao.includes("카카오 3개"), "개수가 0인 플랫폼은 빼고 보여 줌");
+  ok(!onlyKakao.includes("네이버") && onlyKakao.includes("카카오 4개"), "개수가 0인 플랫폼은 빼고 보여 줌");
 
   // Scenario 2: 제외됨에서 기타 탭을 보면 원인을 요청해서 보여 주고(해당 상태만), 기타가 아닌 탭에서는 요청 없이 숨긴다
   run("subscriptionLoadedAt.excluded = 0; window.__p = loadSubscriptionTab('excluded');"); await w.__p; await idle();
