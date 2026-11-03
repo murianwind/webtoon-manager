@@ -14,6 +14,7 @@
 
 import asyncio
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 import aiohttp
@@ -440,32 +441,50 @@ async def refresh_inactive_metadata(session: aiohttp.ClientSession, settings: Se
     return sum(1 for r in results if r)
 
 
-async def refresh_inactive_kakao_status(settings: Settings) -> int:
+async def refresh_inactive_kakao_status(settings: Settings, *, all_batches: bool = False, progress: Callable[[str], None] | None = None) -> int:
     """구독 중이 아닌(구독해제/제외됨) 카카오 작품의 연재 상태(완결/휴재/서비스 종료)를 알아내 저장한다. 카카오 요일 목록은 연재 중인 작품만 담고
     완결 여부는 다운로드를 끝냈을 때만 저장돼서, 받지 않는 작품은 완결이나 서비스가 끝난 작품도 제외됨에 그대로 보였다.
-    아직 안 알아본(또는 다시 볼 때가 된) 작품만 한 번에 LOOKUP_BATCH개까지 차례로 묻는다. 완결(on_issue N)은 DB에 완결로 저장하고(다시 연재하면 해제),
-    작품 정보가 없으면(404/410) 서비스 종료로 기록한다. 일시 오류는 상태를 바꾸지 않는다. 상태를 알아낸 작품 수를 돌려준다."""
+    아직 안 알아본(또는 다시 볼 때가 된) 작품만 묻는다 — 기본(신작 스캔)은 한 번에 LOOKUP_BATCH개까지만 하고 다음 스캔에서 이어서 한다.
+    all_batches=True("지금 전체 재동기화")면 LOOKUP_BATCH개씩 끝까지 이어서 하고, 묶음 사이에 BATCH_REST_SECONDS만큼 쉰다(카카오에 몰리지 않게).
+    묶음마다 progress("N/전체")로 진행 상황을 알린다. 못 알아낸 작품도 결과가 저장돼(일시 오류는 하루 동안 다시 안 묻는다) 목록이 줄어들므로 끝나지 않는 일은 없다.
+    완결(on_issue N)은 DB에 완결로 저장하고(다시 연재하면 해제), 작품 정보가 없으면(404/410) 서비스 종료로 기록한다. 일시 오류는 상태를 바꾸지 않는다.
+    상태를 알아낸 작품 수를 돌려준다."""
     inactive_ids = [row["title_id"] for row in repository.get_kakao_webtoons_map().values() if row["status"] != repository.STATUS_ACTIVE]
-    series_ids = kakao_status.pending_ids(inactive_ids)[: kakao_status.LOOKUP_BATCH]
-    if not series_ids:
+    pending = kakao_status.pending_ids(inactive_ids)
+    total = len(pending)
+    if not pending:
         return 0
-    resolved = 0
+    resolved = done = 0
     async with kakao_page_download.new_session() as kakao_session:
         client = kakao_page_download.client_or_anonymous(kakao_session, settings.request_timeout_seconds)
-        for series_id in series_ids:
-            try:
-                http, series_item = await client.fetch_series_status(series_id)
-            except Exception as e:  # 작품 하나가 이상해도 나머지는 계속한다 — 못 알아낸 것으로 기록하면 하루 뒤에 다시 시도한다
-                log.warning("카카오 작품 상태 확인 실패 (series_id=%s): %s", series_id, e)
-                http, series_item = None, None
-            on_issue = (series_item or {}).get("on_issue")
-            kakao_status.save(series_id, on_issue=on_issue, http=http)
-            if on_issue is not None:
-                repository.set_kakao_finished(series_id, on_issue == "N")
-            if on_issue is not None or http in kakao_status.ENDED_HTTP:
-                resolved += 1
-            await asyncio.sleep(kakao_status.LOOKUP_PAUSE_SECONDS)
+        while pending:
+            batch = pending[: kakao_status.LOOKUP_BATCH]
+            for series_id in batch:
+                resolved += await _refresh_one_kakao_status(client, series_id)
+                await asyncio.sleep(kakao_status.LOOKUP_PAUSE_SECONDS)
+            done += len(batch)
+            if progress is not None:
+                progress(f"카카오 구독해제/제외됨 상태 확인 {done}/{total}개 진행")
+            if not all_batches:
+                break
+            pending = kakao_status.pending_ids(inactive_ids)  # 방금 확인한 작품은 빠진다
+            if pending:
+                await asyncio.sleep(kakao_status.BATCH_REST_SECONDS)
     return resolved
+
+
+async def _refresh_one_kakao_status(client, series_id: int) -> int:
+    """작품 하나의 상태를 확인해 저장한다. 알아냈으면 1, 못 알아냈으면 0(일시 오류 — 하루 뒤에 다시). 한 작품이 예외로 실패해도 밖으로 던지지 않는다."""
+    try:
+        http, series_item = await client.fetch_series_status(series_id)
+    except Exception as e:
+        log.warning("카카오 작품 상태 확인 실패 (series_id=%s): %s", series_id, e)
+        http, series_item = None, None
+    on_issue = (series_item or {}).get("on_issue")
+    kakao_status.save(series_id, on_issue=on_issue, http=http)
+    if on_issue is not None:
+        repository.set_kakao_finished(series_id, on_issue == "N")
+    return 1 if on_issue is not None or http in kakao_status.ENDED_HTTP else 0
 
 
 async def resync_registry(session: aiohttp.ClientSession, settings: Settings) -> int:

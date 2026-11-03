@@ -286,8 +286,9 @@ async def search_authors(name: str):
 
 @router.post("/registry/resync")
 async def resync_registry():
-    """지금 추적 중인 모든 웹툰을 훑어서 작가/태그 레지스트리를 즉시 채운다. 카카오웹툰 관리를 켰으면 카카오페이지 작품의
-    작가(글/원작 구분)도 같은 규칙으로 함께 채운다."""
+    """지금 추적 중인 모든 웹툰을 훑어서 작가/태그 레지스트리를 즉시 채운다(구독해제/제외됨 네이버 작품의 완결 여부도 이때 저장된다).
+    카카오웹툰 관리를 켰으면 카카오페이지 작품의 작가(글/원작 구분)도 같은 규칙으로 함께 채우고, 구독해제/제외됨 카카오 작품의
+    완결·서비스 종료를 40개씩 쉬어 가며 끝까지 확인한다."""
     async def _run():
         settings = get_settings()
         job_status.start("registry")
@@ -302,6 +303,9 @@ async def resync_registry():
                     kakao_client = kakao_page_download.client_or_anonymous(kakao_session, settings.request_timeout_seconds)
                     kakao_count = await tracker.resync_kakao_registry(kakao_client, settings)
                     kakao_page_download.persist_refreshed_cookies(kakao_client)
+                # 구독해제/제외됨 카카오 작품의 완결·서비스 종료도 같이 확인한다 — 40개씩 쉬어 가며 끝까지(제외됨에서 가릴 대상을 알아내는 일)
+                job_status.log_line("registry", "카카오 구독해제/제외됨 완결·서비스 종료 확인 시작 (40개씩 쉬어 가며 끝까지 확인합니다)")
+                await tracker.refresh_inactive_kakao_status(settings, all_batches=True, progress=lambda message: job_status.log_line("registry", message))
             job_status.log_line("registry", f"{count}개 웹툰 처리 완료" + ("" if kakao_count is None else f", 카카오 {kakao_count}개 처리 완료"))
             job_status.finish("registry", success=True)
         except Exception as e:

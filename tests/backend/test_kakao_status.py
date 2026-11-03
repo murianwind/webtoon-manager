@@ -73,6 +73,33 @@ asyncio.run(tracker.refresh_inactive_kakao_status(get_settings())); saved = kaka
 assert saved["100"]["http"] is None and saved["100"]["on_issue"] is None and len(saved) == kakao_status.LOOKUP_BATCH, len(saved)
 print("4) 한 작품 실패 격리 OK")
 
+# Scenario 6: "지금 전체 재동기화"용 — all_batches면 40개씩 끝까지 이어서 확인하고, 묶음 사이에 BATCH_REST_SECONDS만큼 쉰다(카카오에 몰리지 않게). 묶음마다 진행 상황을 알린다.
+# 한 작품이 실패해도(그 결과는 저장돼 하루 동안 다시 안 묻는다) 무한히 돌지 않고 끝난다. 기본 호출(all_batches 없음)은 예전처럼 한 묶음만
+for i in range(150, 200): repository.upsert_new_kakao_webtoon(i, f"더많음{i}", status=repository.STATUS_EXCLUDED)
+async def any_status(self, series_id): asked.append(series_id); return (200, {"on_issue": "Y"})
+kp.KakaoPageClient.fetch_series_status = any_status
+sleeps = []; _real_sleep = asyncio.sleep
+async def record_sleep(seconds, *a, **k): sleeps.append(seconds); await _real_sleep(0)
+tracker.asyncio.sleep = record_sleep
+kakao_status.BATCH_REST_SECONDS = 7; kakao_status.LOOKUP_PAUSE_SECONDS = 0
+inactive = [r["title_id"] for r in repository.get_kakao_webtoons_map().values() if r["status"] != repository.STATUS_ACTIVE]
+repository.set_setting(kakao_status.LOOKUP_KEY, None); asked.clear(); messages = []
+resolved = asyncio.run(asyncio.wait_for(tracker.refresh_inactive_kakao_status(get_settings(), all_batches=True, progress=messages.append), 10))
+total = len(inactive)
+assert sorted(asked) == sorted(inactive) and resolved == total, (len(asked), total, resolved)                                              # 구독 중이 아닌 작품 전부를 끝까지
+batches = -(-total // kakao_status.LOOKUP_BATCH)
+assert [x for x in sleeps if x == 7] == [7] * (batches - 1), f"묶음 사이에만 쉰다({batches - 1}번): {sleeps.count(7)}"
+assert len(messages) == batches and f"{kakao_status.LOOKUP_BATCH}/{total}" in messages[0] and messages[-1].count(f"{total}/{total}") == 1, messages
+sleeps.clear(); asked.clear(); repository.set_setting(kakao_status.LOOKUP_KEY, None)
+asyncio.run(tracker.refresh_inactive_kakao_status(get_settings())); assert len(asked) == kakao_status.LOOKUP_BATCH and 7 not in sleeps, "기본은 한 묶음만(쉬지 않음)"
+async def always_boom(self, series_id): raise RuntimeError("전부 실패")
+kp.KakaoPageClient.fetch_series_status = always_boom
+repository.set_setting(kakao_status.LOOKUP_KEY, None); sleeps.clear(); messages.clear()
+failed = asyncio.run(asyncio.wait_for(tracker.refresh_inactive_kakao_status(get_settings(), all_batches=True, progress=messages.append), 10))
+assert failed == 0 and len(kakao_status.get_lookup()) == total and len(messages) == batches, "전부 실패해도 끝난다(실패도 기록돼 다시 안 묻는다)"
+tracker.asyncio.sleep = _real_sleep
+print("6) 전체 재동기화용 끝까지 이어 확인 OK")
+
 # Scenario 5: 제외됨/구독해제 목록 API가 완결 또는 서비스 종료를 is_finished로 알려 준다(화면이 가린다)
 repository.set_setting(kakao_status.LOOKUP_KEY, None); kakao_status.save(11, on_issue="N", http=200); kakao_status.save(13, on_issue=None, http=404); kakao_status.save(12, on_issue="Y", http=200)
 async def api():

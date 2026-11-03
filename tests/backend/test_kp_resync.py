@@ -1,4 +1,5 @@
-"""지금 전체 재동기화 — 카카오: 작품 정보(글/그림/원작)로 관심 작가 등록 + 글 작가 저장, 상태별 규칙, 실패 격리, 네이버와 함께 실행."""
+"""지금 전체 재동기화 — 카카오: 작품 정보(글/그림/원작)로 관심 작가 등록 + 글 작가 저장, 상태별 규칙, 실패 격리, 네이버와 함께 실행.
+그리고 카카오 구독해제/제외됨 작품의 완결·서비스 종료 확인(40개씩 묶음으로 끝까지, 카카오 관리를 켰을 때만)."""
 import asyncio
 import httpx
 from app import db, repository, tracker, job_status, kakao_page_download as kp
@@ -19,6 +20,9 @@ async def fake_about(self, series_id):
     if series_id == 5: raise RuntimeError("network")                                                                                                  # 예외도 이 작품만 건너뛴다
     return ABOUT.get(series_id)                                                                                                                       # 6은 정보 있음, 7은 None(못 받음)
 kp.KakaoPageClient.fetch_about = fake_about
+status_calls = []
+async def fake_status(self, series_id): status_calls.append(series_id); return (200, {"on_issue": "N" if series_id == 3 else "Y"})   # 3(제외됨)은 완결
+kp.KakaoPageClient.fetch_series_status = fake_status
 _o = asyncio.sleep
 async def _ns(x): await _o(0)
 tracker.asyncio.sleep = _ns
@@ -58,7 +62,7 @@ async def main():
     # ── 3. 전체 재동기화 API: 카카오 관리를 켰을 때만 카카오를 함께 ──
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=m.app), base_url="http://test") as c:
         async def run_resync():
-            calls.clear(); job_status.start("registry")
+            calls.clear(); status_calls.clear(); job_status.start("registry")
             assert (await c.post("/api/registry/resync")).status_code == 200
             for _ in range(200):
                 await _o(0.02)
@@ -73,11 +77,26 @@ async def main():
         text = "\n".join(st["log"]); assert "카카오 작가 재동기화 시작" in text and "완료" in text, text[-300:]
         print("3) 전체 재동기화 API OK (카카오 관리 켰을 때만 함께, 로그/상태)")
 
+        # ── 3b. 같은 버튼이 카카오 구독해제/제외됨 작품의 완결·서비스 종료도 확인한다(구독 중은 안 묻는다) — 켰을 때만, 진행 로그와 함께 ──
+        repository.set_setting("kakao_webtoons_enabled", "0"); st = await run_resync(); assert status_calls == [], "꺼져 있으면 확인하지 않는다"
+        repository.set_setting("kakao_webtoons_enabled", "1"); repository.set_setting("kakao_status_lookup", None); st = await run_resync()
+        assert sorted(status_calls) == [2, 3, 4], status_calls                                                           # 구독해제(2)/제외됨(3)/목록(4)만, 구독 중(1,5,6,7)은 안 묻는다
+        text = "\n".join(st["log"]); assert "완결·서비스 종료 확인 시작" in text and "상태 확인 3/3개 진행" in text and st["status"] == "success", text[-400:]
+        assert bool(repository.get_kakao_webtoon(3)["is_finished"]) is True and bool(repository.get_kakao_webtoon(2)["is_finished"]) is False, "완결은 저장"
+        print("3b) 카카오 완결·서비스 종료 확인 OK")
+
         # ── 4. 카카오 쪽이 통째로 실패해도 네이버 재동기화 결과는 남고 상태는 오류로 ──
         async def boom(client_, settings_): raise RuntimeError("카카오 전체 실패")
         orig = tracker.resync_kakao_registry; tracker.resync_kakao_registry = boom
         st = await run_resync(); tracker.resync_kakao_registry = orig
         assert st["status"] == "error" and "카카오 전체 실패" in "\n".join(st["log"])
         print("4) 카카오 전체 실패 OK (오류로 표시, 다른 처리 중단 안 함)")
+
+        # ── 5. 카카오 상태 확인만 통째로 실패해도 앞의 재동기화 결과는 남고 상태는 오류로 ──
+        async def boom_status(settings_, **kwargs): raise RuntimeError("상태 확인 전체 실패")
+        orig = tracker.refresh_inactive_kakao_status; tracker.refresh_inactive_kakao_status = boom_status
+        st = await run_resync(); tracker.refresh_inactive_kakao_status = orig
+        assert st["status"] == "error" and "상태 확인 전체 실패" in "\n".join(st["log"]) and "원작1" in watched(), "\n".join(st["log"])[-300:]
+        print("5) 상태 확인 전체 실패 OK")
 asyncio.run(main())
 print("\n전부 통과")

@@ -12,6 +12,7 @@ from app.json_setting import JsonSetting
 LOOKUP_KEY = "kakao_status_lookup"
 LOOKUP_BATCH = 40  # 한 번에 알아볼 최대 작품 수
 LOOKUP_PAUSE_SECONDS = 0.3  # 작품 사이에 쉬는 시간(카카오에 한꺼번에 몰리지 않게)
+BATCH_REST_SECONDS = 20  # "지금 전체 재동기화"가 묶음(LOOKUP_BATCH개)을 이어서 확인할 때 묶음 사이에 쉬는 시간
 HIDDEN_RETRY_DAYS = 30  # 완결/서비스 종료는 이만큼 지나면 다시 확인한다(다시 연재하는 경우만 드물게 있다)
 SERVING_RETRY_DAYS = 7  # 연재/휴재는 이만큼 지나면 다시(완결로 바뀔 수 있다)
 ERROR_RETRY_DAYS = 1  # 일시 오류(상태를 못 알아냄)는 하루 뒤에 다시

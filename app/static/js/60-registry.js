@@ -23,7 +23,7 @@ async function refreshRegistryJobStatuses() {
   } catch (e) {
     return;
   }
-  applyJobStatusToLabel(statuses.registry, "registry-resync-status", "재동기화 중...");
+  applyJobStatusToLabel(statuses.registry, "registry-resync-status", "재동기화 중...", true);
 
   if (statuses.registry?.status !== "running") {
     loadAuthorList();
@@ -33,10 +33,14 @@ async function refreshRegistryJobStatuses() {
   }
 }
 
-function applyJobStatusToLabel(st, elementId, runningText) {
+// 작업 상태를 한 줄 문구로 — 실행 중에는 runningText, showProgress를 켜면 최신 로그 줄의 내용(앞의 "시각 — "은 뗀다)을 덧붙여 오래 걸리는 작업의 진행 상황을 보여 준다.
+function applyJobStatusToLabel(st, elementId, runningText, showProgress = false) {
   const el = document.getElementById(elementId);
   if (!st || !el) return;
-  if (st.status === "running") el.textContent = runningText;
+  if (st.status === "running") {
+    const lastLine = showProgress && st.log && st.log.length ? st.log[st.log.length - 1] : "";
+    el.textContent = lastLine ? `${runningText} ${lastLine.split(" — ").slice(1).join(" — ") || lastLine}` : runningText;
+  }
   else if (st.status === "success") el.textContent = "완료됨";
   else if (st.status === "error") el.textContent = "오류 발생 (설정 탭 실행 이력 참고)";
   else el.textContent = "";
