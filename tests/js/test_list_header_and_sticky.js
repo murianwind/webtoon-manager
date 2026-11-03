@@ -3,7 +3,7 @@
 // ③ 요일 탭 줄이 세로로 1px 넘쳐서(음수 마진) 생기던 작은 스크롤바/드래그 이동을 없앤다.
 const fs = require("fs");
 const path = require("path");
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
 const css = fs.readFileSync(path.join(__dirname, "..", "..", "app", "static", "style.css"), "utf8");
 function mobileBlock(text) {
   const start = text.indexOf("@media (max-width: 640px) {");
@@ -17,7 +17,7 @@ const ruleOf = (text, selector) => { const m = text.match(new RegExp("(?:^|\\})\
 (async () => {
   let listError = null;
   const { w, run } = makeApp({ "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" }, "/api/naver-list": () => { if (listError) throw new Error(listError); return []; }, "/api/kakao-list": { items: [], version: "v", refreshing: false } });
-  await sleep(60); run("kakaoWebtoonsEnabled = true;");
+  await idle(); run("kakaoWebtoonsEnabled = true;");
   const $ = (id) => w.document.getElementById(id);
   const call = (code) => { run(`window.__r = ${code};`); return w.__r; };
 
@@ -30,7 +30,7 @@ const ruleOf = (text, selector) => { const m = text.match(new RegExp("(?:^|\\})\
   run("showNaverListStatus('확인 중...');"); ok($("header-list-status").textContent === "확인 중..." && $("naver-list-refresh-status").textContent === "확인 중...", "확인 중... 도 두 칸에");
 
   // Scenario 2: 새로고침이 실패해도 두 칸에 같은 안내
-  listError = "서버 오류"; run("window.__p = loadNaverList(true);"); await w.__p; await sleep(30);
+  listError = "서버 오류"; run("window.__p = loadNaverList(true);"); await w.__p; await idle();
   ok($("header-list-status").textContent === "새로고침 실패: 서버 오류" && $("naver-list-refresh-status").textContent === "새로고침 실패: 서버 오류", "실패 문구도 두 칸에: " + $("header-list-status").textContent);
   listError = null;
 

@@ -1,6 +1,6 @@
 // 설정 > 다운로드 리포트: 발송 시각 스케줄은 없어지고 "발송하지 않는 시간"(시작~끝 + 요일 칩, 여러 개)과 "모으는 시간(N분)"만 설정한다.
 // 같은 카드의 웹툰 뷰어 서버 항목에는 "다운로드 뒤 뷰어 스캔"(켜기, 연동 토큰, 최대 대기 시간) 설정이 있다.
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
 (async () => {
   const quiet = (sh, sm, eh, em, days = []) => ({ start_hour: sh, start_minute: sm, end_hour: eh, end_minute: em, days });
   let report = { quiet_hours: [quiet(23, 0, 6, 0, ["mon", "tue"]), quiet(13, 30, 14, 0)], batch_minutes: 15 };
@@ -14,9 +14,9 @@ const { makeApp, sleep, ok, done } = require("./harness");
     "/api/settings/viewer-scan": (o) => { if (o && o.method === "POST") { if (scanError) throw new Error(scanError); const b = JSON.parse(o.body); posts.scan.push(b); scan = { ...scan, enabled: b.enabled, max_wait_minutes: b.max_wait_minutes, token_set: b.clear_token ? false : (b.token ? true : scan.token_set) }; } return scan; },
     "/api/webtoons": () => [], "/api/kakao-webtoons": () => [],
   };
-  const { w, run } = makeApp(routes); await sleep(60); run("kakaoWebtoonsEnabled = true;");
+  const { w, run } = makeApp(routes); await idle(); run("kakaoWebtoonsEnabled = true;");
   const $ = (id) => w.document.getElementById(id);
-  run("window.__p = loadSettingsPage();"); await w.__p; await sleep(60);
+  run("window.__p = loadSettingsPage();"); await w.__p; await idle();
   const rows = () => [...w.document.querySelectorAll("#report-quiet-list .report-quiet-row")];
   const val = (row, cls) => Number(row.querySelector(cls).value);
   const days = (row) => [...row.querySelectorAll(".quiet-day:checked")].map((c) => c.value);
@@ -42,13 +42,13 @@ const { makeApp, sleep, ok, done } = require("./harness");
   [...$("settings-card-report").querySelectorAll("button")].find((b) => /시간대 추가/.test(b.textContent)).click();
   rows()[0].querySelector(".quiet-start-hour").value = "22"; rows()[0].querySelector(".quiet-end-hour").value = "7"; rows()[0].querySelectorAll(".quiet-day")[0].checked = true;
   $("report-batch-minutes").value = "20";
-  $("btn-save-report-settings").click(); await sleep(80);
+  $("btn-save-report-settings").click(); await idle();
   ok(JSON.stringify(posts.report[0]) === JSON.stringify({ quiet_hours: [quiet(22, 0, 7, 0, ["mon"])], batch_minutes: 20 }), "저장 내용: " + JSON.stringify(posts.report[0]));
   ok($("report-settings-save-result").textContent === "저장했습니다.", "성공 메시지");
 
   // Scenario 4: 겹침 같은 서버 오류는 메시지로 보이고 입력한 행은 그대로 남는다
   reportError = "발송하지 않는 시간 23:00~06:00(매일)와 05:00~07:00(월)이 겹칩니다. 겹치지 않게 고쳐 주세요.";
-  $("btn-save-report-settings").click(); await sleep(80);
+  $("btn-save-report-settings").click(); await idle();
   ok(/겹칩니다/.test($("report-settings-save-result").textContent) && rows().length === 1, "겹침 오류 표시 + 행 유지: " + $("report-settings-save-result").textContent);
   reportError = null;
 
@@ -59,26 +59,26 @@ const { makeApp, sleep, ok, done } = require("./harness");
   ok(/다운로드/.test(scanText) && /아카이빙/.test(scanText) && /수동 다운로드/.test(scanText) && /폴더 일괄 이동/.test(scanText), "스캔을 시키는 경우(다운로드, 수동 다운로드, 아카이빙, 폴더 일괄 이동)를 안내: " + scanText.slice(0, 200));
   ok(/한 번에 하나/.test(scanText) || /겹치지 않/.test(scanText), "스캔은 겹치지 않고 하나씩 돈다는 안내");
   $("viewer-scan-toggle").checked = true; $("viewer-scan-token").value = "새토큰"; $("viewer-scan-max-wait").value = "60";
-  $("btn-save-viewer-scan").click(); await sleep(80);
+  $("btn-save-viewer-scan").click(); await idle();
   ok(JSON.stringify(posts.scan[0]) === JSON.stringify({ enabled: true, token: "새토큰", clear_token: false, max_wait_minutes: 60 }) && $("viewer-scan-token").value === "" && $("viewer-scan-save-result").textContent === "저장했습니다.", "스캔 설정 저장: " + JSON.stringify(posts.scan[0]));
-  $("btn-save-viewer-scan").click(); await sleep(80);
+  $("btn-save-viewer-scan").click(); await idle();
   ok(posts.scan[1].token === null && posts.scan[1].clear_token === false, "토큰을 안 적으면 기존 토큰 유지(null)");
-  $("btn-clear-viewer-scan-token").click(); await sleep(80);
+  $("btn-clear-viewer-scan-token").click(); await idle();
   ok(posts.scan[2].clear_token === true && /없음|입력/.test($("viewer-scan-token").placeholder), "토큰 지우기");
-  scanError = "스캔 대기 시간은 1~240분이어야 합니다."; $("btn-save-viewer-scan").click(); await sleep(80);
+  scanError = "스캔 대기 시간은 1~240분이어야 합니다."; $("btn-save-viewer-scan").click(); await idle();
   ok(/1~240분/.test($("viewer-scan-save-result").textContent), "스캔 설정 오류 표시");
   // Scenario 6: 뷰어 스캔 설정(박스)은 뷰어 서버 주소가 저장돼 있을 때만 보인다 — 주소를 저장하면 나타나고, 지우면 사라진다. 숨겨져도 저장된 스캔 설정은 그대로
   const box = $("viewer-scan-toggle").closest(".viewer-scan-box");
   ok(!box.classList.contains("hidden"), "주소가 저장돼 있으면 스캔 설정이 보임");
-  $("webtoon-server-url").value = ""; $("btn-save-webtoon-server-url").click(); await sleep(60);
+  $("webtoon-server-url").value = ""; $("btn-save-webtoon-server-url").click(); await idle();
   ok(box.classList.contains("hidden") && $("webtoon-server-save-result").textContent === "저장했습니다.", "주소를 지우고 저장하면 스캔 설정이 숨겨짐");
-  $("webtoon-server-url").value = "http://192.168.0.49:25600"; $("btn-save-webtoon-server-url").click(); await sleep(60);
+  $("webtoon-server-url").value = "http://192.168.0.49:25600"; $("btn-save-webtoon-server-url").click(); await idle();
   ok(!box.classList.contains("hidden"), "주소를 저장하면 스캔 설정이 나타남");
   $("webtoon-server-url").value = ""; $("webtoon-server-url").dispatchEvent(new w.Event("input"));
   ok(!box.classList.contains("hidden"), "주소 입력칸을 지우는 중이어도(저장 전) 바뀌지 않는다 — 저장된 주소 기준");
   $("webtoon-server-url").value = "http://typed-but-not-saved"; $("webtoon-server-url").dispatchEvent(new w.Event("input"));
   ok(!box.classList.contains("hidden"), "입력만 하고 저장하기 전에는 바뀌지 않는다(저장된 주소 기준)");
-  serverUrl = ""; run("window.__p = loadWebtoonServerUrl();"); await w.__p; await sleep(30);
+  serverUrl = ""; run("window.__p = loadWebtoonServerUrl();"); await w.__p; await idle();
   ok(box.classList.contains("hidden"), "저장된 주소가 없으면(설정 화면을 열 때) 숨겨짐");
   done();
 })();

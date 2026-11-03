@@ -1,9 +1,8 @@
 // 웹툰 전체목록 카드: 뷰어에 없는 작품도 뷰어 아이콘 자리를 비워 두어서(숨김), 뷰어가 있든 없든 "구독해제" 버튼이 같은 줄에 정렬된다.
 // (예전엔 뷰어에 없는 작품의 아이콘을 지워서 카드마다 버튼 줄 수가 달랐고, 카드 아래쪽 정렬이라 "구독해제"가 위아래로 어긋났다)
-const ALL_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]; // 요일별 탭이 생겼으므로 예제 작품은 모든 요일에 연재하는 것으로 둔다(어느 요일 탭에서든 보이게)
-const { makeApp, sleep, ok, done } = require("./harness");
-const naver = (id, title, extra = {}) => ({ title_id: String(id), title, weekdays: ALL_DAYS, thumbnail_url: `https://n/${id}.jpg`, author_summary: "작가", is_adult: false, is_new: false, is_paused: false, has_new_episode: false, status: "active", ever_subscribed: true, ...extra });
-const kakao = (id, title, extra = {}) => ({ title_id: id, title, weekdays: ALL_DAYS, thumbnail_url: `https://k/${id}`, author_summary: "작가", is_adult: false, is_new: false, is_paused: false, has_new_episode: false, status: "active", ever_subscribed: true, ...extra });
+const { makeApp, sleep, idle, ok, done } = require("./harness");
+const { naver: plainNaver, kakao: plainKakao, subscribed } = require("./factories");
+const naver = subscribed(plainNaver), kakao = subscribed(plainKakao); // 이 테스트의 작품은 기본이 구독 중(뷰어 아이콘은 구독 중 카드에만 붙는다)
 (async () => {
   const routes = {
     "/api/naver-list": () => [naver(1, "뷰어에 있는 작품"), naver(2, "뷰어에 없는 네이버 작품")],
@@ -11,8 +10,8 @@ const kakao = (id, title, extra = {}) => ({ title_id: id, title, weekdays: ALL_D
     "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "http://viewer" }, "/api/webtoons": () => [], "/api/kakao-webtoons": () => [],
     "/api/webtoon-server/lookup": (opts, url) => (url.includes(encodeURIComponent("뷰어에 있는 작품")) ? { url: "http://viewer/a" } : { url: null }),
   };
-  const { w, run } = makeApp(routes); await sleep(50); run("kakaoWebtoonsEnabled = true; webtoonServerConfigured = true;");
-  run("window.__p = loadNaverList(false);"); await w.__p; await sleep(80);
+  const { w, run } = makeApp(routes); await idle(); run("kakaoWebtoonsEnabled = true; webtoonServerConfigured = true;");
+  run("window.__p = loadNaverList(false);"); await w.__p; await idle();
   const card = (title) => [...w.document.querySelectorAll("#naver-list-grid > .webtoon-card")].find((c) => c.querySelector(".webtoon-card-title").textContent === title);
   const rows = (c) => [...c.querySelectorAll(".webtoon-card-actions > *")];
   const viewer = (c) => c.querySelector("[data-viewer-check-title]");

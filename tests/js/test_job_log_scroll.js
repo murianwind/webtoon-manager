@@ -1,10 +1,10 @@
 // 진행 상황 로그(수동 실행/아카이빙/폴더 일괄 이동/수동 다운로드 공통 renderJobLog) — 스크롤 위치 유지.
 // 맨 아래를 보고 있으면 새 줄을 따라 내려가고, 위로 올려 읽는 중이면 그 위치를 유지하고, 다시 맨 아래로 내리면 따라가기를 다시 시작한다.
 // 새 줄이 없으면 다시 그리지 않는다(텍스트 선택/스크롤 유지).
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
 (async () => {
   const { w, run } = makeApp({ "/api/settings/kakao-webtoons-enabled": { enabled: false }, "/api/settings/webtoon-server": { webtoon_server_url: "" } });
-  await sleep(60);
+  await idle();
   // jsdom은 레이아웃을 계산하지 않아서, 로그 상자 높이(한 줄 20px, 보이는 높이 100px)와 스크롤을 직접 흉내 낸다
   const fakeLayout = (id) => {
     const el = w.document.getElementById(id); let top = 0;

@@ -2,10 +2,8 @@
 // 구독 중 카드는 "구독해제 / 제외됨으로 / 뷰어 아이콘" 3줄, 구독하지 않은 카드는 "구독 / 목록제외" 2줄이라 카드 아래쪽 정렬에서 한 줄씩 어긋났다.
 // 규칙(지금 보이는 목록 기준): 뷰어 버튼이 실제로 보이는 카드가 하나라도 있으면 모든 카드를 3줄로(뷰어 버튼이 없는 카드에는 보이지 않는 자리),
 // 하나도 없으면 모든 카드를 2줄로 둔다 — "아직 미등록만"처럼 뷰어 버튼이 필요 없는 목록에 쓸데없는 빈 줄이 생기지 않게.
-const ALL_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]; // 요일별 탭이 생겼으므로 예제 작품은 모든 요일에 연재하는 것으로 둔다(어느 요일 탭에서든 보이게)
-const { makeApp, sleep, ok, done } = require("./harness");
-const naver = (id, title, extra = {}) => ({ title_id: String(id), title, weekdays: ALL_DAYS, thumbnail_url: `https://n/${id}.jpg`, author_summary: "작가", is_adult: false, is_new: false, is_paused: false, has_new_episode: false, status: null, ever_subscribed: false, ...extra });
-const kakao = (id, title, extra = {}) => ({ title_id: id, title, weekdays: ALL_DAYS, thumbnail_url: `https://k/${id}`, author_summary: "작가", is_adult: false, is_new: false, is_paused: false, has_new_episode: false, status: null, ever_subscribed: false, ...extra });
+const { makeApp, sleep, idle, ok, done } = require("./harness");
+const { naver, kakao } = require("./factories");
 const SUB = { status: "active", ever_subscribed: true };
 
 async function render({ serverUrl = "http://viewer", items, inViewer = () => true }) {
@@ -15,12 +13,12 @@ async function render({ serverUrl = "http://viewer", items, inViewer = () => tru
     "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: serverUrl }, "/api/webtoons": () => [], "/api/kakao-webtoons": () => [],
     "/api/webtoon-server/lookup": (opts, url) => ({ url: inViewer(decodeURIComponent((url.match(/title=([^&]+)/) || [])[1] || "")) ? "http://viewer/x" : null }),
   };
-  const { w, run } = makeApp(routes); await sleep(50); run(`kakaoWebtoonsEnabled = true; webtoonServerConfigured = ${serverUrl ? "true" : "false"};`);
-  run("window.__p = loadNaverList(false);"); await w.__p; await sleep(100);
+  const { w, run } = makeApp(routes); await idle(); run(`kakaoWebtoonsEnabled = true; webtoonServerConfigured = ${serverUrl ? "true" : "false"};`);
+  run("window.__p = loadNaverList(false);"); await w.__p; await idle();
   const card = (title) => [...w.document.querySelectorAll("#naver-list-grid > .webtoon-card")].find((c) => c.querySelector(".webtoon-card-title").textContent === title);
   // 화면에서 실제로 자리를 차지하는 줄(display:none이 아닌 것)
   const rows = (title) => [...card(title).querySelectorAll(".webtoon-card-actions > *")].filter((el) => el.style.display !== "none");
-  const setFilter = async (value) => { const sel = w.document.getElementById("naver-list-filter-status"); sel.value = value; sel.dispatchEvent(new w.Event("change")); await sleep(60); };
+  const setFilter = async (value) => { const sel = w.document.getElementById("naver-list-filter-status"); sel.value = value; sel.dispatchEvent(new w.Event("change")); await idle(); };
   return { w, run, rows, card, setFilter };
 }
 const MIXED = [naver(1, "네이버 구독 중", SUB), naver(2, "네이버 미구독"), kakao(71000001, "카카오 구독 중", { ...SUB, platform: "kakao" }), kakao(71000002, "카카오 미구독", { platform: "kakao" })];

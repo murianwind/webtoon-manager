@@ -2,7 +2,7 @@
 // 원인: 전역 .hint는 "제목(h2) 바로 밑에 끼워 넣는" 용도라 위쪽 여백이 음수(-8px)다. 같은 규칙을 h3 밑이나 버튼 밑의 설명에 그대로 쓰면 제목/버튼과 겹친다.
 const fs = require("fs");
 const path = require("path");
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
 const css = fs.readFileSync(path.join(__dirname, "..", "..", "app", "static", "style.css"), "utf8");
 const rule = (selector) => {
   const m = css.match(new RegExp("(?:^|\\})\\s*" + selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\{([^}]*)\\}", "m"));
@@ -13,7 +13,7 @@ const firstMarginTop = (decls) => { const m = px(decls, "margin"); if (m) return
 const marginBottom = (decls) => { const b = px(decls, "margin-bottom"); if (b) return parseFloat(b); const m = px(decls, "margin"); if (!m) return null; const p = m.split(/\s+/); return parseFloat(p.length === 1 ? p[0] : p.length === 2 ? p[0] : p[2]); };
 
 (async () => {
-  const { w } = makeApp({ "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" } }); await sleep(40);
+  const { w } = makeApp({ "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" } }); await idle();
   const common = [...w.document.querySelectorAll("#archive-main-content > .settings-card")].find((c) => c.querySelector("h2").textContent.trim() === "아카이빙 공통 설정");
   // Scenario 1: 공통 설정 안 제목(h3)과 설명 사이에 여백이 있다 — 설명의 위쪽 여백이 음수가 아니고, 제목 아래 여백이 있다
   const hint = rule(".archive-common-section .hint");

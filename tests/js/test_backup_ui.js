@@ -1,19 +1,19 @@
 // 백업/복원 화면 — 복원 결과(경고/다시 입력할 항목) 표시, 확인할 게 없으면 자동 새로고침, 확인 창 문구, 실패 처리
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
 (async () => {
   let response = { status: "restored", warnings: [], reenter: [] }; let fail = null;
   const routes = {
     "/api/settings/kakao-webtoons-enabled": { enabled: false }, "/api/settings/webtoon-server": { webtoon_server_url: "" },
     "/api/restore": () => { if (fail) throw new Error(fail); return response; },
   };
-  const { w, run, calls } = makeApp(routes); await sleep(60);
+  const { w, run, calls } = makeApp(routes); await idle();
   const $ = (id) => w.document.getElementById(id);
   run("window.__reloads = 0; scheduleReload = () => { window.__reloads += 1; };");
   const confirms = []; w.confirm = (m) => { confirms.push(m); return true; };
   const pick = async (data) => {
     const file = { text: async () => (typeof data === "string" ? data : JSON.stringify(data)) };
     Object.defineProperty($("restore-file-input"), "files", { value: [file], configurable: true });
-    $("restore-file-input").dispatchEvent(new w.Event("change")); await sleep(60);
+    $("restore-file-input").dispatchEvent(new w.Event("change")); await idle();
   };
 
   // 1) 확인할 게 없으면: 완료 문구 + 자동 새로고침, 확인 창에 "유지되는 것" 안내

@@ -10,13 +10,14 @@ from types import SimpleNamespace as NS
 import httpx
 
 from app import daily_plus, db, discord_notify, kakao_api, naver_api, repository, tracker
+from fakes import discord_fake
 from app.config import get_settings
 db.get_connection()
 import app.main as m
 
 settings = get_settings()
 sent = []
-async def fake_send(session, message): sent.append(message); return True
+fake_send = discord_fake(sent)
 tracker.send_webhook_notification = fake_send; discord_notify.send_webhook_notification = fake_send
 async def fake_enrich(session, title_id, settings_, **k): return True, "ok"
 tracker.enrich_one = fake_enrich

@@ -1,6 +1,6 @@
 // 설정 화면 정리 — ① 다운로드 폴더/다운로드 속도 조절/신작 스캔/다운로드/아카이빙을 카드 하나("다운로드 · 실행 스케줄") 안의 탭으로 모은다
 // ② 웹툰 뷰어 서버 주소와 이 앱의 외부 접속 주소를 카드 하나("연동 주소", 웹훅이 있어야 보임)로 모은다 ③ 기다무 충전 시각 다운로드 옵션은 "카카오웹툰 관리" 카드로 옮긴다.
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
 (async () => {
   const cron = (h, m = 0, days = []) => ({ mode: "cron", interval_minutes: 60, cron_times: [{ hour: h, minute: m, days }], target: "naver" });
   let saved = null, webhook = false;
@@ -13,8 +13,8 @@ const { makeApp, sleep, ok, done } = require("./harness");
     "/api/settings/discord": () => ({ webhook_url_set: webhook, bot_token_set: false, notify_channel_id: "", bot_ready: false }),
     "/api/webtoons": () => [], "/api/kakao-webtoons": () => [],
   };
-  const { w, run } = makeApp(routes); await sleep(60); run("kakaoWebtoonsEnabled = true;");
-  run("window.__p = loadSettingsPage();"); await w.__p; await sleep(60);
+  const { w, run } = makeApp(routes); await idle(); run("kakaoWebtoonsEnabled = true;");
+  run("window.__p = loadSettingsPage();"); await w.__p; await idle();
   const $ = (id) => w.document.getElementById(id);
   const card = $("settings-card-run");
   const tabs = () => [...card.querySelectorAll(".card-tabs .card-tab")];
@@ -57,9 +57,9 @@ const { makeApp, sleep, ok, done } = require("./harness");
   click("다운로드 폴더"); ok(JSON.stringify(visiblePanels()) === '["roots"]' && !shown(footer), "다운로드 폴더 탭으로 돌아오면 저장 줄 숨김");
 
   // Scenario 5: 설정을 다시 불러와도 보고 있던 탭은 그대로, 저장은 세 스케줄을 모두 보낸다(숨겨진 탭의 값도)
-  click("아카이빙"); run("window.__p = loadSettingsPage();"); await w.__p; await sleep(40);
+  click("아카이빙"); run("window.__p = loadSettingsPage();"); await w.__p; await idle();
   ok(JSON.stringify(visiblePanels()) === '["archive_job"]', "다시 불러와도 탭 유지");
-  $("btn-save-settings").click(); await sleep(80);
+  $("btn-save-settings").click(); await idle();
   ok(saved && Object.keys(saved).sort().join() === "archive_job,discovery_job,download_job" && saved.discovery_job.cron_times[0].days[0] === "mon" && saved.download_job[0].target === "kakao", "숨겨진 탭의 스케줄까지 함께 저장: " + JSON.stringify(saved && Object.keys(saved)));
   ok($("settings-save-result").textContent === "저장했습니다.", "저장 결과");
 
@@ -76,7 +76,7 @@ const { makeApp, sleep, ok, done } = require("./harness");
   ok(["webtoon-server-url", "app-public-base-url", "viewer-scan-toggle"].every((id) => !report.contains($(id))), "리포트 카드에는 주소/스캔 설정이 없다");
   ok(report.contains($("report-quiet-group")) && report.contains($("report-batch-minutes")) && report.contains($("report-unregistered-toggle")), "리포트 카드에는 발송하지 않는 시간/모으는 시간/새 에피소드 섹션");
   ok($("webtoon-server-url").value === "http://192.168.0.49:25600", "뷰어 서버 주소는 그대로 불러와짐(숨겨져 있어도 값은 유지)");
-  webhook = true; run("window.__p = loadDiscordSettings();"); await w.__p; await sleep(40);
+  webhook = true; run("window.__p = loadDiscordSettings();"); await w.__p; await idle();
   ok(shown(links) && shown(report), "웹훅을 저장하면 연동 주소/리포트 카드가 나타난다");
   done();
 })();

@@ -1,8 +1,8 @@
 // 검색창 지우기(x) 버튼: 검색어가 있을 때만 보이고, 누르면 검색어를 비우고 목록이 다시 그려지도록 input 이벤트를 보낸다.
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
 (async () => {
   const { w } = makeApp({ "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" }, "/api/naver-list": [] });
-  await sleep(60);
+  await idle();
   const $ = (id) => w.document.getElementById(id);
   const IDS = ["naver-list-search", "unsubscribed-search", "excluded-search", "manual-query", "episode-history-search", "author-candidate-filter", "tag-catalog-search", "kakao-author-candidate-filter"];
   const clearBtn = (input) => input.parentElement.querySelector(".input-clear");

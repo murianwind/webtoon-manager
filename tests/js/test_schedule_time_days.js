@@ -1,5 +1,5 @@
 // 실행 스케줄 화면 — 요일은 "시각마다" 고른다: 시각 줄(시·분) 옆에 월~일 칩이 있고, 아무 요일도 안 고르면 매일. 저장할 때 시각마다 days로 보낸다(공통 cron_days는 더 이상 보내지 않는다).
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
 (async () => {
   let saved = null;
   const sched = (o = {}) => ({ mode: "interval", interval_minutes: 60, cron_times: [{ hour: 3, minute: 0, days: [] }], target: "naver", ...o });
@@ -15,8 +15,8 @@ const { makeApp, sleep, ok, done } = require("./harness");
     },
     "/api/webtoons": () => [], "/api/kakao-webtoons": () => [],
   };
-  const { w, run } = makeApp(routes); await sleep(60); run("kakaoWebtoonsEnabled = true;");
-  run("window.__p = loadSettingsPage();"); await w.__p; await sleep(40);
+  const { w, run } = makeApp(routes); await idle(); run("kakaoWebtoonsEnabled = true;");
+  run("window.__p = loadSettingsPage();"); await w.__p; await idle();
   const block = (job) => w.document.querySelector(`.schedule-block[data-job="${job}"] .schedule-controls`);
   const rows = (job) => [...block(job).querySelectorAll(".schedule-time-row")];
   const checkedDays = (row) => [...row.querySelectorAll(".schedule-day:checked")].map((c) => c.value);
@@ -41,7 +41,7 @@ const { makeApp, sleep, ok, done } = require("./harness");
 
   // Scenario 3: 저장하면 시각마다 days로 보낸다(공통 cron_days 없음). 시각을 지워도 나머지 줄의 요일은 그대로
   after[1].querySelector(".schedule-time-remove").click();
-  w.document.getElementById("btn-save-settings").click(); await sleep(80);
+  w.document.getElementById("btn-save-settings").click(); await idle();
   const sent = saved.discovery_job;
   ok(JSON.stringify(sent.cron_times) === JSON.stringify([{ hour: 7, minute: 0, days: ["mon", "fri"] }, { hour: 3, minute: 0, days: ["wed"] }]), "신작 스캔 저장 내용: " + JSON.stringify(sent.cron_times));
   ok(!("cron_days" in sent) && !("cron_days" in saved.archive_job) && saved.download_job.every((e) => !("cron_days" in e)), "공통 cron_days는 보내지 않는다");
@@ -49,7 +49,7 @@ const { makeApp, sleep, ok, done } = require("./harness");
 
   // Scenario 4: 예전 응답(시각에 days 없음)도 깨지지 않고 매일로 보인다
   const old = makeApp({ ...routes, "/api/settings": () => ({ discovery_job: { mode: "cron", interval_minutes: 60, cron_times: [{ hour: 3, minute: 0 }], cron_days: [], target: "naver" }, download_job: [], report_job: sched({ mode: "off" }), archive_job: sched({ mode: "off" }) }) });
-  await sleep(60); old.run("window.__p = loadSettingsPage();"); await old.w.__p; await sleep(40);
+  await idle(); old.run("window.__p = loadSettingsPage();"); await old.w.__p; await idle();
   const oldRow = old.w.document.querySelector('.schedule-block[data-job="discovery_job"] .schedule-time-row');
   ok(oldRow && oldRow.querySelectorAll(".schedule-day:checked").length === 0, "days가 없는 시각은 매일(체크 없음)로 표시");
   done();

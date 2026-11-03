@@ -9,11 +9,7 @@ kakao_api._REQUEST_INTERVAL_SECONDS = 0
 SAMPLES = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fixtures", "kakao_page_samples.json"), encoding='utf-8'))
 real_search = SAMPLES['search_series']
 
-class Resp:
-    def __init__(self, s, d): self.status, self._d = s, d
-    async def json(self): return self._d
-    async def __aenter__(self): return self
-    async def __aexit__(self, *a): return False
+from fakes import AsyncResponse as Resp
 class Sess:
     def __init__(self, handler): self.handler, self.calls = handler, []
     def get(self, url, params=None, headers=None, cookies=None, timeout=None):

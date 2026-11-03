@@ -60,7 +60,7 @@ function renderEpisodeHistoryPagination(page, total, pageSize) {
   if (page < totalPages) container.appendChild(makeButton("다음", () => loadEpisodeHistory(page + 1)));
 }
 
-document.getElementById("episode-history-search").addEventListener("input", () => loadEpisodeHistory(1));
+document.getElementById("episode-history-search").addEventListener("input", debounce(() => loadEpisodeHistory(1), SEARCH_DEBOUNCE_MS)); // 글자마다 서버에 요청하지 않고 멈춘 뒤 한 번만
 document.getElementById("episode-history-status").addEventListener("change", () => loadEpisodeHistory(1));
 
 document.getElementById("btn-clear-episode-history").addEventListener("click", async () => {

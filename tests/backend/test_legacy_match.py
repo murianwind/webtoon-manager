@@ -45,11 +45,8 @@ RESULTS = {
     "타원을 그리는 법": [card(7, "타원을 그리는 방법"), card(8, "타원의 비밀"), card(9, "전혀 다른 작품"), card(10, "네번째")],
     "룬의 아이들": [],
 }
-class Resp:
-    def __init__(self, d): self.status, self._d = 200, d
-    async def json(self, content_type=None): return self._d
-    async def __aenter__(self): return self
-    async def __aexit__(self, *a): return False
+from fakes import AsyncResponse
+def Resp(d): return AsyncResponse(200, d)
 class Sess:
     def __init__(self): self.calls = []
     def get(self, url, params=None, headers=None, cookies=None, timeout=None):

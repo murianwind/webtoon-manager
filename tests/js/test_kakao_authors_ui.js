@@ -1,5 +1,5 @@
 // 카카오 작가 화면: 원작자는 "(원작)"으로 표시(선택됨/사용 가능 모두), 여러 명이 묶여 오지 않는다.
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
 (async () => {
   const routes = {
     "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" },
@@ -11,8 +11,8 @@ const { makeApp, sleep, ok, done } = require("./harness");
     "/api/kakao/origin-authors": ["민홍남", "연상호", "황은영"],
     "/api/kakao/authors/candidates": ["황은영", "오오히라 요우", "배혜수"],
   };
-  const { w, run } = makeApp(routes); await sleep(60); run("kakaoWebtoonsEnabled = true;");
-  run("window.__p = loadKakaoAuthorList();"); await w.__p; await sleep(30);
+  const { w, run } = makeApp(routes); await idle(); run("kakaoWebtoonsEnabled = true;");
+  run("window.__p = loadKakaoAuthorList();"); await w.__p; await idle();
   const chips = (id) => Array.from(w.document.querySelectorAll(`#${id} .chip`)).map((c) => c.textContent.replace(/\s*[×✕+xX]\s*$/, "").trim());
   const selected = chips("kakao-author-registered-chips"), all = chips("kakao-author-all-chips");
   ok(JSON.stringify(selected) === JSON.stringify(["연상호 (원작)", "배혜수"]), "선택됨: 원작자에만 '(원작)': " + JSON.stringify(selected));

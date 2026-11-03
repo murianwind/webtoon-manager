@@ -5,6 +5,7 @@ import time
 from http.cookies import SimpleCookie
 
 from app import repository, db
+from fakes import discord_fake
 db.get_connection()
 from app import kakao_page_auth as auth
 from app import kakao_page_download as kp
@@ -77,7 +78,7 @@ assert "만료" in auth.health_alert_message(False, 10) and "다시" in auth.hea
 assert "5" in (auth.health_alert_message(True, 4) or "") or "4" in (auth.health_alert_message(True, 4) or "")
 assert auth.health_alert_message(True, 6) is None
 sent = []
-async def fake_send(session, message): sent.append(message)
+fake_send = discord_fake(sent, result=None)
 auth.discord_notify.send_webhook_notification = fake_send
 auth.discord_config.set_webhook_url("https://discord.com/api/webhooks/1/test")   # 실제처럼 웹훅이 있어야 쿠키 알림이 나간다(없으면 보내지도 기록하지도 않음)
 async def t3():

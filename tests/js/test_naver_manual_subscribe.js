@@ -1,5 +1,5 @@
 // 수동 다운로드(네이버): 검색 결과 카드와 분석 결과 제목 옆에 카카오처럼 구독/구독 중 버튼
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
 (async () => {
   const search = [
     { title_id: "111", title: "구독중 작품", thumbnail_url: "t1", subscription: "active" },
@@ -13,11 +13,11 @@ const { makeApp, sleep, ok, done } = require("./harness");
     "/api/manual-download/search": search, "/api/manual-download/analyze": () => analysis,
     "/api/naver-list/333/subscribe": (opts) => { posts.push(JSON.parse(opts.body)); return { status: "active" }; },
   };
-  const { w, run } = makeApp(routes); await sleep(60); run("kakaoWebtoonsEnabled = true;");
+  const { w, run } = makeApp(routes); await idle(); run("kakaoWebtoonsEnabled = true;");
   const $ = (id) => w.document.getElementById(id);
   run(`switchToTab("manual-download");`);
   $("manual-platform").value = "naver"; $("manual-platform").dispatchEvent(new w.Event("change"));
-  const go = async (q) => { $("manual-query").value = q; $("btn-manual-analyze").click(); await sleep(40); };
+  const go = async (q) => { $("manual-query").value = q; $("btn-manual-analyze").click(); await idle(); };
   const subBtn = (card) => [...card.querySelectorAll(".webtoon-card-actions button")].find((b) => b.textContent.startsWith("구독"));
 
   // Scenario 1: 검색 결과 카드 — 구독 중이면 "구독 중"(비활성), 아니면 "구독"
@@ -30,7 +30,7 @@ const { makeApp, sleep, ok, done } = require("./harness");
   ok(cards[2].querySelector(".webtoon-card-actions").children[0].textContent === "이 작품 분석", "'이 작품 분석' 버튼은 그대로 첫째");
 
   // Scenario 2: 카드의 "구독"을 누르면 구독 API가 호출되고 "구독 중"으로 바뀐다
-  subBtn(cards[2]).click(); await sleep(40);
+  subBtn(cards[2]).click(); await idle();
   ok(posts.length === 1 && posts[0].title === "새 작품" && posts[0].thumbnail_url === "t3", "구독 요청 본문(제목/썸네일): " + JSON.stringify(posts));
   ok(subBtn(cards[2]).textContent === "구독 중" && subBtn(cards[2]).disabled, "누른 뒤 '구독 중'(비활성)");
 
@@ -45,7 +45,7 @@ const { makeApp, sleep, ok, done } = require("./harness");
 
   // Scenario 4: 분석 화면에서 "구독"을 누르면 구독되고 "구독 중"이 된다
   analysis = { ...analysis, title_id: "333", title: "새 작품", subscription: null }; await go("333");
-  posts.length = 0; sub.click(); await sleep(40);
+  posts.length = 0; sub.click(); await idle();
   ok(posts.length === 1 && sub.textContent === "구독 중" && sub.disabled, "분석 화면 구독 후 '구독 중': " + JSON.stringify(posts));
   done();
 })();

@@ -1,6 +1,6 @@
 // 보관할 폴더 즐겨찾기(폴더 선택기): 보관 쪽 선택기에만 즐겨찾기 버튼 줄이 나오고(원본/미리보기 선택기에는 없음),
 // 누르면 그 폴더의 목록이 바로 열리며(원격 고르기를 건너뜀), 목록 화면의 별 버튼으로 추가/삭제하고 ✕로도 삭제한다.
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
 (async () => {
   let favorites = [
     { id: "f1", label: "onedrive · 02 시리즈", dest_type: "rclone", root: "onedrive", path: "개인 자료/Webtoon/02 시리즈" },
@@ -21,7 +21,7 @@ const { makeApp, sleep, ok, done } = require("./harness");
     },
   };
   // 삭제(DELETE /api/archive/favorites/<id>)는 접두사라 harness가 못 찾는다 — fetch를 감싸서 처리
-  const { w, run } = makeApp(routes); await sleep(60);
+  const { w, run } = makeApp(routes); await idle();
   const baseFetch = w.fetch;
   w.fetch = async (url, opts = {}) => {
     const m = String(url).match(/^\/api\/archive\/favorites\/(\w+)$/);
@@ -31,7 +31,7 @@ const { makeApp, sleep, ok, done } = require("./harness");
   const $ = (id) => w.document.getElementById(id);
   const chips = (id) => [...$(id).querySelectorAll(".folder-favorite-chip")];
   const chipLabels = (id) => chips(id).map((c) => c.querySelector(".folder-favorite-name").textContent);
-  const render = async (id, options) => { run(`window.__p = renderFolderPicker("${id}", () => {}, "", ${JSON.stringify(options || {})});`); await w.__p; await sleep(80); };
+  const render = async (id, options) => { run(`window.__p = renderFolderPicker("${id}", () => {}, "", ${JSON.stringify(options || {})});`); await w.__p; await idle(); };
   // 선택기는 한 번 그려지면 위치를 sessionStorage에 기억하므로, 시나리오마다 비운다
   const reset = () => w.sessionStorage.clear();
 
@@ -45,24 +45,24 @@ const { makeApp, sleep, ok, done } = require("./harness");
   ok(chips("archive-folder-target-source-picker").length === 0 && chips("archive-filename-template-preview-folder-picker").length === 0, "원본/미리보기 선택기에는 즐겨찾기 줄이 없다");
   // Scenario 3: 즐겨찾기를 누르면 원격 고르기 없이 그 폴더의 목록이 바로 열린다(현재 위치 표시, 해당 경로로 조회)
   reset(); await render("archive-target-folder-picker");
-  calls.length = 0; chips("archive-target-folder-picker")[0].querySelector(".folder-favorite-name").click(); await sleep(80);
+  calls.length = 0; chips("archive-target-folder-picker")[0].querySelector(".folder-favorite-name").click(); await idle();
   ok(calls.some((c) => c[0] === "rclone" && c[1] === "onedrive" && c[2] === "개인 자료/Webtoon/02 시리즈"), "그 경로로 목록 조회: " + JSON.stringify(calls));
   ok(/현재 위치: onedrive:\/개인 자료\/Webtoon\/02 시리즈/.test($("archive-target-folder-picker").textContent) && /도굴왕/.test($("archive-target-folder-picker").textContent) && !$("archive-target-folder-picker").querySelector(".registry-add-row select"), "목록 화면으로 바로 이동");
   ok(chips("archive-target-folder-picker")[0].classList.contains("folder-favorite-chip-active"), "지금 위치인 즐겨찾기는 강조");
   // Scenario 4: 목록 화면의 별 버튼 — 이미 즐겨찾기한 폴더는 "즐겨찾기됨", 누르면 삭제
   const star = () => $("archive-target-folder-picker").querySelector(".folder-favorite-star");
   ok(/즐겨찾기됨/.test(star().textContent), "이미 즐겨찾기한 폴더 표시: " + star().textContent);
-  calls.length = 0; star().click(); await sleep(80);
+  calls.length = 0; star().click(); await idle();
   ok(calls.some((c) => c[0] === "DELETE" && c[1] === "f1") && chips("archive-target-folder-picker").length === 0 && /즐겨찾기에 추가/.test(star().textContent), "별을 누르면 삭제: " + JSON.stringify(calls));
   // Scenario 5: 다른 폴더로 들어가서 별 버튼으로 추가 — 선택기의 현재 위치(종류/원격/경로)로 저장하고 버튼 줄에 나타난다
-  $("archive-target-folder-picker").querySelector(".folder-picker-row button").click(); await sleep(80);        // "도굴왕" 폴더로 들어감
-  calls.length = 0; star().click(); await sleep(100);
+  $("archive-target-folder-picker").querySelector(".folder-picker-row button").click(); await idle();        // "도굴왕" 폴더로 들어감
+  calls.length = 0; star().click(); await idle();
   const post = calls.find((c) => c[0] === "POST");
   ok(post && post[1].dest_type === "rclone" && post[1].root === "onedrive" && post[1].path === "개인 자료/Webtoon/02 시리즈/도굴왕", "현재 위치로 추가 요청: " + JSON.stringify(post));
   ok(JSON.stringify(chipLabels("archive-target-folder-picker")) === JSON.stringify(["onedrive · 도굴왕"]) && /즐겨찾기됨/.test(star().textContent), "추가한 즐겨찾기가 줄에 나타나고 별이 바뀜");
   // Scenario 6: ✕로 삭제 — 목록 화면이 아닌 처음 화면에서도 된다
   const del = $("archive-target-folder-picker").querySelector(".folder-favorite-remove");
-  calls.length = 0; del.click(); await sleep(80);
+  calls.length = 0; del.click(); await idle();
   ok(calls.some((c) => c[0] === "DELETE") && chips("archive-target-folder-picker").length === 0, "✕로 삭제");
   // Scenario 7: 로컬과 rclone을 둘 다 쓸 수 있으면 로컬 즐겨찾기도 나온다 — 누르면 로컬 모드로 그 루트/경로가 열린다. 일괄 이동 목적지(루트 선택 가능)는 두 루트의 즐겨찾기를 모두 보인다
   settings = { ...settings, local_available: true, rclone_available: true };
@@ -76,7 +76,7 @@ const { makeApp, sleep, ok, done } = require("./harness");
   reset(); await render("bulk-move-dest-picker", { skipExistingCheck: true, localRoots: ["archive", "download"] });
   ok(JSON.stringify(chipLabels("bulk-move-dest-picker")) === JSON.stringify(["로컬 · 카카오", "로컬 · 받은것", "onedrive · 02 시리즈"]), "일괄 이동 목적지: 두 로컬 루트 모두: " + JSON.stringify(chipLabels("bulk-move-dest-picker")));
   reset(); await render("archive-target-folder-picker");
-  calls.length = 0; chips("archive-target-folder-picker")[0].querySelector(".folder-favorite-name").click(); await sleep(80);
+  calls.length = 0; chips("archive-target-folder-picker")[0].querySelector(".folder-favorite-name").click(); await idle();
   ok(calls.some((c) => c[0] === "local" && c[1] === "archive" && c[2] === "카카오"), "로컬 즐겨찾기는 로컬 모드로 열림: " + JSON.stringify(calls));
   // Scenario 8: 즐겨찾기가 하나도 없으면 줄 자체가 나오지 않는다
   favorites = []; run("invalidateArchiveFavorites();"); reset(); await render("archive-target-folder-picker");

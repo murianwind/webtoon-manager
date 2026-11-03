@@ -1,5 +1,5 @@
 // 카카오 수동 다운로드 분석 — 아카이빙으로 보관 폴더에 옮겨진 회차(받은 회차 기록에는 있고 폴더에는 없음)를 "이미받음"으로 보여 주되 구분해서 표시
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
 (async () => {
   const row = (n, extra = {}) => ({ number: n, subtitle: `${n}화`, state: "free", expire: null, free_at: null, downloaded: false, archived: false, before_start: false, selectable: true, ...extra });
   const episodes = [
@@ -13,10 +13,10 @@ const { makeApp, sleep, ok, done } = require("./harness");
     before_start_count: 1, cookie_saved: true, logged_in: true, thumbnail_url: "t", authors: "a", subscription: null, tickets: null, site_total: 6, listed_count: 6, excluded_video_count: 0, episodes };
   let cur = base;
   const routes = { "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" }, "/api/kakao-manual/analyze": () => cur };
-  const { w, run } = makeApp(routes); await sleep(60); run("kakaoWebtoonsEnabled = true;");
+  const { w, run } = makeApp(routes); await idle(); run("kakaoWebtoonsEnabled = true;");
   const $ = (id) => w.document.getElementById(id);
   run(`switchToTab("manual-download");`); $("manual-platform").value = "kakao"; $("manual-platform").dispatchEvent(new w.Event("change"));
-  const analyze = async (a) => { cur = a; $("manual-query").value = "1"; $("btn-manual-analyze").click(); await sleep(40); return $("kakao-manual-summary").textContent; };
+  const analyze = async (a) => { cur = a; $("manual-query").value = "1"; $("btn-manual-analyze").click(); await idle(); return $("kakao-manual-summary").textContent; };
   const cell = (r) => w.document.querySelectorAll("#kakao-manual-tbody tr")[r].children[5].textContent.replace(/\s+/g, " ").trim();
 
   let t = await analyze(base);

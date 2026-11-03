@@ -4,14 +4,8 @@ import asyncio
 from app import webtoon_server_client as client
 
 
-class FakeResponse:
-    def __init__(self, status=200, body=None, bad_json=False):
-        self.status, self._body, self._bad = status, body, bad_json
-    async def json(self):
-        if self._bad: raise ValueError("not json")
-        return self._body
-    async def __aenter__(self): return self
-    async def __aexit__(self, *a): return False
+from fakes import AsyncResponse
+def FakeResponse(status=200, body=None, bad_json=False): return AsyncResponse(status, body, bad_json=bad_json)
 
 
 class FakeSession:

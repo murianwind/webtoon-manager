@@ -69,7 +69,7 @@ async def main():
 
         # ── 4. 실행 대상 ──
         ran = []; gate = asyncio.Event(); started = asyncio.Event()
-        async def fake_impl(platforms, scheduled=False):
+        async def fake_impl(platforms, scheduled=False, partial=False):
             ran.append(sorted(platforms)); started.set(); await gate.wait()
         sch.download_job._run_download_job_impl = fake_impl     # run_download_job이 있는 download_job 모듈이 부르는 이름
         t1 = asyncio.create_task(sch.run_download_job("naver")); await started.wait()              # 네이버 실행 중

@@ -79,16 +79,11 @@ naver_api.fetch_full_webtoon_list = fake_full_list; daily_plus.current_ids = fak
 ANSWERS = {}; calls = []; DELAY = [0.3]                                                                                              # 처음엔 조회를 느리게 — 응답이 조회를 기다리면 바로 드러난다
 async def fake_lookup(session, title_id, timeout): calls.append(title_id); await asyncio.sleep(DELAY[0]); return ANSWERS.get(title_id, [])
 naver_api.fetch_title_page_weekdays = fake_lookup
-MINE = set()                                                                                                                         # 이 테스트가 만든 작품 번호 — 공용 테스트 DB에는 다른 테스트의 작품도 있어서 후보를 우리 것으로 한정한다
-_real_list_all = repository.list_all
-repository.list_all = lambda: [w for w in _real_list_all() if w.title_id in MINE]
-def track(tid, name):
-    MINE.add(tid); repository.upsert_new(tid, name)
 def reset(ids):
     for key in (weekdays.LOOKUP_KEY, weekdays.NAVER_MAP_KEY): repository.set_setting(key, None)
     calls.clear(); ANSWERS.clear(); hidden.clear()
-    for tid in ids: track(tid, f"작품{tid}")
-for tid, name in (("9501", "장기휴재 구독중"), ("9502", "장기휴재 제외됨"), ("9503", "완결"), ("9504", "목록에 있는 작품"), ("9505", "매일플러스")): track(tid, name)
+    for tid in ids: repository.upsert_new(tid, f"작품{tid}")
+for tid, name in (("9501", "장기휴재 구독중"), ("9502", "장기휴재 제외됨"), ("9503", "완결"), ("9504", "목록에 있는 작품"), ("9505", "매일플러스")): repository.upsert_new(tid, name)
 repository.set_status("9502", repository.STATUS_EXCLUDED); repository.mark_finished("9503")
 
 async def main():
@@ -117,7 +112,7 @@ async def main():
 
         DELAY[0] = 0.01
         # Scenario 7: 요청이 실패하면(None) 하루 뒤에 다시, 한꺼번에 40개까지만, 이미 조회 중이면 또 시작하지 않는다
-        for tid in range(9600, 9645): track(str(tid), f"배치{tid}")
+        for tid in range(9600, 9645): repository.upsert_new(str(tid), f"배치{tid}")
         for key in (weekdays.LOOKUP_KEY,): repository.set_setting(key, None)
         calls.clear(); ANSWERS.clear()
         await asyncio.gather(c.get("/api/naver-list"), c.get("/api/naver-list"), c.get("/api/naver-list")); await asyncio.sleep(1.2)
@@ -135,7 +130,7 @@ async def main():
         print("8) 조회 실패에도 목록은 정상 OK")
 
         # Scenario 9: 작품 하나의 조회가 예외로 실패해도 나머지는 계속한다(실패한 건 못 알아낸 것으로 기록 → 하루 뒤 재시도).
-        # (공용 테스트 DB에 다른 테스트의 작품이 많아서 엔드포인트의 배치 순서에 기대지 않고 조회 루프를 직접 부른다)
+        # (엔드포인트의 배치 순서(DB 순서)에 기대지 않고 조회 루프를 직접 불러서 결정적으로 만든다)
         import app.api.webtoons as api_webtoons
         if api_webtoons._weekday_lookup_task is not None: await api_webtoons._weekday_lookup_task                                      # 앞 시나리오의 백그라운드 조회가 끝난 뒤에 시작한다
         for key in (weekdays.LOOKUP_KEY, weekdays.NAVER_MAP_KEY): repository.set_setting(key, None)

@@ -1,13 +1,14 @@
 // 웹툰 전체목록/제외됨 화면 — 요일별 탭(오늘 요일이 기본), 플랫폼 필터(네이버/카카오), 태그 필터는 네이버만 볼 때만, 한 번에 많이 그려서 브라우저가 멎는 문제를 막는 점진 렌더링과 검색 지연.
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
+const { listItem } = require("./factories");
 (async () => {
-  const mk = (platform, id, title, weekdays, extra = {}) => ({ platform, title_id: platform === "kakao" ? 70000000 + id : String(id), title, thumbnail_url: "", author_summary: "저자", writer_names: ["저자"], tags: [], weekdays, status: null, ever_subscribed: false, is_new: false, is_paused: false, has_new_episode: false, is_adult: false, is_finished: false, last_downloaded_no: 0, ...extra });
+  const mk = listItem;
   const base = [
     mk("naver", 1, "네이버 월화", ["mon", "tue"]), mk("naver", 2, "네이버 화", ["tue"]), mk("naver", 3, "네이버 일", ["sun"]), mk("naver", 4, "네이버 기타", []),
     mk("kakao", 5, "카카오 화", ["tue"]), mk("kakao", 6, "카카오 수", ["wed"]), mk("kakao", 7, "카카오 기타", []),
   ];
-  const { w, run } = makeApp({ "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" }, "/api/naver-list": [], "/api/kakao-list": { items: [], version: "v", refreshing: false } });
-  await sleep(60); run("kakaoWebtoonsEnabled = true; currentDate = () => new Date('2026-11-03T03:00:00Z');");        // 2026-11-03 = 화요일(한국시간 12시)
+  const { w, run, wait } = makeApp({ "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" }, "/api/naver-list": [], "/api/kakao-list": { items: [], version: "v", refreshing: false } }, { timeScale: 5 }); // 검색 지연(250ms)을 5배 빠르게 — 고정 sleep 없이 확인
+  await idle(); run("kakaoWebtoonsEnabled = true; currentDate = () => new Date('2026-11-03T03:00:00Z');");        // 2026-11-03 = 화요일(한국시간 12시)
   const $ = (id) => w.document.getElementById(id);
   const feed = (rows) => { w.__rows = rows; run("naverListNaverItems = __rows.filter((r) => r.platform === 'naver'); naverListKakaoItems = __rows.filter((r) => r.platform === 'kakao'); combineNaverListCache(); renderNaverList();"); };
   const titles = (gridId = "naver-list-grid") => [...w.document.querySelectorAll(`#${gridId} .webtoon-card-title`)].map((e) => e.textContent.trim());
@@ -33,9 +34,9 @@ const { makeApp, sleep, ok, done } = require("./harness");
   clickTab("월"); ok(JSON.stringify(titles()) === '["네이버 월화"]', "월요일 탭");
 
   // Scenario 3: 검색하면 요일과 상관없이 전체에서 찾는다(탭은 "전체"로 보이고, 검색을 지우면 보던 탭으로 돌아간다)
-  $("naver-list-search").value = "카카오 수"; $("naver-list-search").dispatchEvent(new w.Event("input")); await sleep(350);
+  $("naver-list-search").value = "카카오 수"; $("naver-list-search").dispatchEvent(new w.Event("input")); await wait(350);
   ok(JSON.stringify(titles()) === '["카카오 수"]' && activeTab("naver-list-weekday-tabs") === "전체", "검색은 전체에서: " + titles());
-  $("naver-list-search").value = ""; $("naver-list-search").dispatchEvent(new w.Event("input")); await sleep(350);
+  $("naver-list-search").value = ""; $("naver-list-search").dispatchEvent(new w.Event("input")); await wait(350);
   ok(activeTab("naver-list-weekday-tabs") === "월" && titles().length === 1, "검색을 지우면 보던 탭(월)으로");
 
   // Scenario 4: 플랫폼 필터(전체/네이버/카카오) — 카카오 관리를 켠 경우에만 보이고, 고르면 그 플랫폼만, 탭 개수도 따라 바뀐다. 선택은 저장된다
@@ -95,8 +96,8 @@ const { makeApp, sleep, ok, done } = require("./harness");
   // Scenario 8: 검색 입력은 잠깐 기다렸다가(250ms) 한 번만 다시 그린다 — 글자마다 수백 개 카드를 다시 걸러서 그리면 멎는다
   feed(base); clickTab("전체");
   let renders = 0; run("window.__renderNaverList = renderNaverList; renderNaverList = function (...a) { window.__renders = (window.__renders || 0) + 1; return window.__renderNaverList(...a); };"); w.__renders = 0;
-  for (const text of ["네", "네이", "네이버"]) { $("naver-list-search").value = text; $("naver-list-search").dispatchEvent(new w.Event("input")); await sleep(40); }
+  for (const text of ["네", "네이", "네이버"]) { $("naver-list-search").value = text; $("naver-list-search").dispatchEvent(new w.Event("input")); await idle(); }
   ok(w.__renders === 0, "입력하는 동안에는 다시 그리지 않는다: " + w.__renders);
-  await sleep(330); ok(w.__renders === 1 && titles().every((t) => t.startsWith("네이버")), "멈추면 한 번만 다시 그린다: " + w.__renders);
+  await wait(330); ok(w.__renders === 1 && titles().every((t) => t.startsWith("네이버")), "멈추면 한 번만 다시 그린다: " + w.__renders);
   done();
 })();

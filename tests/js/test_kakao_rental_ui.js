@@ -1,5 +1,5 @@
 // 카카오 대여권 UI — 수동 다운로드 표(대여권 상태, 선택, 확인 창, 요청)와 설정(자동 사용 체크박스, 기본 꺼짐)
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
 (async () => {
   const ep = (number, state, extra = {}) => ({ number, subtitle: `${number}화`, state, expire: null, free_at: null, downloaded: false, before_start: false, selectable: !["locked", "waitfree_wait", "rental_needed"].includes(state), ...extra });   // 서버는 못 여는 상태를 선택 불가로 내려 준다
   const analysis = {
@@ -14,11 +14,11 @@ const { makeApp, sleep, ok, done } = require("./harness");
     "/api/kakao-manual/analyze": analysis, "/api/kakao-manual/run": (opts) => { runs.push(JSON.parse(opts.body)); return { status: "started" }; },
     "/api/settings/kakao-rental-ticket-auto-use": (opts) => { if (opts && opts.method === "POST") { settingPosts.push(JSON.parse(opts.body)); autoSetting = JSON.parse(opts.body).enabled; } return { enabled: autoSetting }; },
   };
-  const { w, run } = makeApp(routes); await sleep(60); run("kakaoWebtoonsEnabled = true;");
+  const { w, run } = makeApp(routes); await idle(); run("kakaoWebtoonsEnabled = true;");
   const $ = (id) => w.document.getElementById(id);
   const confirms = []; w.confirm = (m) => { confirms.push(m); return w.__confirm === undefined ? true : w.__confirm; };
   run(`switchToTab("manual-download");`); $("manual-platform").value = "kakao"; $("manual-platform").dispatchEvent(new w.Event("change"));
-  $("manual-query").value = "68546405"; $("btn-manual-analyze").click(); await sleep(50);
+  $("manual-query").value = "68546405"; $("btn-manual-analyze").click(); await idle();
   const boxes = () => [...w.document.querySelectorAll(".kakao-manual-ep-checkbox")];
   const box = (n) => boxes().find((b) => b.dataset.no === String(n));
   const checkedNos = () => boxes().filter((b) => b.checked).map((b) => Number(b.dataset.no));
@@ -42,30 +42,30 @@ const { makeApp, sleep, ok, done } = require("./harness");
   ok(JSON.stringify(checkedNos()) === JSON.stringify([2, 3]), "미보유만 선택: 대여권 2장만큼(2,3번): " + JSON.stringify(checkedNos()));
 
   // Scenario 3: 선택 다운로드 — 확인 창에 장수/남는 장수/되돌릴 수 없음 안내, 취소하면 요청이 나가지 않는다
-  w.__confirm = false; $("btn-kakao-manual-download").click(); await sleep(30);
+  w.__confirm = false; $("btn-kakao-manual-download").click(); await idle();
   const msg = confirms[confirms.length - 1] || "";
   ok(/대여권 2장을 사용/.test(msg) && /남은 대여권 0장|0장이 남/.test(msg) && /되돌릴 수 없/.test(msg) && /3일/.test(msg), "확인 창 안내: " + msg.replace(/\n/g, " / "));
   ok(runs.length === 0, "확인 창에서 취소하면 요청이 나가지 않는다");
 
   // Scenario 4: 확인하면 use_rental_tickets=true와 고른 회차가 서버로 간다
-  w.__confirm = true; $("btn-kakao-manual-download").click(); await sleep(30);
+  w.__confirm = true; $("btn-kakao-manual-download").click(); await idle();
   ok(runs.length === 1 && runs[0].use_rental_tickets === true && JSON.stringify(runs[0].numbers) === JSON.stringify([2, 3]), "요청: " + JSON.stringify(runs[0]));
 
   // Scenario 5: 보유 수(2장)보다 많이 직접 골랐으면 앞 번호부터 보유 수만 열린다고 알려 준다
-  box(4).checked = true; confirms.length = 0; w.__confirm = false; $("btn-kakao-manual-download").click(); await sleep(30);
+  box(4).checked = true; confirms.length = 0; w.__confirm = false; $("btn-kakao-manual-download").click(); await idle();
   ok(/선택한 3개 중/.test(confirms[confirms.length - 1] || "") && /2개만/.test(confirms[confirms.length - 1] || ""), "초과 선택 안내: " + (confirms[confirms.length - 1] || "").replace(/\n/g, " / "));
 
   // Scenario 6: 대여권 회차를 하나도 안 골랐으면 확인 창도 없고 use_rental_tickets=false
   $("btn-kakao-manual-select-none").click(); runs.length = 0; confirms.length = 0;
-  w.__confirm = true; box(1).disabled = false; box(1).checked = true; $("btn-kakao-manual-download").click(); await sleep(30);
+  w.__confirm = true; box(1).disabled = false; box(1).checked = true; $("btn-kakao-manual-download").click(); await idle();
   ok(!confirms.some((m) => /대여권/.test(m)), "대여권 안내 창이 뜨지 않는다");
   ok(runs.length === 1 && runs[0].use_rental_tickets === false, "use_rental_tickets=false: " + JSON.stringify(runs[0]));
 
   // Scenario 7: 설정 — 자동 사용 체크박스는 저장된 값을 보여 주고, 저장하면 서버로 간다(끄기)
-  run(`switchToTab("settings");`); await sleep(60);
+  run(`switchToTab("settings");`); await idle();
   const toggle = $("kakao-rental-auto-toggle");
   ok(!!toggle && toggle.checked === true, "설정을 열면 저장된 값(켜짐)이 체크박스에 나온다");
-  toggle.checked = false; $("btn-save-kakao-rental-auto").click(); await sleep(30);
+  toggle.checked = false; $("btn-save-kakao-rental-auto").click(); await idle();
   ok(settingPosts.length === 1 && settingPosts[0].enabled === false, "저장하면 서버로 간다: " + JSON.stringify(settingPosts));
   ok(/저장/.test($("kakao-rental-auto-save-result").textContent), "저장 결과 문구");
   ok(/기다무로 못 여는/.test(w.document.getElementById("settings-card-kakao").textContent) && /되돌릴 수 없/.test($("kakao-rental-auto-group").textContent), "설정 안내문에 대상(기다무로 못 여는 회차)과 되돌릴 수 없다는 주의가 있다");

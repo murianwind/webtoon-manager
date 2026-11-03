@@ -39,23 +39,24 @@ async def run_download_job(target: str = "naver", scheduled: bool = False) -> No
     if not platforms:
         job_status.log_line("download", "이미 실행 중이거나 대기 중이라 건너뜁니다 (중복 실행 방지)")
         return
-    if platforms != wanted:
-        job_status.log_line("download", "이미 실행 중이거나 대기 중인 대상은 건너뛰고 나머지만 실행합니다 (중복 실행 방지)")
     _download_claimed_platforms.update(platforms)
     try:
         async with _download_job_lock:
-            await _run_download_job_impl(platforms, scheduled)
+            await _run_download_job_impl(platforms, scheduled, partial=platforms != wanted)
     finally:
         _download_claimed_platforms.difference_update(platforms)
 
 
-async def _run_download_job_impl(platforms: set[str], scheduled: bool = False) -> None:
+async def _run_download_job_impl(platforms: set[str], scheduled: bool = False, partial: bool = False) -> None:
+    """partial: 일부 플랫폼은 이미 다른 실행이 맡고 있어서 나머지만 실행하는 경우 — 안내 줄은 job_status.start가 로그를 비운 뒤에 남겨야 사라지지 않는다."""
     settings = get_settings()
     # 신작 스캔이 자동으로 구독 추가해 둔 매일+ 작품은 받지 않는다 — 저장해 둔 매일+ 목록으로(네트워크 없이) 먼저 제외됨으로 정리한다
     auto_excluded = repository.exclude_auto_added_titles(daily_plus.cached_ids()) if "naver" in platforms else []
     active_webtoons = repository.list_by_status(repository.STATUS_ACTIVE) if "naver" in platforms else []
 
     job_status.start("download")
+    if partial:
+        job_status.log_line("download", "이미 실행 중이거나 대기 중인 대상은 건너뛰고 나머지만 실행합니다 (중복 실행 방지)")
     if auto_excluded:
         job_status.log_line("download", f"자동 추가된 매일+ 작품 {len(auto_excluded)}개를 제외됨으로 정리했습니다: " + ", ".join(title for _, title in auto_excluded))
     if "naver" in platforms:

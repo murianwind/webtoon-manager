@@ -7,11 +7,7 @@ real_day = SAMPLES['landing_dayofweek']
 real_search = SAMPLES['search_series']
 real_products = SAMPLES['content_product_list']
 
-class Resp:
-    def __init__(self, status, data): self.status, self._d = status, data
-    async def json(self): return self._d
-    async def __aenter__(self): return self
-    async def __aexit__(self, *a): return False
+from fakes import AsyncResponse as Resp
 
 class FakeSession:
     """url+params에 따라 응답을 만드는 가짜 세션. 호출 기록을 남긴다."""

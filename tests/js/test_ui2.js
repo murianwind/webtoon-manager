@@ -1,6 +1,5 @@
-const ALL_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]; // 요일별 탭이 생겼으므로 예제 작품은 모든 요일에 연재하는 것으로 둔다(어느 요일 탭에서든 보이게)
-const { makeApp, sleep, ok, done } = require("./harness");
-const kakao = (id, title, extra = {}) => ({ title_id: id, title, weekdays: ALL_DAYS, thumbnail_url: `https://k/${id}`, author_summary: "작가", is_adult: false, is_new: false, is_paused: false, has_new_episode: false, status: null, ever_subscribed: false, ...extra });
+const { makeApp, sleep, idle, ok, done } = require("./harness");
+const { kakao } = require("./factories");
 (async () => {
   const now = Date.now();
   const analysis = (o = {}) => ({
@@ -33,29 +32,29 @@ const kakao = (id, title, extra = {}) => ({ title_id: id, title, weekdays: ALL_D
     "/api/webtoons": () => [], "/api/kakao-webtoons": () => [], "/api/webtoon-server/lookup": { url: "http://viewer/x" },
   };
   const { w, run, calls } = makeApp(routes);
-  await sleep(60); run("kakaoWebtoonsEnabled = true;");
+  await idle(); run("kakaoWebtoonsEnabled = true;");
   const $ = (id) => w.document.getElementById(id);
 
   console.log("1) 다운로드 폴더 선택기(네이버/카카오 따로, 마운트된 폴더 안에서 고르거나 새로 만들기)");
-  run("window.__p = loadSettingsPage();"); await w.__p; await sleep(40);
+  run("window.__p = loadSettingsPage();"); await w.__p; await idle();
   ok(!!$("settings-panel-roots") && !$("kakao-download-root-group").classList.contains("hidden"), "카드가 있고 카카오 관리를 켜면 카카오 폴더도 보임");
   ok(!$("naver-download-root") && !$("kakao-download-root"), "직접 입력하는 칸은 없어짐");
   ok($("naver-download-root-picker").querySelector(".drp-path").textContent === HOST && $("naver-download-root-picker").textContent.includes("(컨테이너: /webtoon_download, 기본 폴더)"), "네이버: 호스트 경로(" + HOST + ")가 앞에, 컨테이너 경로는 괄호로 보임");
   ok($("kakao-download-root-picker").textContent.includes("네이버와 같은 폴더"), "카카오: 비워 두면 '네이버와 같은 폴더'로 표시");
   ok($("download-roots-status").textContent.includes("네이버: " + HOST + " (컨테이너: /webtoon_download)"), "현재 받는 폴더 문구가 호스트 경로 + (컨테이너 경로)로 나옴: " + $("download-roots-status").textContent.slice(0, 90));
-  const openPicker = async (kind) => { const b = Array.from($(`${kind}-download-root-picker`).querySelectorAll("button")).find((x) => x.textContent === "폴더 선택"); b.click(); await sleep(40); };
+  const openPicker = async (kind) => { const b = Array.from($(`${kind}-download-root-picker`).querySelectorAll("button")).find((x) => x.textContent === "폴더 선택"); b.click(); await idle(); };
   const pbtn = (kind, text) => Array.from($(`${kind}-download-root-picker`).querySelectorAll("button")).find((x) => x.textContent.trim() === text);
   await openPicker("kakao");
   ok(Array.from($("kakao-download-root-picker").querySelectorAll(".drp-list button")).map((b) => b.textContent).join() === "📁 Naver,📁 Kakao", "마운트된 폴더 아래의 하위 폴더가 목록으로 보임");
-  pbtn("kakao", "📁 Kakao").click(); await sleep(40);
+  pbtn("kakao", "📁 Kakao").click(); await idle();
   ok($("kakao-download-root-picker").querySelector(".drp-crumbs").textContent.includes("Kakao") && $("kakao-download-root-picker").querySelector(".drp-list").textContent.includes("웹툰"), "폴더로 들어가면 경로와 하위 폴더가 바뀜");
-  const origPrompt = w.prompt; w.prompt = () => "개미모음"; pbtn("kakao", "새 폴더 만들기").click(); await sleep(40);
+  const origPrompt = w.prompt; w.prompt = () => "개미모음"; pbtn("kakao", "새 폴더 만들기").click(); await idle();
   ok(created.length === 1 && created[0].path === "Kakao/개미모음" && created[0].root === "download_base", "새 폴더 만들기: 마운트된 다운로드 폴더 기준(download_base)으로 요청: " + JSON.stringify(created[0]));
   ok($("kakao-download-root-picker").querySelector(".drp-list").textContent.includes("개미모음"), "만든 폴더가 목록에 바로 나타남");
-  pbtn("kakao", "📁 개미모음").click(); await sleep(40); pbtn("kakao", "이 폴더 선택").click(); await sleep(40);
+  pbtn("kakao", "📁 개미모음").click(); await idle(); pbtn("kakao", "이 폴더 선택").click(); await idle();
   ok($("kakao-download-root-picker").querySelector(".drp-path").textContent === HOST + "\\Kakao\\개미모음" && $("kakao-download-root-picker").textContent.includes("(컨테이너: /webtoon_download/Kakao/개미모음)"), "선택한 폴더가 호스트 경로(앞) + 컨테이너 경로(괄호)로 표시됨");
-  await openPicker("naver"); pbtn("naver", "📁 Naver").click(); await sleep(40); pbtn("naver", "이 폴더 선택").click(); await sleep(40);
-  $("btn-download-roots-save").click(); await sleep(40);
+  await openPicker("naver"); pbtn("naver", "📁 Naver").click(); await idle(); pbtn("naver", "이 폴더 선택").click(); await idle();
+  $("btn-download-roots-save").click(); await idle();
   ok(posted && posted.naver === "/webtoon_download/Naver" && posted.kakao === "/webtoon_download/Kakao/개미모음", "저장 요청에 고른 두 폴더(절대 경로)가 따로 담김: " + JSON.stringify(posted));
   ok($("download-roots-status").textContent.includes("저장했습니다") && $("download-roots-status").textContent.includes(HOST + "\\Naver (컨테이너: /webtoon_download/Naver)"), "저장 뒤 실제로 쓰는 폴더가 표시됨");
   pbtn("kakao", "네이버와 같게").click(); ok($("kakao-download-root-picker").textContent.includes("네이버와 같은 폴더"), "카카오를 '네이버와 같게'로 되돌릴 수 있음");
@@ -65,37 +64,37 @@ const kakao = (id, title, extra = {}) => ({ title_id: id, title, weekdays: ALL_D
   run("kakaoWebtoonsEnabled = true;");
 
   console.log("2) 카카오 구독은 확인 창 없이, 뷰어 서버 설정과 무관");
-  run("webtoonServerConfigured = false;"); run("window.__p = loadNaverList(true);"); await w.__p; await sleep(30);
+  run("webtoonServerConfigured = false;"); run("window.__p = loadNaverList(true);"); await w.__p; await idle();
   const cards = Array.from(w.document.querySelectorAll("#naver-list-grid .webtoon-card"));
   const btnTexts = (c) => Array.from(c.querySelectorAll(".webtoon-card-actions button")).map((b) => b.textContent.trim());
   ok(JSON.stringify(btnTexts(cards.find((c) => c.textContent.includes("달마부장")))) === '["구독","목록제외"]', "뷰어 서버가 없어도 미구독 카카오 카드에 '구독/목록제외'가 보임");
   ok(JSON.stringify(btnTexts(cards.find((c) => c.textContent.includes("궁")))) === '["구독해제","제외됨으로"]', "구독 중 카드는 '구독해제'/'제외됨으로'(뷰어 아이콘은 뷰어를 설정했을 때만)");
   let confirmed = 0; w.confirm = () => { confirmed++; return true; };
   routes["/api/kakao-webtoons/71000001/subscribe"] = () => kakao(71000001, "달마부장", { status: "active", ever_subscribed: true });
-  cards.find((c) => c.textContent.includes("달마부장")).querySelector(".webtoon-card-actions button").click(); await sleep(40);
+  cards.find((c) => c.textContent.includes("달마부장")).querySelector(".webtoon-card-actions button").click(); await idle();
   ok(confirmed === 0 && calls.some((c) => c.url === "/api/kakao-webtoons/71000001/subscribe" && c.method === "POST"), "구독을 누르면 확인 창 없이 바로 구독 요청");
-  run("webtoonServerConfigured = true;"); run("window.__p = loadNaverList(true);"); await w.__p; await sleep(30);
+  run("webtoonServerConfigured = true;"); run("window.__p = loadNaverList(true);"); await w.__p; await idle();
   ok(w.document.querySelector('#naver-list-grid [data-viewer-check-platform="kakao"]') !== null, "뷰어 서버를 설정하면 구독 중 카카오 카드에 뷰어 아이콘이 붙음");
 
   console.log("3) 수동 다운로드: 이용권/기다무/구독 버튼");
-  run(`switchToTab("manual-download");`); await sleep(20);
+  run(`switchToTab("manual-download");`); await idle();
   $("manual-platform").value = "kakao"; $("manual-platform").dispatchEvent(new w.Event("change"));
-  $("manual-query").value = "개미"; $("btn-manual-analyze").click(); await sleep(30);
+  $("manual-query").value = "개미"; $("btn-manual-analyze").click(); await idle();
   const subs = Array.from(w.document.querySelectorAll("#manual-search-results .webtoon-card-actions button:last-child")); const sub = subs[0];
   ok(subs[1].textContent === "구독 중" && subs[1].disabled && subs[0].textContent === "구독" && !subs[0].disabled, "이미 구독한 작품(쌍갑포차)의 검색 결과 카드는 처음부터 '구독 중'(누를 수 없음), 아닌 작품은 '구독'");
   ok(sub && sub.textContent === "구독", "검색 결과 카드에 구독 버튼이 있음(완결작도 검색되므로 강제 구독 가능)");
   routes["/api/kakao-webtoons/68239972/subscribe"] = () => kakao(68239972, "개미", { status: "active" });
-  sub.click(); await sleep(30);
+  sub.click(); await idle();
   const subCall = calls.find((c) => c.url === "/api/kakao-webtoons/68239972/subscribe");
   ok(subCall && JSON.parse(subCall.body).title === "개미" && JSON.parse(subCall.body).author_summary.includes("김용회") && sub.disabled && sub.textContent === "구독 중", "검색 결과에서 바로 구독(제목/표지/작가가 함께 전달됨) — 누르면 '구독 중'으로 바뀜");
-  $("manual-query").value = "67774694"; $("btn-manual-analyze").click(); await sleep(30);
+  $("manual-query").value = "67774694"; $("btn-manual-analyze").click(); await idle();
   const summary = $("kakao-manual-summary").textContent;
   ok(summary.includes("대여권 0장") && !summary.includes("소장권") && summary.includes("3시간 기다무 대여권") && summary.includes("지금 사용 가능"), "분석 요약에 대여권/소장권/기다무 상태가 표시됨: " + summary.slice(-45));
   const rows = Array.from(w.document.querySelectorAll("#kakao-manual-tbody tr")), cell = (r, i) => rows[r].children[i].textContent.trim();
   ok(cell(1, 3) === "기다무" && !rows[1].querySelector("input").disabled && cell(3, 3) === "잠금" && rows[3].querySelector("input").disabled, "기다무 상태 회차는 선택 가능, 그 밖의 잠금은 선택 불가");
   ok(!$("btn-kakao-manual-subscribe").classList.contains("hidden") && $("btn-kakao-manual-subscribe").textContent === "구독", "분석 화면에 구독 버튼(미구독 상태)");
   routes["/api/kakao-webtoons/67774694/subscribe"] = () => kakao(67774694, "모범택시", { status: "active" });
-  $("btn-kakao-manual-subscribe").click(); await sleep(30);
+  $("btn-kakao-manual-subscribe").click(); await idle();
   ok($("btn-kakao-manual-subscribe").textContent === "구독 중" && $("btn-kakao-manual-subscribe").disabled, "구독하면 버튼이 '구독 중'(누를 수 없음)으로 바뀌고, 구독해제 버튼은 없음");
   const sc = calls.find((c) => c.url === "/api/kakao-webtoons/67774694/subscribe");
   ok(sc && JSON.parse(sc.body).thumbnail_url === "https://k/thumb" && JSON.parse(sc.body).author_summary === "까를로스,최승진", "분석에서 받은 표지/작가로 구독");
@@ -103,20 +102,20 @@ const kakao = (id, title, extra = {}) => ({ title_id: id, title, weekdays: ALL_D
   // 기다무 회차를 골라 받기: 사용 확인 창
   const boxes = (no) => w.document.querySelector(`.kakao-manual-ep-checkbox[data-no="${no}"]`);
   boxes(4).checked = true; boxes(5).checked = true; let msg = ""; w.confirm = (m) => { msg = m; return false; };
-  $("btn-kakao-manual-download").click(); await sleep(20);
+  $("btn-kakao-manual-download").click(); await idle();
   ok(msg.includes("기다무 대여권 1장") && msg.includes("4번") && msg.includes("나머지 1개") && !calls.some((c) => c.url === "/api/kakao-manual/run"), "기다무 회차를 고르면 사용 확인 창(번호가 앞선 1개만 열림)이 뜨고, 취소하면 받지 않음");
-  w.confirm = () => true; $("btn-kakao-manual-download").click(); await sleep(30);
+  w.confirm = () => true; $("btn-kakao-manual-download").click(); await idle();
   ok(calls.some((c) => c.url === "/api/kakao-manual/run" && JSON.parse(c.body).numbers.join() === "4,5"), "확인하면 고른 회차를 요청");
   // 기다무를 쓴 뒤 상태: 사용 불가 + 남은 시간
   current = analysis({ tickets: { rental_count: 1, own_count: 0, waitfree_ready: false, waitfree_available_at: new Date(now + 23 * 3600e3 + 59 * 60e3).toISOString() } });
-  $("btn-kakao-manual-select-none").click(); $("btn-manual-analyze").click(); await sleep(30);
+  $("btn-kakao-manual-select-none").click(); $("btn-manual-analyze").click(); await idle();
   const t2 = $("kakao-manual-summary").textContent;
   ok(t2.includes("대여권 1장") && t2.includes("사용 중") && /23시간 5\d분 남음/.test(t2), "기다무를 쓴 뒤에는 '사용 중'과 남은 시간이 표시됨: " + t2.slice(-40));
   ok(!w.document.querySelector("#kakao-manual-summary .warn") || true, "");
   const missingBtn = () => $("btn-kakao-manual-select-missing");
   ok(missingBtn().classList.contains("hidden"), "받은 회차가 없으면 '전체선택'과 같은 결과라서 '미보유만 선택'은 숨겨짐");
   current = analysis({ episodes: analysis().episodes.map((e, i) => (i === 0 ? { ...e, downloaded: true } : e)) });
-  $("btn-manual-analyze").click(); await sleep(30);
+  $("btn-manual-analyze").click(); await idle();
   ok(!missingBtn().classList.contains("hidden"), "이미 받은 회차가 있으면 '미보유만 선택'이 나타남");
   $("btn-kakao-manual-select-missing").click();
   ok(Array.from(w.document.querySelectorAll(".kakao-manual-ep-checkbox:checked")).map((c) => c.dataset.no).join() === "4", "미보유만 선택: 기다무 회차는 사용 가능한 장수(1장)만큼만 — 번호가 가장 앞선 4번만 고름(5번은 안 고름)");
@@ -125,12 +124,12 @@ const kakao = (id, title, extra = {}) => ({ title_id: id, title, weekdays: ALL_D
   const periods = await w.eval("[180, 1440, 4320, 90, 0].map(formatWaitfreePeriod)") ; ok(JSON.stringify(Array.from(periods)) === '["3시간","1일","3일","90분",""]', "기다무 주기 표기: 180→3시간, 1440→1일, 4320→3일: " + Array.from(periods));
   // 경고 문구: 불리언 true가 그대로 보이면 안 되고, 기다무가 없는 작품은 기다무 항목을 숨긴다
   current = analysis({ marker: { number: 31, subtitle: "전혀 다른 제목", resolved_number: 31, warning: true }, tickets: { rental_count: 0, own_count: 0, waitfree_supported: false, waitfree_ready: false, waitfree_available_at: null, waitfree_period_minutes: 1440 } });
-  $("btn-manual-analyze").click(); await sleep(30);
+  $("btn-manual-analyze").click(); await idle();
   const warnText = $("kakao-manual-summary").querySelector(".warn").textContent, sumText = $("kakao-manual-summary").textContent;
   ok(!/true\b/.test(warnText) && warnText.includes("31번 전혀 다른 제목") && warnText.includes("번호대로 이어받습니다"), "표식 불일치 경고가 'true'가 아니라 안내문으로 나옴: " + warnText);
   ok(sumText.includes("대여권 0장") && !sumText.includes("기다무"), "기다무가 없는 작품(waitfree_supported=false)은 기다무 항목이 안 보임");
   current = analysis({ tickets: { rental_count: 0, own_count: 0, waitfree_supported: true, waitfree_ready: false, waitfree_available_at: new Date(Date.now() + 3600e3).toISOString(), waitfree_period_minutes: 1440 } });
-  $("btn-manual-analyze").click(); await sleep(30);
+  $("btn-manual-analyze").click(); await idle();
   ok($("kakao-manual-summary").textContent.includes("1일 기다무 대여권 사용 중"), "기다무가 있는 작품은 예전처럼 표시됨");
   console.log("4) 표 서식: 네이버 표와 같은 규칙 적용");
   const css = require("fs").readFileSync(require("path").join(__dirname, "..", "..", "app", "static", "style.css"), "utf8");

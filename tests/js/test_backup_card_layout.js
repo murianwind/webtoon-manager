@@ -2,7 +2,7 @@
 // (jsdom은 레이아웃을 계산하지 못해서, 문제였던 구조/스타일 규칙을 확인한다)
 const fs = require("fs");
 const path = require("path");
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
 
 const css = fs.readFileSync(path.join(__dirname, "..", "..", "app", "static", "style.css"), "utf8");
 const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ selector: m[1].trim(), body: m[2] }));
@@ -10,7 +10,7 @@ const bodyOf = (selector) => rules.filter((r) => r.selector.split(",").map((s) =
 
 (async () => {
   const { w } = makeApp({ "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" } });
-  await sleep(60);
+  await idle();
   const $ = (id) => w.document.getElementById(id);
 
   // Scenario 1: 버튼과 복원 파일 선택 칸이 같은 한 줄 묶음 안에 있다

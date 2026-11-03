@@ -11,11 +11,7 @@ db.get_connection()
 import app.main as m
 
 
-class Resp:
-    def __init__(self, status=200, data=None): self.status, self._data = status, data
-    async def json(self, content_type=None): return self._data
-    async def __aenter__(self): return self
-    async def __aexit__(self, *a): return False
+from fakes import AsyncResponse as Resp
 class Session:
     def __init__(self, outcome): self.outcome, self.calls = outcome, []
     def _call(self, method, url, headers, timeout):

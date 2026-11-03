@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from app import db, discord_config, discord_notify, job_status, repository, report_dispatch as rd, scheduler, viewer_scan, webtoon_server_client
+from fakes import discord_fake
 db.get_connection()
 
 KST, UTC = ZoneInfo("Asia/Seoul"), timezone.utc
@@ -17,7 +18,7 @@ MIN = lambda n: timedelta(minutes=n)
 LAST_SENT = "report_last_sent_at"
 
 sent = []; SCAN = {}; SECTIONS = {"naver": [], "kakao": []}; VIEWER = {}
-async def fake_send(session, message): sent.append(message)
+fake_send = discord_fake(sent, result=None)
 discord_notify.send_webhook_notification = fake_send
 async def fake_start(session, base, token, timeout): SCAN["start"].append((base, token)); return SCAN["start_result"]
 async def fake_status(session, base, token, timeout): SCAN["poll"] += 1; return {"running": SCAN["running"]}

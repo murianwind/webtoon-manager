@@ -3,11 +3,12 @@ import asyncio
 from types import SimpleNamespace as NS
 
 from app import db, repository, tracker, job_status, kakao_api, discord_notify
+from fakes import discord_fake
 
 db.get_connection()
 S = NS(request_timeout_seconds=5, delay_seconds=0)
 sent = []; results = {}
-async def fake_send(session, message): sent.append(message)
+fake_send = discord_fake(sent, result=None)
 async def fake_search(session, author_name, timeout): return list(results.get(author_name, []))
 kakao_api.search_by_author = fake_search; discord_notify.send_webhook_notification = fake_send
 _o = asyncio.sleep

@@ -1,5 +1,5 @@
 // 수동 다운로드: 검색 결과 카드의 제목 → 작품 페이지 링크, 분석 결과 제목 옆 "작품 페이지" 버튼 (네이버 / 카카오페이지)
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
 (async () => {
   const kakaoSearch = [
     { title_id: 111, title: "블루엔젤 리부트 [19세 완전판]", thumbnail_url: "", authors: "치선", status: "연재", subscription: "active" },
@@ -16,11 +16,11 @@ const { makeApp, sleep, ok, done } = require("./harness");
     "/api/manual-download/search": naverSearch,
     "/api/manual-download/analyze": { title_id: "333", title: "네이버 작품", episodes: [{ episode_no: 1, subtitle: "1화", owned: false, is_locked: false }] },
   };
-  const { w, run } = makeApp(routes); await sleep(60); run("kakaoWebtoonsEnabled = true;");
+  const { w, run } = makeApp(routes); await idle(); run("kakaoWebtoonsEnabled = true;");
   const $ = (id) => w.document.getElementById(id);
   run(`switchToTab("manual-download");`);
   const setPlatform = (p) => { $("manual-platform").value = p; $("manual-platform").dispatchEvent(new w.Event("change")); };
-  const search = async (q) => { $("manual-query").value = q; $("btn-manual-analyze").click(); await sleep(40); };
+  const search = async (q) => { $("manual-query").value = q; $("btn-manual-analyze").click(); await idle(); };
   const cardLinks = () => [...w.document.querySelectorAll("#manual-search-results .webtoon-card-title a")];
 
   // Scenario 1: 카카오 검색 결과 카드의 제목을 누르면 카카오페이지 작품 페이지가 새 탭으로 열린다

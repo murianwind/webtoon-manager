@@ -2,7 +2,7 @@
 // 데스크톱은 그대로(필터 줄을 그대로 펼쳐 둔다). 화면 폭에 따른 모양은 CSS가 정하고, 여기서는 마크업 순서, 접기/펴기 동작, CSS 규칙을 확인한다(실제 폭에서의 모양은 브라우저로 따로 확인).
 const fs = require("fs");
 const path = require("path");
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
 const css = fs.readFileSync(path.join(__dirname, "..", "..", "app", "static", "style.css"), "utf8");
 
 // @media (max-width: 640px) { ... } 안쪽 텍스트 / 그 밖의 텍스트
@@ -18,7 +18,7 @@ const ruleOf = (text, selector) => { const m = text.match(new RegExp("(?:^|\\})\
 
 (async () => {
   const { w, run } = makeApp({ "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" }, "/api/naver-list": [], "/api/kakao-list": { items: [], version: "v", refreshing: false } });
-  await sleep(60); run("kakaoWebtoonsEnabled = true;");
+  await idle(); run("kakaoWebtoonsEnabled = true;");
   const $ = (id) => w.document.getElementById(id);
   const pageOf = (name) => $(`page-${name}`);
   const toggle = (name) => pageOf(name).querySelector(".filter-toggle");

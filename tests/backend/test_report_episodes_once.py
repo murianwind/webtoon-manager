@@ -3,10 +3,11 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 from app import db, repository, scheduler, job_status, discord_notify, report_seen
+from fakes import discord_fake
 db.get_connection()
 
 sent = []
-async def fake_send(session, message): sent.append(message)
+fake_send = discord_fake(sent, result=None)
 discord_notify.send_webhook_notification = fake_send
 async def none(session, settings): return []
 scheduler.report_job._collect_unregistered_new_episodes = none; scheduler.report_job._collect_kakao_new_episodes = none

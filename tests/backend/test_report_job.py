@@ -3,10 +3,11 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 from app import db, repository, scheduler, job_status, discord_notify, webtoon_server_client
+from fakes import discord_fake
 db.get_connection()
 
 sent = []; lookups = []; collected = []
-async def fake_send(session, message): sent.append(message)
+fake_send = discord_fake(sent, result=None)
 discord_notify.send_webhook_notification = fake_send
 async def fake_naver(session, settings): collected.append("naver"); return []
 async def fake_kakao(session, settings): collected.append("kakao"); return []

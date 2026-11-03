@@ -56,7 +56,7 @@ async def main():
         assert 'fetch("/api/naver-list/88800001/exclude"' in page and "http://t/1.jpg" in page and "\\u003cb\\u003e" in page          # 제목의 <b>는 스크립트 안에서 \u003c로 이스케이프돼 들어간다
         assert 'fetch("/api/kakao-webtoons/88800002/exclude"' in kakao.text and "도굴왕" in kakao.text
         assert 'method: "POST"' in page and "res.ok" in script and "실패: " in script and "오류: " in script and "처리 중..." in script
-        assert repository.get("88800001") is None and repository.get_kakao_webtoon(88800002) is None                                       # 페이지를 열어도 제외되지 않는다(다른 테스트와 겹치지 않는 번호)
+        assert repository.get("88800001") is None and repository.get_kakao_webtoon(88800002) is None                                       # 페이지를 열어도 제외되지 않는다
         print("3) 동작 그대로 OK")
 
         # Scenario 4: 보안 — 주소의 title 값이나 경로의 작품 번호에 </script>나 따옴표가 들어 있어도 스크립트 밖으로 빠져나가 실행되지 않는다(이 앱은 외부에서 열 수 있다)

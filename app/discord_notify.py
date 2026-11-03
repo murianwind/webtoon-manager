@@ -17,15 +17,18 @@ log = logging.getLogger(__name__)
 
 
 def _split_message(text: str, limit: int = DISCORD_MESSAGE_CHUNK_LIMIT) -> list[str]:
+    """한도(limit) 안에서 줄 단위로 나눈다. 디스코드는 한 메시지가 한도를 넘거나 비어 있으면 통째로 거부하므로, 빈 조각은 만들지 않고
+    한 줄 자체가 한도보다 길면 그 줄을 한도 길이로 잘라서 나눈다."""
     if len(text) <= limit:
         return [text]
     chunks, current = [], ""
     for line in text.split("\n"):
-        if len(current) + len(line) + 1 > limit:
-            chunks.append(current)
-            current = line
-        else:
-            current = f"{current}\n{line}" if current else line
+        for piece in [line[i : i + limit] for i in range(0, len(line), limit)] or [""]:
+            if current and len(current) + len(piece) + 1 > limit:
+                chunks.append(current)
+                current = piece
+            else:
+                current = f"{current}\n{piece}" if current else piece
     if current:
         chunks.append(current)
     return chunks

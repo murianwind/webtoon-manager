@@ -1,10 +1,11 @@
 // 제외됨 화면은 완결 웹툰을 보여 주지 않는다 — 완결 작품은 수동 다운로드에서 분석해서 구독할 수 있으니 제외됨 목록에 쌓아 둘 필요가 없다.
 // (요일별 탭의 개수, 검색, "기타" 탭 모두에서 빠지고, 안내 줄에 몇 개를 숨겼는지 알려 준다. 구독해제 화면과 전체목록은 그대로.)
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
+const { listItem } = require("./factories");
 (async () => {
-  const mk = (platform, id, title, weekdays, extra = {}) => ({ platform, title_id: platform === "kakao" ? 70000000 + id : String(id), title, thumbnail_url: "", author_summary: "저자", writer_names: ["저자"], tags: [], weekdays, status: "excluded", ever_subscribed: false, is_new: false, is_paused: false, has_new_episode: false, is_adult: false, is_finished: false, ...extra });
-  const { w, run } = makeApp({ "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" }, "/api/naver-list": [], "/api/kakao-list": { items: [], version: "v", refreshing: false } });
-  await sleep(60); run("kakaoWebtoonsEnabled = true; currentDate = () => new Date('2026-11-03T03:00:00Z');");
+  const mk = (platform, id, title, weekdays, extra = {}) => listItem(platform, id, title, weekdays, { status: "excluded", ...extra });
+  const { w, run, wait } = makeApp({ "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" }, "/api/naver-list": [], "/api/kakao-list": { items: [], version: "v", refreshing: false } }, { timeScale: 5 }); // 검색 지연(250ms)을 5배 빠르게 — 고정 sleep 없이 확인
+  await idle(); run("kakaoWebtoonsEnabled = true; currentDate = () => new Date('2026-11-03T03:00:00Z');");
   const $ = (id) => w.document.getElementById(id);
   const titles = (gridId) => [...w.document.querySelectorAll(`#${gridId} .webtoon-card-title`)].map((e) => e.textContent.trim()).sort();
   const tabs = (id) => [...$(id).querySelectorAll(".weekday-tab")];
@@ -23,9 +24,9 @@ const { makeApp, sleep, ok, done } = require("./harness");
   ok(count("excluded-weekday-tabs", "화") === "2" && count("excluded-weekday-tabs", "기타") === "1" && count("excluded-weekday-tabs", "전체") === "4", "탭 개수에서도 완결 제외: 화 " + count("excluded-weekday-tabs", "화") + " 기타 " + count("excluded-weekday-tabs", "기타") + " 전체 " + count("excluded-weekday-tabs", "전체"));
   tabs("excluded-weekday-tabs").find((t) => label(t) === "기타").click(); ok(JSON.stringify(titles("excluded-list")) === '["요일 모름"]', "기타 탭에도 완결이 없다: " + titles("excluded-list"));
   tabs("excluded-weekday-tabs").find((t) => label(t) === "전체").click(); ok(titles("excluded-list").length === 4 && !titles("excluded-list").some((t) => t.includes("완결")), "전체 탭도 완결 제외");
-  $("excluded-search").value = "완결"; $("excluded-search").dispatchEvent(new w.Event("input")); await sleep(350);
+  $("excluded-search").value = "완결"; $("excluded-search").dispatchEvent(new w.Event("input")); await wait(350);
   ok(titles("excluded-list").length === 0 && !$("excluded-empty").classList.contains("hidden"), "검색해도 완결은 안 나온다");
-  $("excluded-search").value = ""; $("excluded-search").dispatchEvent(new w.Event("input")); await sleep(350);
+  $("excluded-search").value = ""; $("excluded-search").dispatchEvent(new w.Event("input")); await wait(350);
 
   // Scenario 2: 안내 줄 — 몇 개를 숨겼는지(수동 다운로드에서 구독할 수 있다는 안내와 함께). 숨길 게 없으면 줄도 숨긴다. 검색/필터와 상관없이 숨긴 전체 개수
   ok(note() && !note().classList.contains("hidden") && /완결 웹툰 3개/.test(note().textContent) && /수동 다운로드/.test(note().textContent), "안내 줄: " + (note() && note().textContent.trim()));

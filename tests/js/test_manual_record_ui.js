@@ -1,5 +1,5 @@
 // 수동 다운로드: 구독 중인 작품의 "받은 기록" 고치기 — 선택한 회차를 "받은 것으로" 또는 "받지 않은 것으로" 기록한다(카카오페이지/네이버 공통).
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
 (async () => {
   const kep = (n, state, extra = {}) => ({ number: n, subtitle: `${n - 1}화`, state, expire: null, free_at: null, downloaded: false, archived: false, before_start: false, selectable: !["locked", "waitfree_wait", "rental_needed"].includes(state), ...extra });
   const kakaoBase = { series_id: 69500409, title: "도굴왕", folder: "/dl/x", mode: "compare", existing_count: 1, marker: null, to_download_count: 1, locked_count: 2, downloaded_count: 1, archived_count: 0, before_start_count: 0,
@@ -18,13 +18,13 @@ const { makeApp, sleep, ok, done } = require("./harness");
     "/api/kakao-manual/record": (opts) => { posts.push(["kakao", JSON.parse(opts.body)]); return kakaoRecordResponse; },
     "/api/manual-download/record": (opts) => { posts.push(["naver", JSON.parse(opts.body)]); return naverRecordResponse; },
   };
-  const { w, run } = makeApp(routes); await sleep(60); run("kakaoWebtoonsEnabled = true;");
+  const { w, run } = makeApp(routes); await idle(); run("kakaoWebtoonsEnabled = true;");
   const $ = (id) => w.document.getElementById(id);
   const confirms = [], alerts = []; let answer = true;
   w.confirm = (m) => { confirms.push(m); return answer; }; w.alert = (m) => alerts.push(m);
   run(`switchToTab("manual-download");`);
   const setPlatform = (p) => { $("manual-platform").value = p; $("manual-platform").dispatchEvent(new w.Event("change")); };
-  const analyze = async (q) => { $("manual-query").value = q; $("btn-manual-analyze").click(); await sleep(60); };
+  const analyze = async (q) => { $("manual-query").value = q; $("btn-manual-analyze").click(); await idle(); };
   const box = (cls, n) => w.document.querySelector(`.${cls}[data-no="${n}"]`);
   const setChecked = (cls, n, on = true) => { const cb = box(cls, n); cb.checked = on; cb.dispatchEvent(new w.Event("change", { bubbles: true })); };   // 사용자가 체크박스를 누른 것과 같게(툴바가 이 이벤트로 갱신된다)
   const shown = (id) => !$(id).classList.contains("hidden");
@@ -49,16 +49,16 @@ const { makeApp, sleep, ok, done } = require("./harness");
   $("btn-kakao-manual-select-none").click();
 
   // Scenario 3: 선택이 없으면 안내만(요청 없음)
-  $("btn-kakao-manual-record-done").click(); await sleep(30);
+  $("btn-kakao-manual-record-done").click(); await idle();
   ok(posts.length === 0 && alerts.some((m) => /기록할 회차를 선택/.test(m)), "선택 없음 안내: " + alerts.join("|"));
   alerts.length = 0;
 
   // Scenario 4: 받은 것으로 기록 — 확인 창(개수 + 폴더 파일은 안 건드림)을 거쳐 요청하고, 결과 안내 뒤 분석을 다시 읽는다. 취소하면 요청 없음
   setChecked("kakao-manual-ep-checkbox", 2); setChecked("kakao-manual-ep-checkbox", 4);       // 4번은 잠긴 회차
   ok(shown("btn-kakao-manual-record-done") && shown("btn-kakao-manual-record-undone"), "선택하면 기록 버튼이 나타난다")
-  answer = false; $("btn-kakao-manual-record-done").click(); await sleep(30);
+  answer = false; $("btn-kakao-manual-record-done").click(); await idle();
   ok(posts.length === 0 && confirms.length === 1 && /2개/.test(confirms[0]) && /받은 것으로/.test(confirms[0]) && /폴더의 파일은 건드리지 않/.test(confirms[0]), "확인 창: " + confirms[0]);
-  answer = true; const before = analyzeCalls.kakao; $("btn-kakao-manual-record-done").click(); await sleep(80);
+  answer = true; const before = analyzeCalls.kakao; $("btn-kakao-manual-record-done").click(); await idle();
   ok(posts.length === 1 && posts[0][0] === "kakao" && JSON.stringify(posts[0][1]) === JSON.stringify({ series_id: 69500409, numbers: [2, 4], downloaded: true }), "받은 것으로 요청: " + JSON.stringify(posts[0]));
   ok(alerts.some((m) => /2개/.test(m) && /기록했습니다/.test(m)) && analyzeCalls.kakao === before + 1, "결과 안내 + 분석 다시 읽기: " + alerts.join("|") + " / " + (analyzeCalls.kakao - before));
   alerts.length = 0;
@@ -66,7 +66,7 @@ const { makeApp, sleep, ok, done } = require("./harness");
   // Scenario 5: 받지 않은 것으로 기록 — 자동으로 받는 대상이 됨을 알리고, 폴더에 파일이 있어 못 바꾼 회차를 결과에 알려 준다
   kakaoRecordResponse = { marked: [3], ignored_in_folder: [1], recorded_count: 1, pending_count: 1 };
   setChecked("kakao-manual-ep-checkbox", 1); setChecked("kakao-manual-ep-checkbox", 3);
-  $("btn-kakao-manual-record-undone").click(); await sleep(80);
+  $("btn-kakao-manual-record-undone").click(); await idle();
   ok(/받지 않은 것으로/.test(confirms[confirms.length - 1]) && /자동으로 받는 대상/.test(confirms[confirms.length - 1]) && /폴더에 파일이 있는 회차는 바꿀 수 없/.test(confirms[confirms.length - 1]), "확인 창: " + confirms[confirms.length - 1]);
   ok(posts.length === 2 && posts[1][1].downloaded === false && JSON.stringify(posts[1][1].numbers) === JSON.stringify([1, 3]), "받지 않은 것으로 요청: " + JSON.stringify(posts[1]));
   ok(alerts.some((m) => /1개/.test(m) && /1번/.test(m) && /폴더에 파일이 있/.test(m)), "못 바꾼 회차 안내: " + alerts.join("|"));
@@ -77,7 +77,7 @@ const { makeApp, sleep, ok, done } = require("./harness");
   setChecked("kakao-manual-ep-checkbox", 2); setChecked("kakao-manual-ep-checkbox", 4);
   const runPosts = []; const realFetch = w.fetch;
   w.fetch = async (url, opts = {}) => { if (String(url).includes("/api/kakao-manual/run")) { runPosts.push(JSON.parse(opts.body)); return { ok: true, status: 200, json: async () => ({ status: "started" }) }; } return realFetch(url, opts); };
-  $("btn-kakao-manual-download").click(); await sleep(60); w.fetch = realFetch;
+  $("btn-kakao-manual-download").click(); await idle(); w.fetch = realFetch;
   ok(runPosts.length === 1 && JSON.stringify(runPosts[0].numbers) === JSON.stringify([2]), "다운로드 요청에서 잠긴 회차 제외: " + JSON.stringify(runPosts));
 
   // ── 네이버 ──
@@ -89,7 +89,7 @@ const { makeApp, sleep, ok, done } = require("./harness");
   // 받은 것으로
   setChecked("manual-ep-checkbox", 3);
   ok(shown("btn-manual-record-done") && shown("btn-manual-record-undone"), "네이버 선택하면 기록 버튼이 나타난다");
-  const nBefore = analyzeCalls.naver; $("btn-manual-record-done").click(); await sleep(80);
+  const nBefore = analyzeCalls.naver; $("btn-manual-record-done").click(); await idle();
   ok(/3화/.test(confirms[0]) && /여기까지 받음/.test(confirms[0]) && /받은 것으로/.test(confirms[0]), "네이버 확인 창: " + confirms[0]);
   ok(posts.length === 1 && JSON.stringify(posts[0][1]) === JSON.stringify({ title_id: "333", episode_nos: [3], downloaded: true }), "네이버 받은 것으로 요청: " + JSON.stringify(posts[0]));
   ok(alerts.some((m) => /2화/.test(m) && /3화/.test(m)) && analyzeCalls.naver === nBefore + 1, "네이버 결과(이전→새 기록) + 분석 다시: " + alerts.join("|"));
@@ -97,7 +97,7 @@ const { makeApp, sleep, ok, done } = require("./harness");
   // 받지 않은 것으로 + 폴더 경고
   naverRecordResponse = { previous: 3, last_downloaded_no: 0, marked: [1], ignored_locked: [], folder_last_no: 2, warning: "폴더에 2화까지 파일이 있어서 다음 실행에서 다시 2화까지 받은 것으로 인식됩니다(파일을 지우면 반영됩니다)." };
   w.document.querySelectorAll(".manual-ep-checkbox").forEach((cb) => (cb.checked = false)); setChecked("manual-ep-checkbox", 1);
-  $("btn-manual-record-undone").click(); await sleep(80);
+  $("btn-manual-record-undone").click(); await idle();
   ok(/1화부터/.test(confirms[1]) && /받을 대상/.test(confirms[1]), "네이버 확인 창(받지 않은 것으로): " + confirms[1]);
   ok(posts[1][1].downloaded === false && alerts.some((m) => /다시 2화까지/.test(m)), "네이버 경고 표시: " + alerts.join("|"));
   // 구독 안 함이면 기록 영역이 숨는다

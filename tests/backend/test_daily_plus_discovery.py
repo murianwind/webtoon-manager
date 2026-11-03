@@ -6,6 +6,7 @@
 import asyncio
 
 from app import daily_plus, db, naver_api, repository, scheduler, tracker
+from fakes import discord_fake
 from app import new_episode_watch
 from app import cookie_health
 from app.config import get_settings
@@ -22,7 +23,7 @@ daily_plus.cached_ids = lambda: set(HIDDEN)
 async def no_sleep(x): pass
 asyncio.sleep = no_sleep
 
-async def fake_send(session, message): sent.append(message); return True
+fake_send = discord_fake(sent)
 tracker.send_webhook_notification = fake_send
 async def fake_enrich(session, title_id, settings_, **k): return True, "ok"
 tracker.enrich_one = fake_enrich

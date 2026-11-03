@@ -1,6 +1,6 @@
 // 수동 다운로드 툴바: 처음에는 "전체선택 / 미보유만 선택 / 기록용 전체선택"만 한 줄로 보이고, 회차를 고르면 그 옆에
 // "선택해제 / 선택 다운로드 / 받은 것으로 기록 / 받지 않은 것으로 기록"이 같은 줄에 나타난다. 버튼 아래에는 처음 세 버튼의 짧은 안내가 있다(카카오페이지/네이버).
-const { makeApp, sleep, ok, done } = require("./harness");
+const { makeApp, sleep, idle, ok, done } = require("./harness");
 (async () => {
   const kep = (n, state, extra = {}) => ({ number: n, subtitle: `${n - 1}화`, state, expire: null, free_at: null, downloaded: false, archived: false, before_start: false, selectable: !["locked", "waitfree_wait", "rental_needed"].includes(state), ...extra });
   const kakaoBase = { series_id: 69500409, title: "도굴왕", folder: "/dl/x", mode: "compare", existing_count: 1, marker: null, to_download_count: 1, locked_count: 1, downloaded_count: 1, archived_count: 0, before_start_count: 0,
@@ -11,12 +11,12 @@ const { makeApp, sleep, ok, done } = require("./harness");
     { episode_no: 1, subtitle: "1화", owned: true, is_locked: false, recorded: false }, { episode_no: 2, subtitle: "2화", owned: false, is_locked: false, recorded: false }, { episode_no: 3, subtitle: "3화", owned: false, is_locked: true, recorded: false }] };
   const routes = { "/api/settings/kakao-webtoons-enabled": { enabled: true }, "/api/settings/webtoon-server": { webtoon_server_url: "" },
     "/api/kakao-manual/analyze": () => kakao, "/api/manual-download/analyze": () => naver };
-  const { w, run } = makeApp(routes); await sleep(60); run("kakaoWebtoonsEnabled = true;");
+  const { w, run } = makeApp(routes); await idle(); run("kakaoWebtoonsEnabled = true;");
   const $ = (id) => w.document.getElementById(id);
   const visible = (ids) => ids.filter((id) => !$(id).classList.contains("hidden"));
   run(`switchToTab("manual-download");`);
   const setPlatform = (p) => { $("manual-platform").value = p; $("manual-platform").dispatchEvent(new w.Event("change")); };
-  const analyze = async (q) => { $("manual-query").value = q; $("btn-manual-analyze").click(); await sleep(60); };
+  const analyze = async (q) => { $("manual-query").value = q; $("btn-manual-analyze").click(); await idle(); };
   const check = (cls, n, on = true) => { const cb = w.document.querySelector(`.${cls}[data-no="${n}"]`); cb.checked = on; cb.dispatchEvent(new w.Event("change", { bubbles: true })); };
 
   // ── 카카오페이지 ──
