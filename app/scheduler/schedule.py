@@ -23,7 +23,7 @@ from app.scheduler.discovery_job import (
 from app.scheduler.download_job import (
     run_download_job,
 )
-from app.scheduler.report_job import run_report_tick
+from app.scheduler.report_tick import run_report_tick
 
 _JOB_FUNCS = {
     "discovery_job": run_discovery_job,
@@ -96,7 +96,7 @@ def create_scheduler() -> AsyncIOScheduler:
     for job_id in DEFAULT_SCHEDULES:
         _apply_job_schedule(scheduler, job_id)
     apply_waitfree_job(scheduler)
-    # 다운로드 리포트 발송 확인(1분마다, 저장된 상태만 봄) — 다운로드 후 모으기/발송하지 않는 시간/뷰어 스캔을 처리한다(report_job.run_report_tick)
+    # 다운로드 리포트 발송 확인(1분마다, 저장된 상태만 봄) — 다운로드 후 모으기/발송하지 않는 시간/뷰어 스캔을 처리한다(report_tick.run_report_tick)
     scheduler.add_job(run_report_tick, trigger=IntervalTrigger(minutes=1), id="report_tick", max_instances=1)
     # 사용자가 설정하는 스케줄이 아니라 고정된 내부 작업 — 설정 화면의 스케줄 저장/재등록과 무관하게 항상 돈다
     scheduler.add_job(

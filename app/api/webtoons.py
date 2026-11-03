@@ -12,13 +12,13 @@ from pydantic import BaseModel, field_validator
 from app import (
     daily_plus,
     naver_api,
+    naver_list_service,
     repository,
     subscription_history,
     tracker,
     weekdays,
 )
 from app import archiver
-from app.models import TitlePage
 from app.config import get_settings
 
 from app.api.common import (
@@ -257,118 +257,13 @@ class NaverListEntryIn(BaseModel):
         return v
 
 
-_weekday_lookup_task: asyncio.Task | None = None
-
-
-def _start_weekday_lookup(title_ids: list[str], timeout_seconds: int) -> None:
-    """요일을 알아볼 작품이 있으면 백그라운드로 시작한다(이미 돌고 있으면 또 시작하지 않는다 — 목록을 연달아 불러도 같은 작품을 겹쳐 묻지 않게)."""
-    global _weekday_lookup_task
-    if not title_ids or (_weekday_lookup_task is not None and not _weekday_lookup_task.done()):
-        return
-    _weekday_lookup_task = asyncio.ensure_future(_run_weekday_lookup(title_ids[: weekdays.LOOKUP_BATCH], timeout_seconds))
-
-
-def _save_page_lookup(title_id: str, page: TitlePage) -> None:
-    """조회 결과를 저장한다(실패는 days=None). 페이지가 완결이라고 알려 주면 제외됨/구독해제 작품은 완결로 저장해 화면에서 가린다 — 구독 중인 작품은 신작 스캔이 맡는다."""
-    weekdays.save_lookup(title_id, page.days if page.status == 200 else None, http=page.status, finished=page.finished)
-    if page.finished:
-        tracked = repository.get(title_id)
-        if tracked is not None and tracked.status != repository.STATUS_ACTIVE:
-            repository.update_is_finished(title_id, True)
-
-
-async def _run_weekday_lookup(title_ids: list[str], timeout_seconds: int) -> None:
-    try:
-        async with aiohttp.ClientSession() as session:
-            for title_id in title_ids:
-                try:
-                    page = await naver_api.fetch_title_page(session, title_id, timeout_seconds)
-                except Exception as e:  # 작품 하나가 이상해도 나머지는 계속한다 — 못 알아낸 것으로 기록하면 하루 뒤에 다시 시도한다
-                    log.warning("작품 요일 조회 실패 (titleId=%s): %s", title_id, e)
-                    page = TitlePage(status=None)
-                await asyncio.to_thread(_save_page_lookup, title_id, page)
-                await asyncio.sleep(weekdays.LOOKUP_PAUSE_SECONDS)
-    except Exception:
-        log.exception("작품 요일 조회 중 오류")
-
-
 @router.get("/naver-list")
 async def browse_naver_list():
-    settings = get_settings()
+    """전체목록(네이버) — 만드는 일은 naver_list_service가 한다."""
     try:
-        async with aiohttp.ClientSession() as session:
-            items = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
-            hidden = await daily_plus.current_ids(settings.request_timeout_seconds, session)
+        return await naver_list_service.build_naver_list(get_settings())
     except naver_api.NaverApiError as e:
         raise HTTPException(status_code=502, detail=f"네이버 웹툰 목록을 불러오지 못했습니다: {e}") from e
-    items = [item for item in items if item.title_id not in hidden]  # 매일+ 작품은 목록에 보이지 않는다(구독 중이어도)
-
-    existing = await asyncio.to_thread(repository.list_all)
-    existing_by_id = {w.title_id: w for w in existing}
-    seen_ids: set[str] = set()
-
-    result = []
-    for item in items:
-        seen_ids.add(item.title_id)
-        tracked = existing_by_id.get(item.title_id)
-        if tracked is not None and tracked.has_update != item.has_update:
-            # 이 목록을 훑는 김에, 추적 중인 작품의 실제 네이버 up 값을 DB에
-            # 갱신해둔다 — 개별 작품 API엔 이 값이 없어서, 다른 탭(구독해제/제외됨
-            # 등)에서 항상 최신값을 보여주려면 여기서 갱신하는 방법뿐이다.
-            await asyncio.to_thread(repository.update_has_update, item.title_id, item.has_update)
-        result.append(
-            {
-                "title_id": item.title_id,
-                "title": item.title_name,
-                "thumbnail_url": tracked.thumbnail_url if tracked and tracked.thumbnail_url else item.thumbnail_url,
-                "weekdays": weekdays.from_naver(item.weekdays),
-                "is_finished": item.is_finished,
-                "is_paused": item.is_paused,
-                "is_new": item.is_new,
-                "is_adult": item.is_adult,
-                "author_summary": item.author_summary,
-                "status": tracked.status if tracked else None,
-                "ever_subscribed": tracked.ever_subscribed if tracked else False,
-                "genres": tracked.genres if tracked else [],
-                "tags": tracked.tags if tracked else [],
-                "has_new_episode": item.has_update,
-            }
-        )
-
-    # 제외됨/구독해제 탭은 네이버를 부르지 않고 DB 기록으로 목록을 만든다 — 그 탭들이 요일별 탭에 쓰도록 요일을 저장해 둔다(바뀐 게 있을 때만 쓴다).
-    await asyncio.to_thread(weekdays.save_naver_map, {entry["title_id"]: entry["weekdays"] for entry in result})
-
-    # 네이버의 요일별 목록 API는 장기 휴재작을 응답에서 아예 빼버린다. 그래서 위 루프만
-    # 돌면 이미 추적 중인(구독중/구독해제) 웹툰이 화면에서 통째로 사라질 수 있다 —
-    # DB에만 남아있는 건 우리가 갖고 있는 정보로 채워서라도 계속 보이게 한다.
-    # 요일도 목록에서 빠지므로(그대로면 "기타"에 남는다) 완결이 아닌 추적 작품은 작품 페이지에서 요일을 알아내 채운다 —
-    # 응답을 늦추지 않게 백그라운드로 하고, 알아낸 요일은 다음에 불러올 때부터 나온다(한 번 알아낸 요일은 60일 동안 다시 묻지 않는다).
-    days_by_id = await asyncio.to_thread(weekdays.get_naver_map)
-    missing = [wt.title_id for wt in existing if wt.title_id not in seen_ids and wt.title_id not in hidden and not wt.is_finished]
-    _start_weekday_lookup(await asyncio.to_thread(weekdays.pending_lookup_ids, missing), settings.request_timeout_seconds)
-    for wt in existing:
-        if wt.title_id in seen_ids or wt.status == repository.STATUS_EXCLUDED or wt.title_id in hidden:
-            continue
-        result.append(
-            {
-                "title_id": wt.title_id,
-                "title": wt.title,
-                "thumbnail_url": wt.thumbnail_url,
-                "weekdays": days_by_id.get(wt.title_id, []),
-                "is_finished": wt.is_finished,
-                "is_paused": wt.is_paused,
-                "is_new": wt.is_new,
-                "is_adult": wt.is_adult,
-                "author_summary": ", ".join(wt.writer_names),
-                "status": wt.status,
-                "ever_subscribed": wt.ever_subscribed,
-                "genres": wt.genres,
-                "tags": wt.tags,
-                "has_new_episode": wt.has_update,
-            }
-        )
-
-    return result
 
 
 @router.post("/naver-list/{title_id}/subscribe")

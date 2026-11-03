@@ -159,29 +159,15 @@ function renderNaverList() {
   // 어디에도 안 보이고 그냥 사라진 것처럼 느껴진다.
   let rows = naverListCache.filter((w) => w.status !== "excluded" && !(w.status === "unsubscribed" && w.ever_subscribed));
 
-  if (platformFilter) rows = rows.filter((w) => (w.platform || "naver") === platformFilter);
+  rows = applyCommonFilters(rows, { platform: platformFilter, badge: badgeFilter });
   if (filterStatus === "active") rows = rows.filter((w) => w.status === "active");
   if (filterStatus === "not-active") rows = rows.filter((w) => w.status !== "active");
-  if (badgeFilter === "new") rows = rows.filter((w) => w.is_new);
-  if (badgeFilter === "paused") rows = rows.filter((w) => w.is_paused);
-  if (badgeFilter === "up") rows = rows.filter((w) => w.has_new_episode);
-
-  if (query) {
-    rows = rows.filter(
-      (w) => w.title.toLowerCase().includes(query) || (w.author_summary || "").toLowerCase().includes(query)
-    );
-  }
+  rows = rows.filter((w) => matchesSearch(w, query, false));
 
   // 요일 탭 — 검색 중에는 요일과 상관없이 전체에서 찾는다(탭은 "전체"로 보이고, 검색을 지우면 보던 탭으로 돌아간다). 탭 옆 개수는 다른 필터를 적용한 뒤 기준이다.
-  const counts = weekdayTabCounts(rows);
-  const activeTab = resolveActiveWeekdayTab("naver-list", query, counts);
-  showEtcDiagnostics(document.getElementById("naver-list-etc-note"), null, activeTab); // 기타를 볼 때만 "왜 요일을 모르는지" 원인을 보여 준다
-  renderWeekdayTabs(document.getElementById("naver-list-weekday-tabs"), counts, activeTab, (key) => {
-    listWindow("naver-list").tab = key;
-    resetListWindow("naver-list");
-    renderNaverList();
+  rows = applyWeekdayTabs("naver-list", rows, {
+    query, tabsEl: document.getElementById("naver-list-weekday-tabs"), etcNoteEl: document.getElementById("naver-list-etc-note"), etcStatus: null, onChange: renderNaverList,
   });
-  rows = rows.filter((w) => weekdayTabMatches(w, activeTab));
 
   rows = [...rows];
   if (sortBy === "author") {

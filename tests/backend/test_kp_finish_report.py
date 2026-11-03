@@ -128,9 +128,9 @@ async def main():
 
     # ── 5. 리포트 ──
     row = lambda platform, title, no, status="success", tid="1": {"platform": platform, "title_name": title, "episode_no": no, "title_id": tid, "status": status, "subtitle": "", "error_msg": ""}
-    naver_only = scheduler._build_report_message([row("naver", "네이버작", 1, tid="100")], [], {"네이버작": "http://v/n"})
+    naver_only = scheduler.build_report_message([row("naver", "네이버작", 1, tid="100")], [], {"네이버작": "http://v/n"})
     assert "• 네이버작 [바로가기](<http://v/n>)" in naver_only and "[네이버]" not in naver_only                          # 네이버만 있으면 예전 형식 그대로
-    mixed = scheduler._build_report_message(
+    mixed = scheduler.build_report_message(
         [row("naver", "네이버작", 1, tid="100"), row("kakao", "쌍갑포차", 409, tid="61641075"), row("kakao", "쌍갑포차", 411, tid="61641075"), row("kakao", "쌍갑포차", 410, tid="61641075"), row("kakao", "개미", 5, tid="68239972")],
         [row("kakao", "실패작", 3, "failed", "5"), row("naver", "네이버실패", 2, "failed", "6")], {"kakao:개미": "http://v/ant"})
     assert "📁 받은 작품 (3):" in mixed
@@ -138,7 +138,7 @@ async def main():
     assert "• [카카오] 쌍갑포차 · 3개 회차(409~411번) [바로가기](<https://page.kakao.com/content/61641075>)" in mixed                                # 없으면 카카오페이지 링크, 회차 수/범위
     assert mixed.index("[네이버] 네이버작") < mixed.index("[카카오] 개미")                                                                          # 네이버가 먼저
     assert "❌ 실패한 작품 (2):" in mixed and "[네이버] 네이버실패" in mixed and "[카카오] 실패작" in mixed
-    same_name = scheduler._build_report_message([row("naver", "같은제목", 1), row("kakao", "같은제목", 2, tid="9")], [], {})
+    same_name = scheduler.build_report_message([row("naver", "같은제목", 1), row("kakao", "같은제목", 2, tid="9")], [], {})
     assert "받은 작품 (2)" in same_name                                                                                                            # 이름이 같아도 플랫폼이 다르면 따로 센다
     print("5) 리포트 OK (플랫폼 표시, 카카오 회차 수/범위, 링크 대체, 네이버 형식 유지)")
 

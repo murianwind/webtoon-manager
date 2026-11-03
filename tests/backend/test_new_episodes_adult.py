@@ -40,16 +40,16 @@ def save_kakao_cookie():
 async def main():
     # 1) 쿠키 없음: 일반 작품만 나오고, 성인 작품은 "확인하지 못함"으로 로그에 남는다
     job_status.start("report")
-    got_n = await scheduler._collect_unregistered_new_episodes(None, S)
-    got_k = await scheduler._collect_kakao_new_episodes(None, S)
+    got_n = await scheduler.collect_unregistered_new_episodes(None, S)
+    got_k = await scheduler.collect_kakao_new_episodes(None, S)
     assert [t for t, *_ in got_n] == ["1"] and [t for t, *_ in got_k] == [11], (got_n, got_k)
     assert "네이버 성인 작품 1개" in logs() and "초임계지옥" in logs() and "카카오 성인 작품 1개" in logs() and "카카오19금" in logs(), logs()
     print("1) 쿠키 없음: 성인 작품은 로그로 알림 OK")
 
     # 2) 쿠키 있음: 성인 작품도 나오고, 성인 작품 조회에만 쿠키를 붙인다(일반 작품은 쿠키 없이)
     save_naver_adult_cookie(); save_kakao_cookie(); naver_calls.clear(); kakao_calls.clear(); job_status.start("report")
-    got_n = await scheduler._collect_unregistered_new_episodes(None, S)
-    got_k = await scheduler._collect_kakao_new_episodes(None, S)
+    got_n = await scheduler.collect_unregistered_new_episodes(None, S)
+    got_k = await scheduler.collect_kakao_new_episodes(None, S)
     assert sorted(t for t, *_ in got_n) == ["1", "2"] and dict((t, n) for t, _, n in got_n)["2"] == 6, got_n
     assert sorted(t for t, *_ in got_k) == [11, 12], got_k
     calls_n = dict(naver_calls); calls_k = dict(kakao_calls)

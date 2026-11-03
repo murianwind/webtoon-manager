@@ -28,6 +28,13 @@ const { listItem } = require("./factories");
   ok(titles("excluded-list").length === 0 && !$("excluded-empty").classList.contains("hidden"), "검색해도 완결은 안 나온다");
   $("excluded-search").value = ""; $("excluded-search").dispatchEvent(new w.Event("input")); await wait(350);
 
+  // Scenario 1b: 제외됨 검색은 작가 이름(writer_names)으로도 찾는다 — 제목/저자 요약에 없어도
+  showExcluded([mk("naver", 41, "제목과무관", ["tue"], { author_summary: "요약에없음", writer_names: ["김작가"] }), mk("naver", 42, "다른작품", ["tue"])]);
+  $("excluded-search").value = "김작가"; $("excluded-search").dispatchEvent(new w.Event("input")); await wait(350); await idle();
+  ok(JSON.stringify(titles("excluded-list")) === '["제목과무관"]', "작가 이름으로 검색: " + titles("excluded-list"));
+  $("excluded-search").value = ""; $("excluded-search").dispatchEvent(new w.Event("input")); await wait(350); await idle();
+  showExcluded(rows);
+
   // Scenario 2: 안내 줄 — 몇 개를 숨겼는지(수동 다운로드에서 구독할 수 있다는 안내와 함께). 숨길 게 없으면 줄도 숨긴다. 검색/필터와 상관없이 숨긴 전체 개수
   ok(note() && !note().classList.contains("hidden") && /완결 웹툰 3개/.test(note().textContent) && /수동 다운로드/.test(note().textContent), "안내 줄: " + (note() && note().textContent.trim()));
   showExcluded(rows.filter((r) => !r.is_finished)); ok(note().classList.contains("hidden"), "숨긴 것이 없으면 안내 줄도 없다");

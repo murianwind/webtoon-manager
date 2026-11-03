@@ -48,7 +48,7 @@ async def main():
     async def fake_reader(session, base, name, timeout): looked_up.append(name); return 'http://viewer/x'
     webtoon_server_client.fetch_reader_url = fake_reader                  # 뷰어 서버가 설정돼 있어도 쓰이지 않아야 한다
     repository.set_setting('webtoon_server_url', 'http://viewer')
-    results = await scheduler._collect_kakao_new_episodes(s, Settings())
+    results = await scheduler.collect_kakao_new_episodes(s, Settings())
     got = {r[0]: r for r in results}
     ids_up = {c['series_id'] for c in cards if c.get('badge') == 'BT02'}
     # "전체목록의 미구독 웹툰"만: 구독 중/구독해제/제외됨은 빠지고, 목록 상태와 기록 없는 작품은 남는다(네이버와 같은 취지)
@@ -60,7 +60,7 @@ async def main():
     # 리포트는 화면 캐시가 아니라 새 조회(요일 7탭이 실제로 호출됨)
     assert sum('dayofweek' in c[0] for c in s.calls) == 7
     print('리포트 수집 OK: 후보', len(got), '개 / 요일 호출', 7, '회 / 회차 호출', sum('product/list' in c[0] for c in s.calls), '회')
-    msg = scheduler._build_report_message([], [], {}, [], 'https://app.example.com', kakao_new_episodes=results)
+    msg = scheduler.build_report_message([], [], {}, [], 'https://app.example.com', kakao_new_episodes=results)
     assert '[카카오]' in msg and 'page.kakao.com/content/' in msg
     assert msg.count('[목록 제외]') == len(results)                                 # 미구독 작품이니 전부 "목록 제외" 링크가 붙는다
     print('리포트 메시지 OK')

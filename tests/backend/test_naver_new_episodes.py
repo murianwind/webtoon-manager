@@ -27,7 +27,7 @@ async def main():
     add("5", repository.STATUS_UNREGISTERED, True)      # 구독한 적 있는데 "목록으로" 되돌림 → 전체목록에 보이니 알림
     # 6: 기록 없음(제외됨에서 "목록으로" 보낸, 구독한 적 없는 작품 — 이때는 기록이 지워진다)
     # 7: 새 회차 없음 → 후보 아님
-    got = await scheduler._collect_unregistered_new_episodes(None, S)
+    got = await scheduler.collect_unregistered_new_episodes(None, S)
     assert sorted(t for t, _, _ in got) == ["1", "5", "6"], got
     assert dict((t, no) for t, _, no in got) == {"1": 101, "5": 105, "6": 106}
     print("네이버 새 에피소드 후보 OK (기록 없음 + 목록 상태만, 구독 중/구독해제/제외됨 제외)")

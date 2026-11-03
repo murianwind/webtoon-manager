@@ -25,12 +25,12 @@ async def report_candidates():
     naver_api.fetch_full_webtoon_list, naver_api.fetch_latest_episode_no = fake_list, fake_latest
 
     # Scenario 1: 리포트의 미등록 새 에피소드 — 매일+는 후보에서 빠지고(최신 회차를 묻는 요청도 안 나간다) 일반 작품은 남는다
-    got = await scheduler._collect_unregistered_new_episodes(None, settings)
+    got = await scheduler.collect_unregistered_new_episodes(None, settings)
     assert got == [("111", "일반 미등록 작품", 7)] and fetched == ["111"], (got, fetched)
     # Scenario 2: 매일+ 목록을 모르면 아무것도 거르지 않는다
     async def unknown(timeout_seconds, session=None): return set()
     daily_plus.current_ids = unknown; fetched.clear()
-    got = await scheduler._collect_unregistered_new_episodes(None, settings)
+    got = await scheduler.collect_unregistered_new_episodes(None, settings)
     assert sorted(t for t, _, _ in got) == ["111", "852534"]
     daily_plus.current_ids = current_ids
     print("1~2) 리포트 미등록 새 에피소드 OK")

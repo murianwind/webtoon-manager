@@ -140,14 +140,14 @@ async def main():
 
         # Scenario 9: 작품 하나의 조회가 예외로 실패해도 나머지는 계속한다(실패한 건 못 알아낸 것으로 기록 → 하루 뒤 재시도).
         # (엔드포인트의 배치 순서(DB 순서)에 기대지 않고 조회 루프를 직접 불러서 결정적으로 만든다)
-        import app.api.webtoons as api_webtoons
-        if api_webtoons._weekday_lookup_task is not None: await api_webtoons._weekday_lookup_task                                      # 앞 시나리오의 백그라운드 조회가 끝난 뒤에 시작한다
+        from app import weekday_lookup
+        if weekday_lookup._task is not None: await weekday_lookup._task                                      # 앞 시나리오의 백그라운드 조회가 끝난 뒤에 시작한다
         for key in (weekdays.LOOKUP_KEY, weekdays.NAVER_MAP_KEY): repository.set_setting(key, None)
         async def half(session, title_id, timeout):
             if title_id == "9701": raise RuntimeError("이 작품만 이상")
             return page_of(["fri"], title_id)
         naver_api.fetch_title_page = half
-        await api_webtoons._run_weekday_lookup(["9701", "9702"], 5)
+        await weekday_lookup.run(["9701", "9702"], 5)
         saved = weekdays._get_lookup()
         assert saved["9701"]["ok"] is False and saved["9702"]["ok"] is True and saved["9702"]["days"] == ["fri"], saved
         print("9) 한 작품 실패에도 나머지 계속 OK")
@@ -155,14 +155,14 @@ async def main():
         for tid, status in (("9801", repository.STATUS_EXCLUDED), ("9802", repository.STATUS_UNSUBSCRIBED), ("9803", repository.STATUS_ACTIVE), ("9804", repository.STATUS_EXCLUDED)):
             repository.upsert_new(tid, f"작품{tid}"); repository.set_status(tid, status)
         FINISHED.update({"9801", "9802", "9803"}); ANSWERS.update({"9801": [], "9802": [], "9803": [], "9804": ["tue"]})
-        await api_webtoons._run_weekday_lookup(["9801", "9802", "9803", "9804"], 5)
+        await weekday_lookup.run(["9801", "9802", "9803", "9804"], 5)
         saved = weekdays._get_lookup()
         assert saved["9801"]["http"] == 200 and saved["9801"]["finished"] is True and saved["9804"]["finished"] is False, saved
         assert repository.get("9801").is_finished and repository.get("9802").is_finished, "제외됨/구독해제 완결은 저장"
         assert not repository.get("9803").is_finished and not repository.get("9804").is_finished, "구독 중이거나 연재 중이면 그대로"
         async def fails(session, title_id, timeout): return TitlePage(status=403, days=[], finished=None)
         naver_api.fetch_title_page = fails
-        await api_webtoons._run_weekday_lookup(["9801"], 5)
+        await weekday_lookup.run(["9801"], 5)
         assert weekdays._get_lookup()["9801"]["ok"] is False and weekdays._get_lookup()["9801"]["http"] == 403, "실패는 HTTP 상태를 남긴다"
         print("10) 조회 결과의 상태/완결 저장 OK")
 asyncio.run(main())

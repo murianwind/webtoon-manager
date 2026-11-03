@@ -24,7 +24,7 @@ async def fake_start(session, base, token, timeout): SCAN["start"].append((base,
 async def fake_status(session, base, token, timeout): SCAN["poll"] += 1; return {"running": SCAN["running"]}
 webtoon_server_client.start_scan = fake_start; webtoon_server_client.scan_status = fake_status
 async def fake_sections(session, settings, *, force_test): return list(SECTIONS["naver"]), list(SECTIONS["kakao"])
-scheduler.report_job._collect_new_episode_sections = fake_sections
+scheduler.report_job.collect_new_episode_sections = fake_sections
 async def fake_reader(session, base, name, timeout): return VIEWER.get(name)
 webtoon_server_client.fetch_reader_url = fake_reader
 discord_config.set_webhook_url("https://discord.com/api/webhooks/1/test")

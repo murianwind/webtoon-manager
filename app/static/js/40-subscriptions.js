@@ -97,31 +97,15 @@ function renderSubscriptionTab(status) {
     note.textContent = `완결 웹툰 ${hiddenFinished}개는 이 목록에 표시하지 않습니다(필요하면 수동 다운로드에서 분석해서 구독할 수 있습니다).`;
     note.classList.toggle("hidden", hiddenFinished === 0);
   }
-  if (platformFilter) rows = rows.filter((w) => (w.platform || "naver") === platformFilter);
-  if (query) {
-    rows = rows.filter(
-      (w) =>
-        w.title.toLowerCase().includes(query) ||
-        (w.writer_names || []).some((n) => n.toLowerCase().includes(query)) ||
-        (w.author_summary || "").toLowerCase().includes(query)
-    );
-  }
+  rows = applyCommonFilters(rows, { platform: platformFilter, badge: badgeFilter });
+  rows = rows.filter((w) => matchesSearch(w, query, true)); // 구독해제/제외됨은 작가 이름으로도 찾는다
   if (tagFilter) rows = rows.filter((w) => (w.tags || []).includes(tagFilter));
-  if (badgeFilter === "new") rows = rows.filter((w) => w.is_new);
-  if (badgeFilter === "paused") rows = rows.filter((w) => w.is_paused);
-  if (badgeFilter === "up") rows = rows.filter((w) => w.has_new_episode);
 
   if (tabsEl) {
     // 전체목록과 같은 요일 탭(화면마다 따로 기억) — 검색 중에는 요일과 상관없이 전체에서 찾는다
-    const counts = weekdayTabCounts(rows);
-    const activeTab = resolveActiveWeekdayTab(status, query, counts);
-    renderWeekdayTabs(tabsEl, counts, activeTab, (key) => {
-      listWindow(status).tab = key;
-      resetListWindow(status);
-      renderSubscriptionTab(status);
+    rows = applyWeekdayTabs(status, rows, {
+      query, tabsEl, etcNoteEl: document.getElementById(`${status}-etc-note`), etcStatus: status, onChange: () => renderSubscriptionTab(status),
     });
-    rows = rows.filter((w) => weekdayTabMatches(w, activeTab));
-    showEtcDiagnostics(document.getElementById(`${status}-etc-note`), status, activeTab); // 기타를 볼 때만 "왜 요일을 모르는지" 원인을 보여 준다
   }
 
   rows = [...rows].sort((a, b) => a.title.localeCompare(b.title));
