@@ -13,7 +13,7 @@ async def none(session, settings): return []
 scheduler.report_sections.collect_unregistered_new_episodes = none; scheduler.report_sections.collect_kakao_new_episodes = none
 
 async def report(force=False):
-    sent.clear(); job_status.start("report"); await scheduler._run_report_job_impl(force_test=force); return list(sent)
+    sent.clear(); job_status.start("report"); await (scheduler.run_test_report() if force else scheduler.send_batch_report(datetime.now(timezone.utc).isoformat())); return list(sent)
 def add(title_id, name, no, platform, status="success"): repository.add_episode_history(title_id, name, no, f"{no}화", status, "오류" if status == "failed" else "", platform=platform)
 
 async def main():
@@ -53,7 +53,7 @@ async def main():
 
     # ── 6. 전송이 실패하면 기록하지 않아서 다음에 다시 보낸다 ──
     async def boom(session, message): raise RuntimeError("웹훅 오류")
-    discord_notify.send_webhook_notification = boom; add("66", "전송실패작", 1, "naver"); sent.clear(); job_status.start("report"); await scheduler._run_report_job_impl()
+    discord_notify.send_webhook_notification = boom; add("66", "전송실패작", 1, "naver"); sent.clear(); job_status.start("report"); await scheduler.send_batch_report(datetime.now(timezone.utc).isoformat())
     discord_notify.send_webhook_notification = fake_send; msgs = await report(); assert len(msgs) == 1 and "전송실패작" in msgs[0]
     print("6) 전송 실패 시 재시도 OK")
 

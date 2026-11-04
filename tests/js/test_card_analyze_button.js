@@ -68,5 +68,13 @@ const SUB = { status: "active", ever_subscribed: true };
   // Scenario 5: 분석 버튼은 전체목록 카드에만 — 제외됨/구독해제 카드에는 없다
   ctx.run("subscriptionCache.excluded = [" + JSON.stringify(naver(9, "제외된 작품", { status: "excluded" })) + "]; renderSubscriptionTab('excluded');"); await idle();
   ok(!ctx.w.document.querySelector("#excluded-list [data-analyze]") && ctx.w.document.querySelectorAll("#excluded-list .webtoon-card").length === 1, "제외됨 카드에는 분석 버튼이 없다");
+
+  // Scenario 6: CSS — jsdom은 레이아웃을 계산하지 않으므로 규칙이 실제로 들어 있는지 스타일 파일을 직접 본다(예전에 이 규칙이 파일에 안 들어갔는데 테스트가 통과한 적이 있다).
+  // 뷰어 아이콘 + 분석 버튼은 한 줄(flex)이고, 분석 버튼이 아이콘을 뺀 나머지 폭을 채워서 줄 전체가 위의 버튼들과 같은 폭이다. 아이콘은 가운데 정렬(align-self)이 아니라 줄 안에서 정렬한다.
+  const css = require("fs").readFileSync(require("path").join(__dirname, "../../app/static/style.css"), "utf8");
+  const block = (selector) => { const m = css.match(new RegExp(selector.replace(/[.]/g, "\\.") + "\\s*\\{([^}]*)\\}")); return m ? m[1] : ""; };
+  ok(/display:\s*flex/.test(block(".card-viewer-row")) && /align-items:\s*center/.test(block(".card-viewer-row")), "뷰어 줄은 flex 한 줄: " + block(".card-viewer-row").trim());
+  ok(/flex:\s*1\s+1\s+auto/.test(block(".webtoon-card-actions .analyze-inline")), "분석 버튼은 남은 폭을 채운다: " + block(".webtoon-card-actions .analyze-inline").trim());
+  ok(/align-self:\s*auto/.test(block(".card-viewer-row .icon-btn")), "줄 안의 아이콘은 가운데 정렬 해제: " + block(".card-viewer-row .icon-btn").trim());
   done();
 })();

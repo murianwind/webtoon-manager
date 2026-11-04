@@ -38,6 +38,32 @@ log = logging.getLogger(__name__)
 
 # ── 클라이언트 ────────────────────────────────────────────────────────────
 
+def _absorb_entries(entries: list[dict], episodes: dict[int, Episode | None], excluded_orders: list[int], series_title: str, now_kst: datetime) -> int:
+    """한 페이지의 항목을 episodes(상품 번호 → 회차)에 더하고 새로 센 항목 수를 돌려준다. 상품 번호가 없거나 이미 본 항목은 건너뛴다.
+    동영상/체험판 회차는 목록에서 빼되(다시 세지 않게 None으로 표시만) 순서 번호를 excluded_orders에 남긴다 — 뒤 회차 번호를 그만큼 당기는 데 쓴다."""
+    new_count = 0
+    for entry in entries:
+        item = entry.get("item") or {}
+        product_id = item.get("product_id")
+        if product_id is None or product_id in episodes:
+            continue
+        if is_excluded_item(item):
+            excluded_orders.append(int(item.get("order_value") or 0))
+            episodes[product_id] = None
+        else:
+            episodes[product_id] = _parse_episode(item, series_title, now_kst)
+        new_count += 1
+    return new_count
+
+
+def _renumber_after_exclusion(episodes: dict[int, Episode | None], excluded_orders: list[int]) -> list[Episode]:
+    """번호가 0 이하인 항목(예고 등)을 빼고, 제외된 동영상/체험판이 앞에 있던 만큼 회차 번호를 당긴 뒤 번호 오름차순으로 돌려준다."""
+    images = [e for e in episodes.values() if e is not None and e.number > 0]
+    for episode in images:
+        episode.number -= sum(1 for order in excluded_orders if order < episode.number)
+    return sorted(images, key=lambda e: e.number)
+
+
 class KakaoPageClient:
     """로그인 쿠키를 붙여 카카오페이지 API/이미지를 부르는 클라이언트. 세션은 쿠키 저장소가 없는
     것(aiohttp.DummyCookieJar)으로 만들어 쓴다 — 쿠키는 이 객체가 직접 관리하고, 서버가 새로 내려준
@@ -110,27 +136,13 @@ class KakaoPageClient:
             if not series_item:
                 series_item = result.get("series_item") or {}
             entries = result.get("list") or []
-            new_count = 0
-            for entry in entries:
-                item = entry.get("item") or {}
-                product_id = item.get("product_id")
-                if product_id is None or product_id in episodes:
-                    continue
-                if is_excluded_item(item):
-                    excluded_orders.append(int(item.get("order_value") or 0))
-                    episodes[product_id] = None  # 다시 세지 않게 표시만 해 둔다
-                else:
-                    episodes[product_id] = _parse_episode(item, series_item.get("title", ""), now_kst)
-                new_count += 1
+            new_count = _absorb_entries(entries, episodes, excluded_orders, series_item.get("title", ""), now_kst)
             cursor = entries[-1].get("cursor_index") if entries else None
             if not result.get("has_next") or new_count == 0 or cursor is None:
                 break
             await asyncio.sleep(_PAGE_INTERVAL_SECONDS)
         series_item["_excluded_video_count"] = len(excluded_orders)  # 동영상/체험판이라 목록에서 뺀 회차 수(분석 화면의 "사이트 회차 수" 비교용)
-        images = [e for e in episodes.values() if e is not None and e.number > 0]
-        for episode in images:
-            episode.number -= sum(1 for order in excluded_orders if order < episode.number)
-        return series_item, sorted(images, key=lambda e: e.number)
+        return series_item, _renumber_after_exclusion(episodes, excluded_orders)
 
     async def ticket_info(self, series_id: int) -> TicketInfo | None:
         """이 작품의 대여권/소장권 수와 기다무 상태. 못 받으면 None(기다무를 못 쓰는 것으로 다룬다)."""

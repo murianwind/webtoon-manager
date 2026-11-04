@@ -15,7 +15,7 @@ from app import discord_config, report_dispatch, report_seen, repository, viewer
 from app.config import get_settings
 
 
-from app.scheduler.report_job import _SETTING_KEY_REPORT_LAST_SENT_AT, _report_job_lock, _run_report_job_impl
+from app.scheduler.report_job import _SETTING_KEY_REPORT_LAST_SENT_AT, _report_job_lock, send_batch_report
 
 log = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ async def _report_step(now: datetime, scan: _TickScan) -> None:
     if report_dispatch.is_quiet(now):
         return  # 발송하지 않는 시간 — 쌓아 둔 채 끝날 때까지 기다린다
     async with _report_job_lock:
-        await _run_report_job_impl(force_test=False, until=cutoff)
+        await send_batch_report(cutoff)
     report_dispatch.finish_cycle(cutoff)
 
 

@@ -394,6 +394,20 @@ select {
   color: var(--accent);
   border-color: var(--accent);
 }
+/* 전체목록: 뷰어 아이콘 + 분석 버튼은 한 줄 — 분석 버튼이 아이콘을 뺀 나머지 폭을 채워서 줄 전체가 위의 버튼들과 같은 폭이다.
+   뷰어 버튼이 없으면 분석은 아래 줄에 다른 버튼과 같은 크기(analyze-inline이 붙지 않는다) */
+.card-viewer-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.card-viewer-row .icon-btn {
+  align-self: auto;
+}
+.webtoon-card-actions .analyze-inline {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 
 .badge {
   display: inline-block;

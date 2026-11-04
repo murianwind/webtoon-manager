@@ -60,7 +60,7 @@ async def sync_metadata():
 async def run_report_job_now():
     """수동 버튼으로 누른 실행은 실제 테스트 목적이므로, 지난 발송 이후 기록이
     없어도 최근 기록으로라도 발송해서 실제로 잘 오는지 확인할 수 있게 한다."""
-    asyncio.create_task(scheduler_mod.run_report_job(force_test=True))
+    asyncio.create_task(scheduler_mod.run_test_report())
     return {"status": "started"}
 
 

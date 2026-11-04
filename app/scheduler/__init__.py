@@ -40,8 +40,8 @@ from app.scheduler import quick_scan_job
 from app.scheduler.quick_scan_job import run_quick_scan_job, run_quick_scan_nightly
 from app.scheduler.report_job import (
     _SETTING_KEY_REPORT_LAST_SENT_AT,
-    _run_report_job_impl,
-    run_report_job,
+    run_test_report,
+    send_batch_report,
 )
 from app.scheduler.report_message import build_report_message
 from app.scheduler.report_sections import collect_kakao_new_episodes, collect_unregistered_new_episodes
@@ -73,7 +73,6 @@ __all__ = [
     "_notify_newly_finished",
     "_run_discovery_job_impl",
     "_run_download_job_impl",
-    "_run_report_job_impl",
     "build_report_message",
     "collect_kakao_new_episodes",
     "collect_unregistered_new_episodes",
@@ -89,6 +88,7 @@ __all__ = [
     "quick_scan_job",
     "run_download_job",
     "run_kakao_catalog_refresh_job",
-    "run_report_job",
+    "run_test_report",
+    "send_batch_report",
     "run_report_tick",
 ]

@@ -33,12 +33,19 @@ _SETTING_KEY_WEBTOON_SERVER_URL = "webtoon_server_url"
 _KST = ZoneInfo("Asia/Seoul")
 
 
-async def run_report_job(force_test: bool = False) -> None:
+async def run_test_report() -> None:
+    """리포트 발송 버튼(테스트 발송) — 오늘(없으면 어제) 기록과 새 에피소드 요약을 보낸다. 이미 알린 회차도 보여 주고, 발송 기준 시각과 "알렸다"는 기록은 건드리지 않는다."""
     if _report_job_lock.locked():
         job_status.log_line("report", "이미 실행 중이라 건너뜁니다 (중복 실행 방지)")
         return
     async with _report_job_lock:
-        await _run_report_job_impl(force_test=force_test)
+        await _run_report(test=True)
+
+
+async def send_batch_report(until: str) -> None:
+    """자동 발송 — 1분 확인(report_tick)이 묶음을 확정하고 부른다(그쪽에서 _report_job_lock을 잡고 있다). until: 이번 묶음의 끝 — 지난 발송 기준 시각부터 이 시각까지의 이력만 담고,
+    보낸 뒤(또는 보낼 것이 없을 때) 발송 기준 시각도 이 값으로 둔다. 받은 이력이 있을 때만 보내고(새 에피소드 요약은 이력과 함께만 나간다), 같은 회차는 한 번만 알린다."""
+    await _run_report(test=False, until=until)
 
 
 def _kst_day_range_utc(day) -> tuple[str, str]:
@@ -48,16 +55,16 @@ def _kst_day_range_utc(day) -> tuple[str, str]:
     return start_kst.astimezone(timezone.utc).isoformat(), end_kst.astimezone(timezone.utc).isoformat()
 
 
-def _select_report_rows(since: str | None, force_test: bool, until: str | None = None) -> tuple[list[dict], bool]:
+def _select_report_rows(test: bool, until: str | None) -> tuple[list[dict], bool]:
     """리포트에 담을 다운로드 이력과, 어제 기록으로 대체했는지(테스트 발송에서만).
 
-    일반 발송은 "지난 발송 이후" 이력 전부다. 테스트 발송은 그 누적 로직을 아예 안 쓴다 — 오늘(한국시간) 다운로드한 것만 보내고,
-    오늘 게 없으면 어제 것만 보낸다. 전체 이력이 몰려서 나오는 걸 막기 위해 날짜 하루 단위로 딱 끊는다."""
-    if not force_test:
+    자동 발송은 "지난 발송 기준 시각 ~ 묶음의 끝(until)"의 이력 중 아직 알리지 않은 회차다(기준 시각이 없으면 담을 것이 없다 — 옛 이력이 몰려 나가지 않게).
+    테스트 발송은 그 누적 로직을 아예 안 쓴다 — 오늘(한국시간) 다운로드한 것만 보내고, 오늘 게 없으면 어제 것만 보낸다. 전체 이력이 몰려서 나오는 걸 막기 위해 날짜 하루 단위로 딱 끊는다."""
+    if not test:
+        since = repository.get_setting(_SETTING_KEY_REPORT_LAST_SENT_AT)
         if not since:
             return [], False
-        # until이 있으면(자동 발송) 묶음이 확정된 시각까지만 — 그 뒤에 끝난 다운로드는 다음 묶음으로 남는다
-        return (repository.list_episode_history_window(since, until) if until else repository.list_episode_history_since(since)), False
+        return report_seen.filter_unseen_rows(repository.list_episode_history_window(since, until)), False
     today = datetime.now(_KST).date()
     rows = repository.list_episode_history_between(*_kst_day_range_utc(today))
     if rows:
@@ -83,53 +90,44 @@ async def _resolve_reader_urls(session: aiohttp.ClientSession, settings, success
     return urls
 
 
-async def _run_report_job_impl(force_test: bool = False, until: str | None = None) -> None:
-    """리포트 한 통을 만들어 보낸다. until: 자동 발송에서 이번 묶음의 끝(이 시각까지의 이력만 담고, 보낸 뒤 발송 기준 시각도 이 값으로 둔다). 자동 발송은 받은 이력이 있을 때만 보내고(새 에피소드 요약은 이력과 함께만 나간다), 테스트 발송은 예전처럼 요약만 있어도 보낸다."""
-    settings = get_settings()
-    job_status.start("report")
-
-    since = repository.get_setting(_SETTING_KEY_REPORT_LAST_SENT_AT)
-    now_iso = datetime.now(timezone.utc).isoformat()
-    if not since and not force_test and until is None:
-        # 최초 실행이면 지금까지 쌓인 이력을 전부 몰아 보내는 대신, 지금 시점부터 집계를 시작한다 — 첫 리포트에 예전 이력이 전부
-        # 딸려오는 걸 방지. 수동 테스트(force_test)일 때는 이 규칙을 건너뛴다 — 사용자가 실제 발송 형태를 확인해보고 싶은 것이므로.
-        repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, until or now_iso)
-        job_status.log_line("report", "최초 실행 — 이번 시점부터 집계 시작 (발송 없음)")
-        job_status.finish("report", success=True)
-        return
-
-    rows, used_fallback = _select_report_rows(since, force_test, until)
-    if not force_test:
-        rows = report_seen.filter_unseen_rows(rows)  # 이미 보고한 회차는 뺀다(같은 회차는 한 번만) — 테스트 발송은 전부 보여준다
+async def _send_message(session: aiohttp.ClientSession, settings, rows: list[dict], unregistered_new_episodes: list, kakao_new_episodes: list, used_fallback: bool) -> None:
+    """리포트 메시지를 만들어(받은 작품의 뷰어 링크 포함) 디스코드로 보낸다. 실패하면 예외가 그대로 올라간다."""
     success_rows = [r for r in rows if r["status"] == "success"]
     failed_rows = [r for r in rows if r["status"] == "failed"]
-    app_public_base_url = repository.get_setting("app_public_base_url") or ""
+    reader_urls = await _resolve_reader_urls(session, settings, success_rows)
+    message = build_report_message(
+        success_rows, failed_rows, reader_urls, unregistered_new_episodes, repository.get_setting("app_public_base_url") or "", kakao_new_episodes
+    )
+    if used_fallback:
+        message = "🧪 **[테스트 발송 — 오늘 기록 없어 어제 기록으로 대체됨]**\n" + message
+    await discord_notify.send_webhook_notification(session, message)
 
+
+async def _run_report(*, test: bool, until: str | None = None) -> None:
+    """리포트 한 통을 만들어 보낸다(test: 테스트 발송, 아니면 until까지의 묶음 발송)."""
+    settings = get_settings()
+    job_status.start("report")
+    rows, used_fallback = _select_report_rows(test, until)
     try:
         async with aiohttp.ClientSession() as session:
-            unregistered_new_episodes, kakao_new_episodes = await collect_new_episode_sections(session, settings, force_test=force_test)
-            if not rows and (until is not None or (not unregistered_new_episodes and not kakao_new_episodes)):
+            unregistered_new_episodes, kakao_new_episodes = await collect_new_episode_sections(session, settings, force_test=test)
+            # 자동 발송은 받은 이력이 있을 때만 보낸다(새 에피소드 요약은 이력과 함께만). 테스트 발송은 요약만 있어도 보낸다.
+            if not rows and (not test or (not unregistered_new_episodes and not kakao_new_episodes)):
                 job_status.log_line("report", "발송할 내용 없음 (다운로드 기록도, 새 에피소드도 없음)")
-                if not force_test:
-                    repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, until or now_iso)
+                if not test:
+                    repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, until)
                 job_status.finish("report", success=True)
                 return
 
-            reader_urls = await _resolve_reader_urls(session, settings, success_rows)
-            message = build_report_message(
-                success_rows, failed_rows, reader_urls, unregistered_new_episodes, app_public_base_url, kakao_new_episodes
-            )
-            if used_fallback:
-                message = "🧪 **[테스트 발송 — 오늘 기록 없어 어제 기록으로 대체됨]**\n" + message
-            await discord_notify.send_webhook_notification(session, message)
-            if not force_test:
+            await _send_message(session, settings, rows, unregistered_new_episodes, kakao_new_episodes, used_fallback)
+            if not test:
                 # 전송이 성공한 뒤에만 기록(실패하면 다음에 다시 시도)
                 report_seen.remember(unregistered_new_episodes, kakao_new_episodes)
                 report_seen.remember_rows(rows)
 
-        if not force_test:
-            repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, until or now_iso)
-        job_status.log_line("report", f"리포트 발송 완료 (성공 {len(success_rows)}건, 실패 {len(failed_rows)}건)")
+        if not test:
+            repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, until)
+        job_status.log_line("report", f"리포트 발송 완료 (성공 {sum(1 for r in rows if r['status'] == 'success')}건, 실패 {sum(1 for r in rows if r['status'] == 'failed')}건)")
         job_status.finish("report", success=True)
     except Exception as e:
         log.error("리포트 발송 중 예외: %s", e)
