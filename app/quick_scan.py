@@ -72,18 +72,14 @@ def _is_fresh(at: float | None, ok: bool, max_age_seconds: float, now: float) ->
     return now - at < (max_age_seconds if ok else FAILED_RETRY_SECONDS)
 
 
-def collect_targets(*, today: str, max_age_hours: float, scope: set[str] | None = None, now: float | None = None) -> tuple[list[Target], int]:
-    """(확인할 작품 목록(처리 순서대로), 최근에 확인해서 건너뛴 수). scope를 주면 그 그룹(etc/mon~sun)만."""
-    now = now if now is not None else time.time()
-    max_age = max_age_hours * 3600
-    order = group_order(today)
-    targets: list[Target] = []
-    skipped = 0
-
-    live = {title_id for title_id, days in weekdays._LIVE_MAP.load().items() if days}  # 요일별 목록에 있는 작품은 목록이 최신이다
+def _naver_targets(order: list[str], max_age: float, now: float) -> tuple[list[Target], int]:
+    """확인할 네이버 작품과 최근 확인해서 건너뛴 수. 요일별 목록(live)에 있는 작품은 목록이 최신이고, 매일+ 숨김/완결은 대상이 아니다."""
+    live = {title_id for title_id, days in weekdays._LIVE_MAP.load().items() if days}
     hidden = daily_plus.cached_ids()
     known_days = weekdays.get_naver_map()
     lookups = weekdays._get_lookup()
+    targets: list[Target] = []
+    skipped = 0
     for wt in repository.list_all():
         if wt.is_finished or wt.title_id in live or wt.title_id in hidden:
             continue
@@ -92,27 +88,43 @@ def collect_targets(*, today: str, max_age_hours: float, scope: set[str] | None 
             skipped += 1
             continue
         targets.append(Target("naver", wt.title_id, wt.title, _group_of(known_days.get(wt.title_id, []), order)))
+    return targets, skipped
 
-    listed = {item["title_id"] for item in kakao_catalog.snapshot()[0] if item.get("weekdays")}  # 요일 목록에 있는 작품은 이미 최신
-    hidden_kakao = kakao_status.hidden_ids()
-    kakao_lookups = kakao_status.get_lookup()
+
+def _kakao_targets(order: list[str], max_age: float, now: float) -> tuple[list[Target], int]:
+    """확인할 카카오 작품과 건너뛴 수. 요일 목록 캐시에 있는 작품은 이미 최신이고, 완결/서비스 종료/판매 중지로 확인된 작품은 대상이 아니다."""
+    listed = {item["title_id"] for item in kakao_catalog.snapshot()[0] if item.get("weekdays")}
+    hidden = kakao_status.hidden_ids()
+    lookups = kakao_status.get_lookup()
+    targets: list[Target] = []
+    skipped = 0
     for row in repository.get_kakao_webtoons_map().values():
         series_id = row["title_id"]
-        if row["is_finished"] or series_id in listed or series_id in hidden_kakao:
+        if row["is_finished"] or series_id in listed or series_id in hidden:
             continue
-        entry = kakao_lookups.get(str(series_id))
+        entry = lookups.get(str(series_id))
         if entry is not None:
             ok = entry.get("on_issue") is not None or kakao_status.is_ended(entry)
             if _is_fresh(entry.get("at"), ok, max_age, now):
                 skipped += 1
                 continue
         targets.append(Target("kakao", series_id, row["title"], _group_of(kakao_status.weekdays_of(series_id), order)))
+    return targets, skipped
 
+
+def collect_targets(*, today: str, max_age_hours: float, scope: set[str] | None = None, now: float | None = None) -> tuple[list[Target], int]:
+    """(확인할 작품 목록(처리 순서대로), 최근에 확인해서 건너뛴 수). scope를 주면 그 그룹(etc/mon~sun)만."""
+    now = now if now is not None else time.time()
+    max_age = max_age_hours * 3600
+    order = group_order(today)
+    naver, naver_skipped = _naver_targets(order, max_age, now)
+    kakao, kakao_skipped = _kakao_targets(order, max_age, now)
+    targets = naver + kakao
     if scope is not None:
         targets = [t for t in targets if t.group in scope]
     rank = {group: index for index, group in enumerate(order)}
     targets.sort(key=lambda t: (rank[t.group], t.platform != "naver", t.title))  # 그룹 순서 → 네이버 먼저 → 이름순
-    return targets, skipped
+    return targets, naver_skipped + kakao_skipped
 
 
 async def scan(targets: list[Target], settings: Settings, progress: Callable[[str], None] | None = None) -> ScanStats:

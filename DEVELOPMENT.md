@@ -365,7 +365,7 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - **`plan_by_folder_rules`**(28 → 16): 시작 지점 판단(`_decide_start` → `_StartPoint`)과 표식 확인(`_resolve_marker`)을 분리. 순수 함수라 **리팩토링 전 함수를 복사해 두고 무작위 입력 6만 건으로 새 함수와 결과를 비교했고 불일치가 0건**이었다(모든 모드 도달; 이 비교 스크립트는 일회용이라 저장소에는 없다).
 - **`download_selected`**(34 → 11): 잠긴 회차를 기다무/대여권으로 여는 규칙은 `_LockedEpisodeOpener`(이용권 정보는 처음 필요할 때 한 번만 조회, 기다무는 번호가 가장 앞선 한 장만), 회차 하나 받기는 `_download_selected_episode`. 이 함수의 문구/분기를 검증하는 테스트가 없어서 `tests/backend/test_kp_download_selected.py`(가짜 카카오 서버)를 먼저 만들었다 — 요청 횟수까지 확인한다(기다무 불가 회차는 이용권 조회도 안 한다 등).
 - **하네스**: `idle(timeout = 5000)` — 끝나지 않는 요청이 있으면 멈추지 않고 몇 개가 남았는지 알리며 실패한다(일부러 느리게 둔 요청을 `idle`로 기다리다 300초 멈춘 적이 있다; 그런 요청은 짧게 `sleep`으로 확인한다).
-- **남은 큰 함수**: `run_download`(26), `kakao_manual_analyze`(27) — 먼저 현재 동작을 고정하는 테스트가 필요하다("남은 큰 함수 정리" 절 참고).
+- (복잡도 21 이상이던 큰 함수는 모두 정리했다 — "큰 함수 정리 마무리" 절 참고.)
 
 ## 빠른 상태 스캔, 새로고침 연동, 분석 버튼, 화면 문구의 실행 이력 이동
 
@@ -380,5 +380,13 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - **옛 발송 경로 제거**(`app/scheduler/report_job.py`): `_run_report_job_impl(force_test, until)`의 "`until` 없는 일반 발송"은 운영에서 부르는 곳이 없었다(호출자는 테스트 발송 버튼과 1분 확인뿐이었고, 발송 기준 시각의 처음 값은 `note_download_finished`가 이미 정한다). 그 경로(와 최초 실행 분기, `list_episode_history_since` 사용)를 없애고 진입점을 목적별로 나눴다 — `run_test_report()`(리포트 발송 버튼: 오늘/어제 이력과 새 에피소드 요약, 잠금으로 겹침 방지, 기록은 남기지 않음)와 `send_batch_report(until)`(1분 확인이 묶음을 확정하고 부른다 — 호출하는 쪽이 `_report_job_lock`을 잡는다, 이력이 있을 때만 보내고 같은 회차는 한 번만 알린다). 공통 구현은 `_run_report`(복잡도 22 → 13)와 `_send_message`다. 이 경로를 붙들던 테스트 3개(`test_report_job`/`test_report_dedupe`/`test_report_episodes_once`)를 새 진입점으로 옮겼고, 자동 발송이 요약만으로 안 나가는 것, 테스트 발송이 요약만으로 나가는 것, 겹침 방지를 새로 고정했다(변형 검사 11개 모두 잡음). `repository.list_episode_history_since`는 운영에서는 안 쓰이고 테스트의 조회 도우미로만 남아 있다.
 - **회차 목록 읽기**(`app/kakao_page_download/client.py`, `list_episodes` 23 → 11): 한 페이지의 항목 더하기(`_absorb_entries`: 상품 번호 없음/중복 건너뜀, 동영상·체험판은 목록에서 빼되 순서 번호를 남기고 새 항목으로는 센다)와 번호 당기기(`_renumber_after_exclusion`)로 나눴다. 페이지 이어 읽기와 멈춤 조건(마지막 페이지, 새 항목 없는 페이지, 다음 위치 모름, 최대 페이지 수, 중간 실패면 None)을 `tests/backend/test_kp_list_episodes.py`가 고정한다(변형 검사 14개 모두 잡음).
 - **분석 버튼 CSS**: 전체목록의 뷰어 줄(`.card-viewer-row`)과 분석 버튼 폭(`.analyze-inline`) 규칙이 실제 스타일 파일에 들어갔는지 `test_card_analyze_button.js`가 파일을 직접 읽어 확인한다(jsdom은 레이아웃을 계산하지 않아서, 규칙이 빠졌는데 테스트가 통과한 적이 있다).
-- **아직 안 한 것**: `run_download`(복잡도 26), `kakao_manual_analyze`(27) — 먼저 현재 동작을 고정하는 테스트가 필요하다.
+- **카카오 분석 응답/자동 다운로드 분해**: 아래 "큰 함수 정리 마무리" 절 참고.
+
+## 큰 함수 정리 마무리: 카카오 분석 응답, 자동 다운로드 (골든 파일로 고정)
+
+- **골든 테스트**: 응답/결과가 큰 사전이라 몇 필드만 보는 테스트로는 바뀐 곳을 놓친다. 그래서 현재 구현으로 시나리오별 결과 전체를 JSON으로 저장해 두고(`tests/fixtures/*_golden.json`) 테스트가 그것과 정확히 비교한다(임시 폴더 경로는 `<ROOT>`로 치환). **응답/결과 모양을 일부러 바꿀 때만 `UPDATE_GOLDEN=1`로 다시 만들고, 만든 뒤 내용을 눈으로 확인한다**(시나리오가 의도한 상태를 만들었는지 — 예전에 파일 이름 규칙을 잘못 써서 폴더 시나리오가 비어 있던 것을 이 확인으로 잡았다).
+- **`kakao_manual_analyze`**(`app/api/kakao_download.py`, 27 → 11): `_load_analysis_inputs`(세션/로그인 확인/목록/이용권 — 쿠키가 있고 로그아웃이 아닐 때만 이용권 조회), `_plan_summary`, `_tickets_payload`, `_episode_rows_payload`로 나눴다. `tests/backend/test_kp_analyze_response.py`(+ `kakao_analyze_golden.json`)가 로그인+대여권 / 기다무 충전 / 기다무 없는 작품(충전 표시가 있어도 쓸 수 없음) / 폴더·기록·보관 섞임 / 익명 / 로그인 풀림(이용권 요청 안 함) / 충전 주기는 작품 정보 값 / 파일 하나(표식) / 목록 실패 502를 고정한다(변형 검사 13개 모두 잡음).
+- **`run_download`**(`app/kakao_page_download/runner.py`, 26 → 10): `_plan_for_run`(폴더 규칙 → 받은 기록/받지 않은 것으로 기록 반영), `_download_in_number_order`(번호순 받기, 기다무로 열 회차는 자기 번호 차례, 실패하면 그 회차에서 멈춤)로 나눴다. `tests/backend/test_kp_run_download.py`(+ `kakao_run_download_golden.json`)가 결과(`RunResult`)·진행 문구·폴더 파일·받은 기록·저장된 다음 충전 시각을 시나리오 24개로 고정한다. 등록된 작품과 등록 안 된 작품은 받은 회차 기록을 저장할 수 있는지가 달라서(등록 안 된 작품은 폴더만 본다) 폴더 시나리오는 둘 다 둔다. 변형 검사에서 잡히지 않은 2개는 **실제로 결과가 달라지는 입력이 없는 변형(동등)** 으로 판단했다 — 받은 기록이 비어 있는데 "받지 않은 것으로 기록"만 있는 경우는 새 폴더라 영향이 없고, 기다무로 연 회차는 대여권 대상이 아니라 후보에서 빼는 코드는 방어용이다.
+- **가짜 카카오 사이트**(`tests/backend/fake_kakao_rental_site.py`): `ticket_period`/`series_period`(충전 주기), `on_issue`(연재/완결) 옵션을 추가했다(기본값은 이전과 같다).
+- **결과**: 복잡도 21 이상(radon D 등급)인 함수는 더 없다. 가장 큰 것은 `tracker.scan_kakao_authors_for_new_titles`(20)이고 11~20(C 등급)인 함수는 남아 있다 — 필요해지면 같은 방식(현재 동작을 고정하는 테스트 → 분해)으로 한다. 정리 중에 새로 만든 `quick_scan.collect_targets`(23)도 네이버/카카오 대상 고르기(`_naver_targets`, `_kakao_targets`)로 나눴다.
 

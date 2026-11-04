@@ -1,0 +1,1106 @@
+{
+ "무료 개수 제한": {
+  "downloaded": [
+   1,
+   2
+  ],
+  "items": [
+   [
+    1,
+    "1화"
+   ],
+   [
+    2,
+    "2화"
+   ]
+  ],
+  "failed": null,
+  "mode": "new_folder",
+  "to_download": [
+   1,
+   2,
+   3,
+   4
+  ],
+  "locked": [],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": null,
+  "caught_up": null,
+  "ticket_needed": null,
+  "nothing_left": false,
+  "messages": [
+   "1번 회차 받음 (0001_1화.zip)",
+   "2번 회차 받음 (0002_2화.zip)"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0001_1화.zip",
+   "0002_2화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [],
+  "waitfree_next_at": null
+ },
+ "무료 전부": {
+  "downloaded": [
+   1,
+   2,
+   3
+  ],
+  "items": [
+   [
+    1,
+    "1화"
+   ],
+   [
+    2,
+    "2화"
+   ],
+   [
+    3,
+    "3화"
+   ]
+  ],
+  "failed": null,
+  "mode": "new_folder",
+  "to_download": [
+   1,
+   2,
+   3
+  ],
+  "locked": [],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": null,
+  "caught_up": 3,
+  "ticket_needed": null,
+  "nothing_left": true,
+  "messages": [
+   "1번 회차 받음 (0001_1화.zip)",
+   "2번 회차 받음 (0002_2화.zip)",
+   "3번 회차 받음 (0003_3화.zip)"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0001_1화.zip",
+   "0002_2화.zip",
+   "0003_3화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [],
+  "waitfree_next_at": null
+ },
+ "기다무로 열기": {
+  "downloaded": [
+   1,
+   2,
+   3
+  ],
+  "items": [
+   [
+    1,
+    "1화"
+   ],
+   [
+    2,
+    "2화"
+   ],
+   [
+    3,
+    "3화"
+   ]
+  ],
+  "failed": null,
+  "mode": "new_folder",
+  "to_download": [
+   1,
+   3
+  ],
+  "locked": [
+   2,
+   4
+  ],
+  "title": "작품",
+  "ticket_used": 2,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": null,
+  "caught_up": null,
+  "ticket_needed": null,
+  "nothing_left": false,
+  "messages": [
+   "1번 회차 받음 (0001_1화.zip)",
+   "2번 회차를 기다무로 열었습니다",
+   "2번 회차 받음 (0002_2화.zip)",
+   "3번 회차 받음 (0003_3화.zip)"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0001_1화.zip",
+   "0002_2화.zip",
+   "0003_3화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [],
+  "waitfree_next_at": "2098-12-31T15:00:00+00:00"
+ },
+ "기다무 충전 중이면 건너뜀": {
+  "downloaded": [
+   1,
+   3
+  ],
+  "items": [
+   [
+    1,
+    "1화"
+   ],
+   [
+    3,
+    "3화"
+   ]
+  ],
+  "failed": null,
+  "mode": "new_folder",
+  "to_download": [
+   1,
+   3
+  ],
+  "locked": [
+   2
+  ],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": null,
+  "caught_up": null,
+  "ticket_needed": null,
+  "nothing_left": false,
+  "messages": [
+   "1번 회차 받음 (0001_1화.zip)",
+   "3번 회차 받음 (0003_3화.zip)"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0001_1화.zip",
+   "0003_3화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [],
+  "waitfree_next_at": "2098-12-31T15:00:00+00:00"
+ },
+ "기다무 불가 회차 건너뜀": {
+  "downloaded": [
+   1,
+   3
+  ],
+  "items": [
+   [
+    1,
+    "1화"
+   ],
+   [
+    3,
+    "3화"
+   ]
+  ],
+  "failed": null,
+  "mode": "new_folder",
+  "to_download": [
+   1,
+   3
+  ],
+  "locked": [
+   2
+  ],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": null,
+  "caught_up": null,
+  "ticket_needed": 2,
+  "nothing_left": false,
+  "messages": [
+   "1번 회차 받음 (0001_1화.zip)",
+   "3번 회차 받음 (0003_3화.zip)"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0001_1화.zip",
+   "0003_3화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [],
+  "waitfree_next_at": null
+ },
+ "기다무 없는 작품": {
+  "downloaded": [
+   1,
+   3
+  ],
+  "items": [
+   [
+    1,
+    "1화"
+   ],
+   [
+    3,
+    "3화"
+   ]
+  ],
+  "failed": null,
+  "mode": "new_folder",
+  "to_download": [
+   1,
+   3
+  ],
+  "locked": [
+   2
+  ],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": false,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": null,
+  "caught_up": null,
+  "ticket_needed": 2,
+  "nothing_left": false,
+  "messages": [
+   "1번 회차 받음 (0001_1화.zip)",
+   "3번 회차 받음 (0003_3화.zip)"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0001_1화.zip",
+   "0003_3화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [],
+  "waitfree_next_at": null
+ },
+ "받기 실패에서 멈춤": {
+  "downloaded": [
+   1
+  ],
+  "items": [
+   [
+    1,
+    "1화"
+   ]
+  ],
+  "failed": 2,
+  "mode": "new_folder",
+  "to_download": [
+   1,
+   2,
+   3
+  ],
+  "locked": [],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": null,
+  "caught_up": null,
+  "ticket_needed": null,
+  "nothing_left": false,
+  "messages": [
+   "1번 회차 받음 (0001_1화.zip)",
+   "2번 회차 받기 실패 — 여기서 멈춥니다(다음에 이 회차부터 다시 시도) · 원인: 이미지 목록이 비어 있음(result_code=1)"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0001_1화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [],
+  "waitfree_next_at": null
+ },
+ "기다무로 연 회차 받기 실패": {
+  "downloaded": [
+   1
+  ],
+  "items": [
+   [
+    1,
+    "1화"
+   ]
+  ],
+  "failed": 2,
+  "mode": "new_folder",
+  "to_download": [
+   1,
+   3
+  ],
+  "locked": [
+   2
+  ],
+  "title": "작품",
+  "ticket_used": 2,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": null,
+  "caught_up": null,
+  "ticket_needed": null,
+  "nothing_left": false,
+  "messages": [
+   "1번 회차 받음 (0001_1화.zip)",
+   "2번 회차를 기다무로 열었습니다",
+   "2번 회차 받기 실패 — 기다무로 이미 열렸으니 대여 기간 안에 다음 실행에서 다시 받습니다 · 원인: 이미지 목록이 비어 있음(result_code=1)"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0001_1화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [],
+  "waitfree_next_at": "2098-12-31T15:00:00+00:00"
+ },
+ "대여권 사용": {
+  "downloaded": [
+   1,
+   2,
+   3
+  ],
+  "items": [
+   [
+    1,
+    "1화"
+   ],
+   [
+    2,
+    "2화"
+   ],
+   [
+    3,
+    "3화"
+   ]
+  ],
+  "failed": null,
+  "mode": "new_folder",
+  "to_download": [
+   1
+  ],
+  "locked": [
+   2,
+   3,
+   4
+  ],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [
+   2,
+   3
+  ],
+  "rental_remaining": 0,
+  "rental_skip_mode": true,
+  "error": null,
+  "caught_up": null,
+  "ticket_needed": 4,
+  "nothing_left": false,
+  "messages": [
+   "1번 회차 받음 (0001_1화.zip)",
+   "2번 회차를 대여권으로 열었습니다 (남은 대여권 1장)",
+   "2번 회차 받음 (0002_2화.zip)",
+   "3번 회차를 대여권으로 열었습니다 (남은 대여권 0장)",
+   "3번 회차 받음 (0003_3화.zip)",
+   "4번 회차: 사용할 수 있는 대여권이 없습니다 — 이 작품의 대여권 사용은 여기서 멈춥니다"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0001_1화.zip",
+   "0002_2화.zip",
+   "0003_3화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [],
+  "waitfree_next_at": null
+ },
+ "대여권 꺼짐": {
+  "downloaded": [
+   1
+  ],
+  "items": [
+   [
+    1,
+    "1화"
+   ]
+  ],
+  "failed": null,
+  "mode": "new_folder",
+  "to_download": [
+   1
+  ],
+  "locked": [
+   2
+  ],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": null,
+  "caught_up": null,
+  "ticket_needed": 2,
+  "nothing_left": false,
+  "messages": [
+   "1번 회차 받음 (0001_1화.zip)"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0001_1화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [],
+  "waitfree_next_at": null
+ },
+ "대여권 받기 실패": {
+  "downloaded": [
+   1
+  ],
+  "items": [
+   [
+    1,
+    "1화"
+   ]
+  ],
+  "failed": 2,
+  "mode": "new_folder",
+  "to_download": [
+   1
+  ],
+  "locked": [
+   2,
+   3
+  ],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [
+   2
+  ],
+  "rental_remaining": 1,
+  "rental_skip_mode": true,
+  "error": null,
+  "caught_up": null,
+  "ticket_needed": null,
+  "nothing_left": false,
+  "messages": [
+   "1번 회차 받음 (0001_1화.zip)",
+   "2번 회차를 대여권으로 열었습니다 (남은 대여권 1장)",
+   "2번 회차 받기 실패 — 대여권으로 이미 열렸으니 대여 기간 안에 다음 실행에서 다시 받습니다 · 원인: 이미지 목록이 비어 있음(result_code=1)"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0001_1화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [],
+  "waitfree_next_at": null
+ },
+ "받기 실패면 대여권 안 씀": {
+  "downloaded": [],
+  "items": [],
+  "failed": 1,
+  "mode": "new_folder",
+  "to_download": [
+   1
+  ],
+  "locked": [
+   2
+  ],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": true,
+  "error": null,
+  "caught_up": null,
+  "ticket_needed": null,
+  "nothing_left": false,
+  "messages": [
+   "1번 회차 받기 실패 — 여기서 멈춥니다(다음에 이 회차부터 다시 시도) · 원인: 이미지 목록이 비어 있음(result_code=1)"
+  ],
+  "folders": [],
+  "files": [],
+  "has_metadata": false,
+  "recorded": [],
+  "waitfree_next_at": null
+ },
+ "개수 제한이 대여권에도": {
+  "downloaded": [
+   1,
+   2
+  ],
+  "items": [
+   [
+    1,
+    "1화"
+   ],
+   [
+    2,
+    "2화"
+   ]
+  ],
+  "failed": null,
+  "mode": "new_folder",
+  "to_download": [
+   1,
+   2
+  ],
+  "locked": [
+   3
+  ],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": true,
+  "error": null,
+  "caught_up": null,
+  "ticket_needed": null,
+  "nothing_left": false,
+  "messages": [
+   "1번 회차 받음 (0001_1화.zip)",
+   "2번 회차 받음 (0002_2화.zip)"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0001_1화.zip",
+   "0002_2화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [],
+  "waitfree_next_at": null
+ },
+ "받은 파일이 여럿(누락 비교)": {
+  "downloaded": [
+   3,
+   5,
+   6
+  ],
+  "items": [
+   [
+    3,
+    "3화"
+   ],
+   [
+    5,
+    "5화"
+   ],
+   [
+    6,
+    "6화"
+   ]
+  ],
+  "failed": null,
+  "mode": "compare",
+  "to_download": [
+   3,
+   5,
+   6
+  ],
+  "locked": [],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": null,
+  "caught_up": 6,
+  "ticket_needed": null,
+  "nothing_left": true,
+  "messages": [
+   "3번 회차 받음 (0003_3화.zip)",
+   "5번 회차 받음 (0005_5화.zip)",
+   "6번 회차 받음 (0006_6화.zip)"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0003_3화.zip",
+   "0005_5화.zip",
+   "0006_6화.zip",
+   "1_1화.zip",
+   "2_2화.zip",
+   "4_4화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [],
+  "waitfree_next_at": null
+ },
+ "파일 하나(표식)": {
+  "downloaded": [
+   4,
+   5
+  ],
+  "items": [
+   [
+    4,
+    "4화"
+   ],
+   [
+    5,
+    "5화"
+   ]
+  ],
+  "failed": null,
+  "mode": "single_marker",
+  "to_download": [
+   4,
+   5
+  ],
+  "locked": [],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": null,
+  "caught_up": 5,
+  "ticket_needed": null,
+  "nothing_left": true,
+  "messages": [
+   "4번 회차 받음 (0004_4화.zip)",
+   "5번 회차 받음 (0005_5화.zip)"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0004_4화.zip",
+   "0005_5화.zip",
+   "3_3화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [],
+  "waitfree_next_at": null
+ },
+ "받은 파일이 여럿(등록된 작품)": {
+  "downloaded": [
+   3,
+   5,
+   6
+  ],
+  "items": [
+   [
+    3,
+    "3화"
+   ],
+   [
+    5,
+    "5화"
+   ],
+   [
+    6,
+    "6화"
+   ]
+  ],
+  "failed": null,
+  "mode": "compare",
+  "to_download": [
+   3,
+   5,
+   6
+  ],
+  "locked": [],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": null,
+  "caught_up": 6,
+  "ticket_needed": null,
+  "nothing_left": true,
+  "messages": [
+   "3번 회차 받음 (0003_3화.zip)",
+   "5번 회차 받음 (0005_5화.zip)",
+   "6번 회차 받음 (0006_6화.zip)"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0003_3화.zip",
+   "0005_5화.zip",
+   "0006_6화.zip",
+   "1_1화.zip",
+   "2_2화.zip",
+   "4_4화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   6
+  ],
+  "waitfree_next_at": null
+ },
+ "파일 하나(등록된 작품: 기록이 생긴다)": {
+  "downloaded": [
+   4,
+   5
+  ],
+  "items": [
+   [
+    4,
+    "4화"
+   ],
+   [
+    5,
+    "5화"
+   ]
+  ],
+  "failed": null,
+  "mode": "compare",
+  "to_download": [
+   4,
+   5
+  ],
+  "locked": [],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": null,
+  "caught_up": 5,
+  "ticket_needed": null,
+  "nothing_left": true,
+  "messages": [
+   "4번 회차 받음 (0004_4화.zip)",
+   "5번 회차 받음 (0005_5화.zip)"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0004_4화.zip",
+   "0005_5화.zip",
+   "3_3화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [
+   3,
+   4,
+   5
+  ],
+  "waitfree_next_at": null
+ },
+ "폴더 없이 받은 기록만": {
+  "downloaded": [
+   4,
+   5
+  ],
+  "items": [
+   [
+    4,
+    "4화"
+   ],
+   [
+    5,
+    "5화"
+   ]
+  ],
+  "failed": null,
+  "mode": "recorded_only",
+  "to_download": [
+   4,
+   5
+  ],
+  "locked": [],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": null,
+  "caught_up": 5,
+  "ticket_needed": null,
+  "nothing_left": true,
+  "messages": [
+   "4번 회차 받음 (0004_4화.zip)",
+   "5번 회차 받음 (0005_5화.zip)"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0004_4화.zip",
+   "0005_5화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [
+   1,
+   2,
+   3,
+   4,
+   5
+  ],
+  "waitfree_next_at": null
+ },
+ "받지 않은 것으로 기록": {
+  "downloaded": [
+   1,
+   4
+  ],
+  "items": [
+   [
+    1,
+    "1화"
+   ],
+   [
+    4,
+    "4화"
+   ]
+  ],
+  "failed": null,
+  "mode": "compare",
+  "to_download": [
+   1,
+   4
+  ],
+  "locked": [],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": null,
+  "caught_up": 4,
+  "ticket_needed": null,
+  "nothing_left": true,
+  "messages": [
+   "1번 회차 받음 (0001_1화.zip)",
+   "4번 회차 받음 (0004_4화.zip)"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0001_1화.zip",
+   "0004_4화.zip",
+   "3_3화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [
+   1,
+   3,
+   4
+  ],
+  "waitfree_next_at": null
+ },
+ "완결 작품": {
+  "downloaded": [
+   1
+  ],
+  "items": [
+   [
+    1,
+    "1화"
+   ]
+  ],
+  "failed": null,
+  "mode": "new_folder",
+  "to_download": [
+   1
+  ],
+  "locked": [],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": true,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": null,
+  "caught_up": null,
+  "ticket_needed": null,
+  "nothing_left": true,
+  "messages": [
+   "1번 회차 받음 (0001_1화.zip)"
+  ],
+  "folders": [
+   "작품"
+  ],
+  "files": [
+   "0001_1화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [],
+  "waitfree_next_at": null
+ },
+ "제목 지정": {
+  "downloaded": [
+   1
+  ],
+  "items": [
+   [
+    1,
+    "1화"
+   ]
+  ],
+  "failed": null,
+  "mode": "new_folder",
+  "to_download": [
+   1
+  ],
+  "locked": [],
+  "title": "내가 정한 제목",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": null,
+  "caught_up": 1,
+  "ticket_needed": null,
+  "nothing_left": true,
+  "messages": [
+   "1번 회차 받음 (0001_1화.zip)"
+  ],
+  "folders": [
+   "내가 정한 제목"
+  ],
+  "files": [
+   "0001_1화.zip"
+  ],
+  "has_metadata": true,
+  "recorded": [],
+  "waitfree_next_at": null
+ },
+ "목록 못 읽음": {
+  "downloaded": [],
+  "items": [],
+  "failed": null,
+  "mode": "new_folder",
+  "to_download": [],
+  "locked": [],
+  "title": "",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": "회차 목록을 가져오지 못했습니다.",
+  "caught_up": null,
+  "ticket_needed": null,
+  "nothing_left": false,
+  "messages": [],
+  "folders": [],
+  "files": [],
+  "has_metadata": false,
+  "recorded": [],
+  "waitfree_next_at": "2098-12-31T15:00:00+00:00"
+ },
+ "개수 0": {
+  "downloaded": [],
+  "items": [],
+  "failed": null,
+  "mode": "new_folder",
+  "to_download": [
+   1,
+   2
+  ],
+  "locked": [],
+  "title": "작품",
+  "ticket_used": null,
+  "finished": false,
+  "waitfree_supported": true,
+  "rental_used": [],
+  "rental_remaining": null,
+  "rental_skip_mode": false,
+  "error": null,
+  "caught_up": null,
+  "ticket_needed": null,
+  "nothing_left": false,
+  "messages": [],
+  "folders": [],
+  "files": [],
+  "has_metadata": false,
+  "recorded": [],
+  "waitfree_next_at": null
+ }
+}

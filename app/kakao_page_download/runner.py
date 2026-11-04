@@ -19,6 +19,7 @@ from app.kakao_page_download.client import (
 from app.kakao_page_download.models import (
     DownloadPlan,
     Episode,
+    ExistingFile,
     IMAGE_CONCURRENCY,
     RunResult,
     SelectedResult,
@@ -101,31 +102,29 @@ def _remove_superseded(folder: Path, number: int, *, keep: Path) -> None:
                 log.warning("교체된 예전 파일을 지우지 못했습니다 (%s): %s", entry.name, e)
 
 
-async def run_download(
-    client: KakaoPageClient, *, series_id: int, title: str | None, download_root: str, max_episodes: int, on_progress=None,
-    use_rental_tickets: bool = False,
-) -> RunResult:
-    """폴더 규칙(자동 다운로드용)으로 받을 회차를 정해 번호순으로 최대 max_episodes개 받는다(기다무로 여는 회차도 자기 번호 차례에). 실패하면 그 회차에서 멈춘다.
-    폴더 이름은 title(있으면), 없으면 카카오페이지에 등록된 작품 제목을 쓴다."""
-    listing = await client.list_episodes(series_id)
-    if listing is None:
-        return RunResult([], [], None, DownloadPlan(mode="new_folder"), "회차 목록을 가져오지 못했습니다.")
-    series_item, episodes = listing
-    folder_title = title or series_item.get("title") or str(series_id)
-    folder = series_folder(download_root, folder_title)
-    existing = scan_existing_files(folder)
-    plan = plan_by_folder_rules(episodes, existing, series_item.get("title") or "")
-    recorded = kakao_records.sync_before_planning(series_id, existing, plan)  # 기록이 없으면 폴더+아카이빙 이력으로 처음 만들고, 폴더를 비웠으면 버린다
+def _plan_for_run(series_id: int, series_item: dict, episodes: list[Episode], existing: list[ExistingFile]) -> DownloadPlan:
+    """자동 다운로드의 받을 회차 계획 — 폴더 규칙으로 한 번 정하고, 받은 회차 기록(기록이 없으면 폴더+아카이빙 이력으로 처음 만들고, 폴더를 비웠으면 버린다)이나
+    "받지 않은 것으로" 기록한 회차가 있으면 그것을 반영해서 다시 정한다."""
+    series_title = series_item.get("title") or ""
+    plan = plan_by_folder_rules(episodes, existing, series_title)
+    recorded = kakao_records.sync_before_planning(series_id, existing, plan)
     pending = repository.get_kakao_pending_numbers(series_id)
     if recorded or pending:
-        plan = plan_by_folder_rules(episodes, existing, series_item.get("title") or "", recorded, pending)
+        plan = plan_by_folder_rules(episodes, existing, series_title, recorded, pending)
+    return plan
+
+
+async def _download_in_number_order(
+    client: KakaoPageClient, series_id: int, series_item: dict, plan: DownloadPlan, folder: Path, max_episodes: int, on_progress=None,
+) -> tuple[list[int], list[tuple[int, str]], int | None, int | None]:
+    """계획대로 번호순으로 받는다 → (받은 번호, (번호, 부제목), 실패한 회차, 기다무로 연 회차).
+    받을 수 있는 회차는 받고, 가장 앞의 잠긴 회차는 자기 번호 차례에 기다무로 연다(한 장뿐이라 그 뒤 잠긴 회차는 대기).
+    지금 못 여는 잠긴 회차(기다무 충전 중이거나 기다무로 못 여는 회차)는 건너뛰고 뒤의 열린 회차를 받는다 — 뒤에 무료가 있어도 영원히 막히지 않게.
+    받기에 실패하면 번호순을 지키려고 그 회차에서 멈춘다(다음에 이 회차부터 다시 시도)."""
     downloaded: list[int] = []
     items: list[tuple[int, str]] = []
     failed: int | None = None
     ticket_used: int | None = None
-    # 번호순으로 처리한다: 받을 수 있는 회차는 받고, 가장 앞의 잠긴 회차는 자기 번호 차례에 기다무로 연다(한 장뿐이라 그 뒤 잠긴 회차는 대기).
-    # 지금 못 여는 잠긴 회차(기다무 충전 중이거나 기다무로 못 여는 회차)는 건너뛰고 뒤의 열린 회차를 받는다 — 뒤에 무료가 있어도 영원히 막히지 않게.
-    # 받기에 실패하면 번호순을 지키려고 그 회차에서 멈춘다(다음에 이 회차부터 다시 시도).
     waitfree_target = plan.locked[0] if plan.locked and waitfree_supported(series_item) else None
     if waitfree_target is None or waitfree_target.waitfree_blocked:
         waitfree_sync.forget(series_id)  # 기다무로 열 잠긴 회차가 없으면 충전 시각을 기다릴 이유가 없다(정기 다운로드가 그대로 확인한다)
@@ -147,6 +146,23 @@ async def run_download(
         items.append((episode.number, episode.subtitle))
         if on_progress:
             on_progress(f"{episode.number}번 회차 받음 ({path.name})")
+    return downloaded, items, failed, ticket_used
+
+
+async def run_download(
+    client: KakaoPageClient, *, series_id: int, title: str | None, download_root: str, max_episodes: int, on_progress=None,
+    use_rental_tickets: bool = False,
+) -> RunResult:
+    """폴더 규칙(자동 다운로드용)으로 받을 회차를 정해 번호순으로 최대 max_episodes개 받는다(기다무로 여는 회차도 자기 번호 차례에). 실패하면 그 회차에서 멈춘다.
+    폴더 이름은 title(있으면), 없으면 카카오페이지에 등록된 작품 제목을 쓴다."""
+    listing = await client.list_episodes(series_id)
+    if listing is None:
+        return RunResult([], [], None, DownloadPlan(mode="new_folder"), "회차 목록을 가져오지 못했습니다.")
+    series_item, episodes = listing
+    folder_title = title or series_item.get("title") or str(series_id)
+    folder = series_folder(download_root, folder_title)
+    plan = _plan_for_run(series_id, series_item, episodes, scan_existing_files(folder))
+    downloaded, items, failed, ticket_used = await _download_in_number_order(client, series_id, series_item, plan, folder, max_episodes, on_progress)
     rental_used: list[int] = []
     rental_remaining: int | None = None
     if failed is None and use_rental_tickets and plan.locked:

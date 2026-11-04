@@ -140,12 +140,8 @@ def _kakao_episode_state(
     return kakao_page_download.episode_state(episode)
 
 
-@router.get("/kakao-manual/analyze")
-async def kakao_manual_analyze(series_id: int):
-    """작품의 회차를 폴더 규칙(폴더 없음 / 누락 회차 비교 / 파일 1개면 그 이후부터)으로 분석해서 표로 보여줄 결과를
-    돌려준다. 아무것도 받지 않는다."""
-    settings = get_settings()
-    root = await asyncio.to_thread(download_roots.kakao_root, settings)
+async def _load_analysis_inputs(settings, series_id: int):
+    """분석에 필요한 사이트 응답 — (회차 목록(없으면 None), 이용권(로그인돼 있을 때만), 쿠키 저장 여부, 로그인 여부). 로그인 확인과 이용권 조회는 저장된 쿠키가 있을 때만 한다."""
     async with kakao_page_download.new_session() as session:
         client = kakao_page_download.client_or_anonymous(session, settings.request_timeout_seconds)
         cookie_saved = bool(client.cookies)  # 저장된 쿠키가 있는 클라이언트만 쿠키 값을 갖는다(익명은 빈 값)
@@ -158,6 +154,60 @@ async def kakao_manual_analyze(series_id: int):
         # 대여권/소장권/기다무 현황(작품 화면의 "대여권 N장 | 소장권 N장 | 기다무"와 같은 값) — 로그인돼 있을 때만 의미가 있다
         tickets = await client.ticket_info(series_id) if cookie_saved and logged_in is not False else None
         kakao_page_download.persist_refreshed_cookies(client)
+    return listing, tickets, cookie_saved, logged_in
+
+
+def _plan_summary(plan, series_id: int, title: str, folder) -> dict:
+    """폴더 규칙 결과(plan)의 요약 — 모드, 표식, 회차 개수들."""
+    return {
+        "series_id": series_id, "title": title, "folder": str(folder), "mode": plan.mode, "existing_count": plan.existing_count,
+        "marker": None if plan.marker is None else {
+            "number": plan.marker.number, "subtitle": plan.marker.subtitle,
+            "resolved_number": plan.marker.resolved_number, "warning": plan.marker.warning,
+        },
+        "to_download_count": len(plan.to_download), "locked_count": len(plan.locked),
+        "downloaded_count": sum(1 for row in plan.rows if row.downloaded),
+        "archived_count": sum(1 for row in plan.rows if row.archived),  # 받은 회차 기록에는 있고 폴더에는 없는 것(아카이빙으로 보관 폴더로 옮겨진 회차)
+        "before_start_count": sum(1 for row in plan.rows if row.before_start),
+    }
+
+
+def _tickets_payload(tickets, supported: bool, series_item: dict) -> dict | None:
+    if tickets is None:
+        return None
+    return {
+        "rental_count": tickets.rental_count, "own_count": tickets.own_count,
+        "waitfree_supported": supported,  # False면 화면은 기다무 항목을 보여주지 않는다
+        "waitfree_ready": tickets.waitfree_ready, "waitfree_available_at": tickets.waitfree_available_at,
+        # 기다무 충전 주기(3시간/1일/3일 등 작품마다 다름) — 이용권 응답에 없으면 작품 정보의 값을 쓴다
+        "waitfree_period_minutes": tickets.waitfree_period_minutes or int(series_item.get("waitfree_period_by_minute") or 0),
+    }
+
+
+def _episode_rows_payload(plan, series_item: dict, waitfree_ready: bool, rental_ready: bool, tickets_known: bool) -> list[dict]:
+    return [
+        {
+            "number": row.episode.number, "subtitle": row.episode.subtitle,
+            # 잠긴 회차라도 기다무를 쓸 수 있으면 "waitfree" — 골라서 받으면 기다무로 열고 받는다(한 장이라 하나만)
+            "state": _kakao_episode_state(row.episode, waitfree_ready, series_item, rental_ready, tickets_known=tickets_known, downloaded=row.downloaded),
+            "expire": row.episode.rent_expire,
+            "free_at": kakao_page_download.free_date_of(row.episode),  # 연재무료: 이 날짜에 무료가 된다
+            "downloaded": row.downloaded, "archived": row.archived, "before_start": row.before_start,
+            "selectable": (  # 이미 받은 회차도 다시 받을 수 있다(수동)
+                row.episode.accessible or _can_open_with_waitfree(row.episode, waitfree_ready) or _can_open_with_rental(row.episode, series_item, rental_ready)
+            ),
+        }
+        for row in plan.rows
+    ]
+
+
+@router.get("/kakao-manual/analyze")
+async def kakao_manual_analyze(series_id: int):
+    """작품의 회차를 폴더 규칙(폴더 없음 / 누락 회차 비교 / 파일 1개면 그 이후부터)으로 분석해서 표로 보여줄 결과를
+    돌려준다. 아무것도 받지 않는다."""
+    settings = get_settings()
+    root = await asyncio.to_thread(download_roots.kakao_root, settings)
+    listing, tickets, cookie_saved, logged_in = await _load_analysis_inputs(settings, series_id)
     if listing is None:
         raise HTTPException(status_code=502, detail="카카오페이지에서 회차 목록을 가져오지 못했습니다. 작품 번호를 확인하거나 잠시 뒤 다시 시도해주세요.")
     series_item, episodes = listing
@@ -173,42 +223,15 @@ async def kakao_manual_analyze(series_id: int):
         repository.get_kakao_pending_numbers(series_id),
     )
     return {
-        "series_id": series_id, "title": title, "folder": str(folder), "mode": plan.mode, "existing_count": plan.existing_count,
-        "marker": None if plan.marker is None else {
-            "number": plan.marker.number, "subtitle": plan.marker.subtitle,
-            "resolved_number": plan.marker.resolved_number, "warning": plan.marker.warning,
-        },
-        "to_download_count": len(plan.to_download), "locked_count": len(plan.locked),
-        "downloaded_count": sum(1 for row in plan.rows if row.downloaded),
-        "archived_count": sum(1 for row in plan.rows if row.archived),  # 받은 회차 기록에는 있고 폴더에는 없는 것(아카이빙으로 보관 폴더로 옮겨진 회차)
-        "before_start_count": sum(1 for row in plan.rows if row.before_start),
+        **_plan_summary(plan, series_id, title, folder),
         "cookie_saved": cookie_saved, "logged_in": logged_in,
         # 진단: 사이트가 말하는 전체 회차 수와 우리가 가져온 수(동영상으로 뺀 수 포함) — 목록에서 회차가 빠졌을 때 화면이 알려 준다
         "site_total": int(series_item.get("on_sale_count") or 0), "listed_count": len(episodes),
         "excluded_video_count": int(series_item.get("_excluded_video_count") or 0),
         "thumbnail_url": kakao_api._thumbnail_url(series_item), "authors": series_item.get("authors") or "",
         "subscription": tracked["status"] if tracked else None,  # 이 프로그램의 구독 상태(active 등, 없으면 None)
-        "tickets": None if tickets is None else {
-            "rental_count": tickets.rental_count, "own_count": tickets.own_count,
-            "waitfree_supported": supported,  # False면 화면은 기다무 항목을 보여주지 않는다
-            "waitfree_ready": tickets.waitfree_ready, "waitfree_available_at": tickets.waitfree_available_at,
-            # 기다무 충전 주기(3시간/1일/3일 등 작품마다 다름) — 이용권 응답에 없으면 작품 정보의 값을 쓴다
-            "waitfree_period_minutes": tickets.waitfree_period_minutes or int(series_item.get("waitfree_period_by_minute") or 0),
-        },
-        "episodes": [
-            {
-                "number": row.episode.number, "subtitle": row.episode.subtitle,
-                # 잠긴 회차라도 기다무를 쓸 수 있으면 "waitfree" — 골라서 받으면 기다무로 열고 받는다(한 장이라 하나만)
-                "state": _kakao_episode_state(row.episode, waitfree_ready, series_item, rental_ready, tickets_known=tickets is not None, downloaded=row.downloaded),
-                "expire": row.episode.rent_expire,
-                "free_at": kakao_page_download.free_date_of(row.episode),  # 연재무료: 이 날짜에 무료가 된다
-                "downloaded": row.downloaded, "archived": row.archived, "before_start": row.before_start,
-                "selectable": (  # 이미 받은 회차도 다시 받을 수 있다(수동)
-                    row.episode.accessible or _can_open_with_waitfree(row.episode, waitfree_ready) or _can_open_with_rental(row.episode, series_item, rental_ready)
-                ),
-            }
-            for row in plan.rows
-        ],
+        "tickets": _tickets_payload(tickets, supported, series_item),
+        "episodes": _episode_rows_payload(plan, series_item, waitfree_ready, rental_ready, tickets is not None),
     }
 
 

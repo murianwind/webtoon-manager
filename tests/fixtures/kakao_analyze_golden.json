@@ -1,0 +1,635 @@
+{
+ "로그인+대여권": {
+  "status": 200,
+  "body": {
+   "series_id": 1,
+   "title": "작품",
+   "folder": "<ROOT>/작품",
+   "mode": "new_folder",
+   "existing_count": 0,
+   "marker": null,
+   "to_download_count": 1,
+   "locked_count": 3,
+   "downloaded_count": 0,
+   "archived_count": 0,
+   "before_start_count": 0,
+   "cookie_saved": true,
+   "logged_in": true,
+   "site_total": 0,
+   "listed_count": 4,
+   "excluded_video_count": 0,
+   "thumbnail_url": "",
+   "authors": "가",
+   "subscription": null,
+   "tickets": {
+    "rental_count": 2,
+    "own_count": 0,
+    "waitfree_supported": true,
+    "waitfree_ready": false,
+    "waitfree_available_at": "2099-01-01T00:00:00+09:00",
+    "waitfree_period_minutes": 1440
+   },
+   "episodes": [
+    {
+     "number": 1,
+     "subtitle": "1화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": false,
+     "selectable": true
+    },
+    {
+     "number": 2,
+     "subtitle": "2화",
+     "state": "waitfree_wait",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": false,
+     "selectable": false
+    },
+    {
+     "number": 3,
+     "subtitle": "3화",
+     "state": "rental",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": false,
+     "selectable": true
+    },
+    {
+     "number": 4,
+     "subtitle": "4화",
+     "state": "locked",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": false,
+     "selectable": false
+    }
+   ]
+  }
+ },
+ "기다무 충전": {
+  "status": 200,
+  "body": {
+   "series_id": 1,
+   "title": "작품",
+   "folder": "<ROOT>/작품",
+   "mode": "new_folder",
+   "existing_count": 0,
+   "marker": null,
+   "to_download_count": 1,
+   "locked_count": 2,
+   "downloaded_count": 0,
+   "archived_count": 0,
+   "before_start_count": 0,
+   "cookie_saved": true,
+   "logged_in": true,
+   "site_total": 0,
+   "listed_count": 3,
+   "excluded_video_count": 0,
+   "thumbnail_url": "",
+   "authors": "가",
+   "subscription": null,
+   "tickets": {
+    "rental_count": 0,
+    "own_count": 0,
+    "waitfree_supported": true,
+    "waitfree_ready": true,
+    "waitfree_available_at": null,
+    "waitfree_period_minutes": 1440
+   },
+   "episodes": [
+    {
+     "number": 1,
+     "subtitle": "1화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": false,
+     "selectable": true
+    },
+    {
+     "number": 2,
+     "subtitle": "2화",
+     "state": "waitfree",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": false,
+     "selectable": true
+    },
+    {
+     "number": 3,
+     "subtitle": "3화",
+     "state": "rental_needed",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": false,
+     "selectable": false
+    }
+   ]
+  }
+ },
+ "기다무 없는 작품": {
+  "status": 200,
+  "body": {
+   "series_id": 1,
+   "title": "작품",
+   "folder": "<ROOT>/작품",
+   "mode": "new_folder",
+   "existing_count": 0,
+   "marker": null,
+   "to_download_count": 1,
+   "locked_count": 1,
+   "downloaded_count": 0,
+   "archived_count": 0,
+   "before_start_count": 0,
+   "cookie_saved": true,
+   "logged_in": true,
+   "site_total": 0,
+   "listed_count": 2,
+   "excluded_video_count": 0,
+   "thumbnail_url": "",
+   "authors": "가",
+   "subscription": null,
+   "tickets": {
+    "rental_count": 1,
+    "own_count": 0,
+    "waitfree_supported": false,
+    "waitfree_ready": false,
+    "waitfree_available_at": "2099-01-01T00:00:00+09:00",
+    "waitfree_period_minutes": 1440
+   },
+   "episodes": [
+    {
+     "number": 1,
+     "subtitle": "1화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": false,
+     "selectable": true
+    },
+    {
+     "number": 2,
+     "subtitle": "2화",
+     "state": "rental",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": false,
+     "selectable": true
+    }
+   ]
+  }
+ },
+ "폴더/기록 섞임": {
+  "status": 200,
+  "body": {
+   "series_id": 1,
+   "title": "작품",
+   "folder": "<ROOT>/작품",
+   "mode": "compare",
+   "existing_count": 2,
+   "marker": null,
+   "to_download_count": 2,
+   "locked_count": 0,
+   "downloaded_count": 4,
+   "archived_count": 2,
+   "before_start_count": 0,
+   "cookie_saved": true,
+   "logged_in": true,
+   "site_total": 0,
+   "listed_count": 6,
+   "excluded_video_count": 0,
+   "thumbnail_url": "",
+   "authors": "가",
+   "subscription": "active",
+   "tickets": {
+    "rental_count": 0,
+    "own_count": 0,
+    "waitfree_supported": true,
+    "waitfree_ready": false,
+    "waitfree_available_at": "2099-01-01T00:00:00+09:00",
+    "waitfree_period_minutes": 1440
+   },
+   "episodes": [
+    {
+     "number": 1,
+     "subtitle": "1화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": true,
+     "archived": true,
+     "before_start": false,
+     "selectable": true
+    },
+    {
+     "number": 2,
+     "subtitle": "2화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": true,
+     "archived": true,
+     "before_start": false,
+     "selectable": true
+    },
+    {
+     "number": 3,
+     "subtitle": "3화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": true,
+     "archived": false,
+     "before_start": false,
+     "selectable": true
+    },
+    {
+     "number": 4,
+     "subtitle": "4화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": true,
+     "archived": false,
+     "before_start": false,
+     "selectable": true
+    },
+    {
+     "number": 5,
+     "subtitle": "5화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": false,
+     "selectable": true
+    },
+    {
+     "number": 6,
+     "subtitle": "6화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": false,
+     "selectable": true
+    }
+   ]
+  }
+ },
+ "익명": {
+  "status": 200,
+  "body": {
+   "series_id": 2,
+   "title": "작품",
+   "folder": "<ROOT>/작품",
+   "mode": "compare",
+   "existing_count": 2,
+   "marker": null,
+   "to_download_count": 0,
+   "locked_count": 0,
+   "downloaded_count": 0,
+   "archived_count": 0,
+   "before_start_count": 2,
+   "cookie_saved": false,
+   "logged_in": null,
+   "site_total": 0,
+   "listed_count": 2,
+   "excluded_video_count": 0,
+   "thumbnail_url": "",
+   "authors": "가",
+   "subscription": null,
+   "tickets": null,
+   "episodes": [
+    {
+     "number": 1,
+     "subtitle": "1화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": true,
+     "selectable": true
+    },
+    {
+     "number": 2,
+     "subtitle": "2화",
+     "state": "locked",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": true,
+     "selectable": false
+    }
+   ]
+  }
+ },
+ "로그인 풀림": {
+  "status": 200,
+  "body": {
+   "series_id": 2,
+   "title": "작품",
+   "folder": "<ROOT>/작품",
+   "mode": "compare",
+   "existing_count": 2,
+   "marker": null,
+   "to_download_count": 0,
+   "locked_count": 0,
+   "downloaded_count": 0,
+   "archived_count": 0,
+   "before_start_count": 2,
+   "cookie_saved": true,
+   "logged_in": false,
+   "site_total": 0,
+   "listed_count": 2,
+   "excluded_video_count": 0,
+   "thumbnail_url": "",
+   "authors": "가",
+   "subscription": null,
+   "tickets": null,
+   "episodes": [
+    {
+     "number": 1,
+     "subtitle": "1화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": true,
+     "selectable": true
+    },
+    {
+     "number": 2,
+     "subtitle": "2화",
+     "state": "locked",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": true,
+     "selectable": false
+    }
+   ]
+  }
+ },
+ "기다무 없는 작품(충전 표시)": {
+  "status": 200,
+  "body": {
+   "series_id": 2,
+   "title": "작품",
+   "folder": "<ROOT>/작품",
+   "mode": "compare",
+   "existing_count": 2,
+   "marker": null,
+   "to_download_count": 0,
+   "locked_count": 0,
+   "downloaded_count": 1,
+   "archived_count": 0,
+   "before_start_count": 2,
+   "cookie_saved": true,
+   "logged_in": true,
+   "site_total": 0,
+   "listed_count": 3,
+   "excluded_video_count": 0,
+   "thumbnail_url": "",
+   "authors": "가",
+   "subscription": null,
+   "tickets": {
+    "rental_count": 1,
+    "own_count": 0,
+    "waitfree_supported": false,
+    "waitfree_ready": true,
+    "waitfree_available_at": null,
+    "waitfree_period_minutes": 1440
+   },
+   "episodes": [
+    {
+     "number": 1,
+     "subtitle": "1화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": true,
+     "selectable": true
+    },
+    {
+     "number": 2,
+     "subtitle": "2화",
+     "state": "rental",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": true,
+     "selectable": true
+    },
+    {
+     "number": 3,
+     "subtitle": "3화",
+     "state": "rental",
+     "expire": null,
+     "free_at": null,
+     "downloaded": true,
+     "archived": false,
+     "before_start": false,
+     "selectable": true
+    }
+   ]
+  }
+ },
+ "충전 주기는 작품 정보 값": {
+  "status": 200,
+  "body": {
+   "series_id": 2,
+   "title": "작품",
+   "folder": "<ROOT>/작품",
+   "mode": "compare",
+   "existing_count": 2,
+   "marker": null,
+   "to_download_count": 0,
+   "locked_count": 0,
+   "downloaded_count": 0,
+   "archived_count": 0,
+   "before_start_count": 2,
+   "cookie_saved": true,
+   "logged_in": true,
+   "site_total": 0,
+   "listed_count": 2,
+   "excluded_video_count": 0,
+   "thumbnail_url": "",
+   "authors": "가",
+   "subscription": null,
+   "tickets": {
+    "rental_count": 3,
+    "own_count": 0,
+    "waitfree_supported": true,
+    "waitfree_ready": false,
+    "waitfree_available_at": "2099-01-01T00:00:00+09:00",
+    "waitfree_period_minutes": 180
+   },
+   "episodes": [
+    {
+     "number": 1,
+     "subtitle": "1화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": true,
+     "selectable": true
+    },
+    {
+     "number": 2,
+     "subtitle": "2화",
+     "state": "waitfree_wait",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": true,
+     "selectable": false
+    }
+   ]
+  }
+ },
+ "파일 하나(표식)": {
+  "status": 200,
+  "body": {
+   "series_id": 3,
+   "title": "작품",
+   "folder": "<ROOT>/작품",
+   "mode": "single_marker",
+   "existing_count": 1,
+   "marker": {
+    "number": 3,
+    "subtitle": "3화",
+    "resolved_number": 3,
+    "warning": false
+   },
+   "to_download_count": 3,
+   "locked_count": 0,
+   "downloaded_count": 1,
+   "archived_count": 0,
+   "before_start_count": 2,
+   "cookie_saved": true,
+   "logged_in": true,
+   "site_total": 0,
+   "listed_count": 6,
+   "excluded_video_count": 0,
+   "thumbnail_url": "",
+   "authors": "가",
+   "subscription": null,
+   "tickets": {
+    "rental_count": 3,
+    "own_count": 0,
+    "waitfree_supported": true,
+    "waitfree_ready": false,
+    "waitfree_available_at": "2099-01-01T00:00:00+09:00",
+    "waitfree_period_minutes": 1440
+   },
+   "episodes": [
+    {
+     "number": 1,
+     "subtitle": "1화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": true,
+     "selectable": true
+    },
+    {
+     "number": 2,
+     "subtitle": "2화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": true,
+     "selectable": true
+    },
+    {
+     "number": 3,
+     "subtitle": "3화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": true,
+     "archived": false,
+     "before_start": false,
+     "selectable": true
+    },
+    {
+     "number": 4,
+     "subtitle": "4화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": false,
+     "selectable": true
+    },
+    {
+     "number": 5,
+     "subtitle": "5화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": false,
+     "selectable": true
+    },
+    {
+     "number": 6,
+     "subtitle": "6화",
+     "state": "free",
+     "expire": null,
+     "free_at": null,
+     "downloaded": false,
+     "archived": false,
+     "before_start": false,
+     "selectable": true
+    }
+   ]
+  }
+ },
+ "목록 실패": {
+  "status": 502,
+  "body": {
+   "detail": "카카오페이지에서 회차 목록을 가져오지 못했습니다. 작품 번호를 확인하거나 잠시 뒤 다시 시도해주세요."
+  }
+ }
+}
