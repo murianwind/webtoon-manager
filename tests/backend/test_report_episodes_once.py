@@ -11,6 +11,8 @@ fake_send = discord_fake(sent, result=None)
 discord_notify.send_webhook_notification = fake_send
 async def none(session, settings): return []
 scheduler.report_sections.collect_unregistered_new_episodes = none; scheduler.report_sections.collect_kakao_new_episodes = none
+async def no_new_titles(session, settings): return []                                                             # 신규 웹툰 수집은 이 테스트의 관심사가 아니다 — 실제 네이버/카카오 목록을 부르지 않게(CI에서만 실패한 적이 있다)
+scheduler.report_sections.collect_naver_new_titles = no_new_titles; scheduler.report_sections.collect_kakao_new_titles = no_new_titles
 
 async def report(force=False):
     sent.clear(); job_status.start("report"); await (scheduler.run_test_report() if force else scheduler.send_batch_report(datetime.now(timezone.utc).isoformat())); return list(sent)

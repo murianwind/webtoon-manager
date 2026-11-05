@@ -14,6 +14,8 @@ NEW = {"naver": [], "kakao": []}                                                
 async def fake_naver(session, settings): collected.append("naver"); return list(NEW["naver"])
 async def fake_kakao(session, settings): collected.append("kakao"); return list(NEW["kakao"])
 scheduler.report_sections.collect_unregistered_new_episodes = fake_naver; scheduler.report_sections.collect_kakao_new_episodes = fake_kakao
+async def no_new_titles(session, settings): return []                                                             # 신규 웹툰 수집은 이 테스트의 관심사가 아니다 — 실제 네이버/카카오 목록을 부르지 않게(CI에서만 실패한 적이 있다)
+scheduler.report_sections.collect_naver_new_titles = no_new_titles; scheduler.report_sections.collect_kakao_new_titles = no_new_titles
 VIEWER = {}
 async def fake_reader(session, base, name, timeout): lookups.append(name); return VIEWER.get(name)
 webtoon_server_client.fetch_reader_url = fake_reader
