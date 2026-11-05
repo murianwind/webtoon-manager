@@ -6,8 +6,10 @@ from pathlib import Path
 import httpx
 
 from app import db, repository, archiver, download_roots, kakao_page_download as kp
-from app import kakao_cover
+from app import kakao_cover, rclone_updater
 db.get_connection()
+async def no_update(*args, **kwargs): return "rclone 업데이트 확인 생략(테스트)"
+rclone_updater.check_and_update = no_update              # 아카이빙 작업은 시작할 때 이 확인을 하는데 실제 GitHub에 접속한다 — 네트워크가 되는 CI에서 느려서 실패한 적이 있다
 kakao_cover.fetch_official_cover_bytes = lambda sid, **k: b"\xff\xd8\xffcover"   # 표지는 외부 요청 없이
 import app.main as m
 from app.config import get_settings
@@ -81,10 +83,12 @@ async def main():
         # ── 7. API 수동 실행 경로에서도 카카오 폴더를 쓴다 ──
         zipfile_(kfolder, "0004_4화.zip"); zipfile_(kfolder, "0005_5화.zip")
         r = await c.post("/api/archive/run", json={"title_ids": ["kakao_61641075"], "full_move": False}); assert r.status_code == 200
-        for _ in range(100):
+        from app import job_status
+        for _ in range(400):                                                                                          # 작업이 끝날 때까지(최대 20초) 기다린다
             await asyncio.sleep(0.05)
-            from app import job_status
             if job_status.snapshot().get("archive", {}).get("status") not in (None, "running"): break
+        else:
+            raise AssertionError("아카이빙 작업이 20초 안에 끝나지 않았다")
         assert sorted(p.name for p in kfolder.glob("*.zip")) == ["0005_5화.zip"], sorted(p.name for p in kfolder.glob("*"))
         print("7) API 수동 실행 OK")
 

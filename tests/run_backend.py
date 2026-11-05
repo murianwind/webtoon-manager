@@ -25,7 +25,7 @@ def run_one(script: Path) -> tuple[bool, str]:
             **os.environ,
             "DATABASE_PATH": str(base / "data" / "t.db"), "ARCHIVE_ROOT": str(base / "archive"),
             "DOWNLOAD_ROOT": str(base / "download"), "COOKIE_FILE_PATH": str(base / "cookies.json"),
-            "PYTHONPATH": str(ROOT), "PYTHONWARNINGS": "ignore",
+            "PYTHONPATH": os.pathsep.join([str(ROOT), str(ROOT / "tests" / "netguard")]), "PYTHONWARNINGS": "ignore",   # netguard: 테스트에서는 외부 네트워크를 항상 즉시 실패시킨다(샌드박스/CI 차이 방지)
         }
         cmd = [sys.executable, str(script)]
         if COVERAGE:  # --coverage: 실행한 줄을 기록한다(테스트가 어느 코드를 안 거치는지 볼 때)

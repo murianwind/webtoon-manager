@@ -11,10 +11,14 @@ import time
 
 import httpx
 
-from app import daily_plus, db, kakao_api, kakao_catalog, naver_api, repository, weekdays
+from app import daily_plus, db, kakao_api, kakao_catalog, naver_api, repository, weekday_lookup, weekdays
 from app.models import NaverListItem
 db.get_connection()
 import app.main as m
+
+# 전체목록을 열 때 요일별 목록에서 빠진 추적 작품의 요일을 백그라운드로 조회한다(weekday_lookup) — 이 테스트의 관심사가 아니고(그 조회는 test_naver_weekday_lookup이 본다),
+# 실제 네트워크를 부르면 결과를 저장하는 때에 따라 "다시 받아도 저장하지 않는다" 확인이 흔들린다(네트워크가 되는 곳과 막힌 곳이 다르게 동작) — 그래서 시작하지 않게 한다.
+weekday_lookup.start = lambda title_ids, timeout_seconds: None
 
 # Scenario 1: 요일 표기 통일 — 월~일 순서, 중복/모르는 값 무시
 assert weekdays.from_naver(["SUNDAY", "MONDAY", "MONDAY", "DAILY", "xyz"]) == ["mon", "sun"] and weekdays.from_naver(["WEDNESDAY", "TUESDAY"]) == ["tue", "wed"]

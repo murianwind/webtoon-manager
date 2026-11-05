@@ -399,3 +399,10 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - **이미 제외된 웹툰의 "목록 제외" 링크**: `_render_exclude_confirm_html(..., already_excluded=True)`가 안내만 보여 준다(`common._EXCLUDE_PAGE_STYLE`을 두 페이지가 공유). 네이버/카카오 확인 페이지가 제외 상태를 보고 정한다(`test_exclude_confirm_already.py`).
 - **테스트**: `test_list_alert.py`(언제), `test_new_titles.py`(무엇을 — "제외했다가 목록으로" 흐름 포함), `test_list_alert_flow.py`(실제 발송: 얹기/단독/30분/재시도/기본 7시), `test_list_alert_api.py`, `test_exclude_confirm_already.py`, `tests/js/test_list_alert_settings_ui.js`. 변형 검사는 파이썬 바이트코드 캐시가 같은 길이의 변형에서 낡은 채 남아 거짓 결과를 낼 수 있어서 `PYTHONDONTWRITEBYTECODE=1`로 돌린다.
 
+## 테스트는 외부 네트워크를 쓰지 않는다 (샌드박스/CI 차이 방지)
+
+- **왜**: 테스트가 가짜로 바꾸지 않은 외부 접속이 네트워크가 막힌 곳(개발 샌드박스)에서는 조용히 실패해 통과하고, 네트워크가 열린 곳(CI)에서는 실제로 나가서 결과가 달라지는 일이 CI에서만 실패하는 테스트로 세 번 나왔다 — 신규 웹툰 수집이 실제 목록을 받아 옴(`test_report_job`), 아카이빙 작업 시작 때 rclone 업데이트 확인이 실제 GitHub에 접속해 느려짐(`test_kp_archive_kakao`; 새 버전이 있으면 바이너리를 내려받아 교체까지 한다), 전체목록을 열 때의 백그라운드 요일 조회가 실제로 나가 저장 시점이 흔들림(`test_list_weekdays`).
+- **막는 방법**: `tests/run_backend.py`가 테스트 프로세스의 `PYTHONPATH`에 `tests/netguard/`를 넣고, 그 안의 `sitecustomize.py`가 외부 이름 조회/접속(`socket.getaddrinfo`, `connect`)을 항상 즉시 `OSError("테스트에서는 외부 네트워크를 쓰지 않는다 …")`로 실패시킨다(루프백 127.x/::1/localhost와 유닉스 소켓은 허용; 앱 실행에는 쓰이지 않는다). 그래서 샌드박스와 CI가 같은 조건이다. `tests/backend/test_network_guard.py`가 이 보장을 확인한다. 외부 호출이 있는 코드를 테스트할 때는 계속 그 호출을 가짜로 바꿔야 한다(막히면 실패가 아니라 "호출이 막혔다"는 오류로 돌아온다).
+- **소스를 보는 가드**: `test_report_tests_isolated.py`(리포트를 보내 보는 테스트는 신규 웹툰 수집을 가짜로), `test_tests_isolated_from_network.py`(아카이빙 작업을 돌리는 테스트는 `check_and_update`를 가짜로).
+- **외부 접속 시도를 찾는 법**: 프로젝트 루트에 외부 호스트 조회를 파일에 기록하는 `sitecustomize.py`를 임시로 두고 `python tests/run_backend.py`를 돌리면 어느 테스트가 어느 호스트로 나가려 했는지 나온다(찾은 뒤 지운다 — 루트의 `sitecustomize.py`는 커밋하지 않는다).
+
