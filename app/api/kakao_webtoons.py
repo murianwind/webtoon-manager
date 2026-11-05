@@ -295,6 +295,8 @@ async def delete_kakao_webtoon(title_id: int):
 
 @router.get("/kakao-webtoons/{title_id}/exclude-confirm", response_class=HTMLResponse)
 async def kakao_exclude_confirm_page(title_id: int, title: str = ""):
+    tracked = await asyncio.to_thread(repository.get_kakao_webtoon, title_id)
     return _render_exclude_confirm_html(
         title_id, title, f"/api/kakao-webtoons/{title_id}/exclude", {"title": title or str(title_id)},
+        already_excluded=bool(tracked) and tracked["status"] == repository.STATUS_EXCLUDED,  # 이미 제외된 작품이면 안내만(버튼 없음)
     )

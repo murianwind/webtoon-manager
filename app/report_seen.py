@@ -23,6 +23,8 @@ MAX_ENTRIES = 5000
 
 NaverItem = tuple[str, str, int]  # (title_id, title_name, 최신 회차 번호)
 KakaoItem = tuple[int, str, str]  # (title_id, title_name, 바로가기 URL)
+NewNaver = tuple[str, str]  # 신규 웹툰: (title_id, title_name)
+NewKakao = tuple[int, str]  # 신규 웹툰: (title_id, title_name)
 
 
 def _load() -> dict[str, str]:
@@ -39,6 +41,10 @@ def _naver_key(item: NaverItem) -> tuple[str, str]:
 
 def _kakao_key(item: KakaoItem) -> tuple[str, str]:
     return f"kakao:{item[0]}", item[2]
+
+
+def _new_key(platform: str, title_id) -> str:
+    return f"new:{platform}:{title_id}"
 
 
 def _row_key(row: dict) -> str:
@@ -88,3 +94,33 @@ def remember(naver_items: list[NaverItem], kakao_items: list[KakaoItem]) -> None
     while len(seen) > MAX_ENTRIES:
         seen.pop(next(iter(seen)))
     repository.set_setting(SETTING_KEY, json.dumps(seen, ensure_ascii=False))
+
+
+# ── 신규 웹툰 ─────────────────────────────────────────────────────────
+# "신규 웹툰" 알림은 작품마다 한 번만 나간다. 알린 작품은 여기 기억해 두고, 그 뒤에는 (사이트의 신작 표시가 남아 있어도) 새 회차가 나올 때 "새 에피소드"로 알린다.
+# 목록 제외했다가 "목록으로" 되돌려 DB 기록이 지워져도 이 기억은 남아서 신규로 또 알리지 않는다(그래서 DB가 아니라 여기에 둔다).
+
+def is_new_announced(platform: str, title_id) -> bool:
+    return _new_key(platform, title_id) in _load()
+
+
+def filter_unannounced_new(naver_items: list[NewNaver], kakao_items: list[NewKakao]) -> tuple[list[NewNaver], list[NewKakao]]:
+    seen = _load()
+    return (
+        [i for i in naver_items if _new_key("naver", i[0]) not in seen],
+        [i for i in kakao_items if _new_key("kakao", i[0]) not in seen],
+    )
+
+
+def remember_new(naver_items: list[NewNaver], kakao_items: list[NewKakao]) -> None:
+    """방금 신규 웹툰으로 알린 작품들을 기록한다(전송이 성공한 뒤에만 호출한다)."""
+    if not naver_items and not kakao_items:
+        return
+    seen = _load()
+    for key in [*(_new_key("naver", i[0]) for i in naver_items), *(_new_key("kakao", i[0]) for i in kakao_items)]:
+        seen.pop(key, None)
+        seen[key] = "1"
+    while len(seen) > MAX_ENTRIES:
+        seen.pop(next(iter(seen)))
+    repository.set_setting(SETTING_KEY, json.dumps(seen, ensure_ascii=False))
+

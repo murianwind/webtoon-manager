@@ -49,4 +49,29 @@ lines = msg.split("\n")
 assert f"📁 받은 작품 ({limit + 5}):" in lines and "_외 5개 생략_" in lines and f"❌ 실패한 작품 ({limit + 2}):" in lines and "_외 2개 생략_" in lines and "_외 3개 생략_" in lines
 assert lines.count("• 작품000") == 1 and not any("작품" + f"{limit:03d}" in l for l in lines), "한도 뒤는 나열하지 않는다"
 exact = build([ok_row(f"작품{i:03d}") for i in range(limit)], [], {}); assert "생략" not in exact and exact.count("• ") == limit
+
+# Scenario 6: 신규 웹툰 섹션 — 웹툰명 옆에 "정보 보기"(작품 페이지)와 "목록 제외" 링크. 앱 주소가 없으면 목록 제외는 안 붙는다. 새 에피소드 앞에 나오고 개수 헤더가 따로다. 한도를 넘으면 생략 표시
+NAVER_PAGE = "https://comic.naver.com/webtoon/list?titleId="
+msg = build([ok_row("가")], [], {}, None, "", None, new_titles=[("12", "네이버 신작")], kakao_new_titles=[(22, "카카오 신작")])
+assert msg.endswith("\n".join(["", "🆕 웹툰 전체목록 중 신규 웹툰 (2):", f"• [네이버] 네이버 신작 · [정보 보기](<{NAVER_PAGE}12>)\n• [카카오] 카카오 신작 · [정보 보기](<https://page.kakao.com/content/22>)"])), msg
+msg = build([ok_row("가")], [], {}, None, "https://app.example", None, new_titles=[("12", "네이버 신작")], kakao_new_titles=[(22, "카카오 신작")])
+assert f"• [네이버] 네이버 신작 · [정보 보기](<{NAVER_PAGE}12>) · [목록 제외](<https://app.example/api/webtoons/12/exclude-confirm?title={quote('네이버 신작')}>)" in msg
+assert f"• [카카오] 카카오 신작 · [정보 보기](<https://page.kakao.com/content/22>) · [목록 제외](<https://app.example/api/kakao-webtoons/22/exclude-confirm?title={quote('카카오 신작')}>)" in msg
+both = build([ok_row("가")], [fail_row("실패")], {}, [("11", "새회차", 3)], "", None, new_titles=[("12", "신작")])
+assert both.index("❌ 실패한 작품") < both.index("🆕 웹툰 전체목록 중 신규 웹툰") < both.index("🆕 웹툰 전체목록 중 새 에피소드"), "실패 → 신규 웹툰 → 새 에피소드 순서"
+many = build([ok_row("가")], [], {}, None, "", None, new_titles=[(str(i), f"신작{i:03d}") for i in range(limit + 4)])
+assert f"🆕 웹툰 전체목록 중 신규 웹툰 ({limit + 4}):" in many and "_외 4개 생략_" in many
+assert "신규 웹툰" not in build([ok_row("가")], [], {}, None, "", None, new_titles=[], kakao_new_titles=[]), "비어 있으면 섹션이 없다"
+print("6) 신규 웹툰 섹션 OK")
+
+# Scenario 7: 단독 알림(다운로드 이력 없이 신규 웹툰 + 새 에피소드만) — 제목 줄 + 두 섹션. 비어 있는 섹션은 빠지고 둘 다 비면 빈 문자열(보내지 않는다)
+alone = rm.build_list_alert_message([("12", "네이버 신작")], [(22, "카카오 신작")], [("11", "네이버 새회차", 5)], [(33, "카카오 새회차", "https://page.kakao.com/content/33/viewer/9")], "")
+assert alone == "\n".join(["🔔 웹툰 전체목록 알림 (2026-11-03)", "", "🆕 웹툰 전체목록 중 신규 웹툰 (2):",
+    f"• [네이버] 네이버 신작 · [정보 보기](<{NAVER_PAGE}12>)\n• [카카오] 카카오 신작 · [정보 보기](<https://page.kakao.com/content/22>)", "",
+    "🆕 웹툰 전체목록 중 새 에피소드 (2):", f"• [네이버] 네이버 새회차 [바로가기](<{rm.NAVER_DETAIL_URL_TEMPLATES['webtoon']}?titleId=11&no=5>)\n• [카카오] 카카오 새회차 [바로가기](<https://page.kakao.com/content/33/viewer/9>)"]), alone
+only_eps = rm.build_list_alert_message([], [], [("11", "새회차", 5)], [], "")
+assert "신규 웹툰" not in only_eps and "새 에피소드 (1)" in only_eps and only_eps.startswith("🔔 웹툰 전체목록 알림 (2026-11-03)")
+assert rm.build_list_alert_message([], [], [], [], "") == "", "보낼 게 없으면 빈 문자열"
+print("7) 단독 알림 OK")
 print("ALL OK")
+

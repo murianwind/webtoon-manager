@@ -305,7 +305,9 @@ async def naver_list_exclude(title_id: str, payload: NaverListEntryIn):
 
 @router.get("/webtoons/{title_id}/exclude-confirm", response_class=HTMLResponse)
 async def exclude_confirm_page(title_id: str, title: str = "", thumbnail_url: str = ""):
+    tracked = await asyncio.to_thread(repository.get, title_id)
     return _render_exclude_confirm_html(
         title_id, title, f"/api/naver-list/{title_id}/exclude",
         {"title": title or title_id, "thumbnail_url": thumbnail_url},
+        already_excluded=tracked is not None and tracked.status == repository.STATUS_EXCLUDED,  # 이미 제외된 작품이면 안내만(버튼 없음)
     )

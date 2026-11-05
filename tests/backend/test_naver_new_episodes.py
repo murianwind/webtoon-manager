@@ -6,9 +6,15 @@ from types import SimpleNamespace as NS
 from app import db, naver_api, repository, scheduler
 from app.config import get_settings
 db.get_connection()
+# 이 테스트는 리포트에 담기는 섹션의 내용/반복 여부를 본다 — 언제 얹히는지(하루 한 번)는 test_list_alert.py/test_list_alert_flow.py가 본다. 그래서 매 묶음에 얹히게 둔다.
+from app import list_alert
+list_alert.should_attach = lambda now: True
+import app.scheduler as _scheduler                                                                                 # 신규 웹툰 수집은 이 테스트의 관심사가 아니라 비워 둔다(실제 네트워크를 부르지 않게)
+async def _no_new_titles(session, settings): return []
+_scheduler.report_sections.collect_naver_new_titles = _no_new_titles; _scheduler.report_sections.collect_kakao_new_titles = _no_new_titles
 
 S = NS(request_timeout_seconds=5, artist_scan_concurrency=3, delay_seconds=0, cookie_file_path=get_settings().cookie_file_path)
-ITEMS = [NS(title_id=t, title_name=f"작품{t}", has_update=up, is_adult=False) for t, up in
+ITEMS = [NS(title_id=t, title_name=f"작품{t}", has_update=up, is_adult=False, is_new=False) for t, up in
          (("1", True), ("2", True), ("3", True), ("4", True), ("5", True), ("6", True), ("7", False))]
 async def fake_list(session, timeout): return list(ITEMS)
 async def fake_latest(session, title_id, timeout, cookies=None): return 100 + int(title_id)

@@ -6,6 +6,12 @@ from datetime import datetime, timedelta, timezone
 
 from app import db, repository, scheduler, job_status, discord_notify
 db.get_connection()
+# 이 테스트는 리포트에 담기는 섹션의 내용/반복 여부를 본다 — 언제 얹히는지(하루 한 번)는 test_list_alert.py/test_list_alert_flow.py가 본다. 그래서 매 묶음에 얹히게 둔다.
+from app import list_alert
+list_alert.should_attach = lambda now: True
+import app.scheduler as _scheduler                                                                                 # 신규 웹툰 수집은 이 테스트의 관심사가 아니라 비워 둔다(실제 네트워크를 부르지 않게)
+async def _no_new_titles(session, settings): return []
+_scheduler.report_sections.collect_naver_new_titles = _no_new_titles; _scheduler.report_sections.collect_kakao_new_titles = _no_new_titles
 
 sent = []; FAIL = {"on": False}
 async def fake_send(session, message):

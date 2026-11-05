@@ -42,6 +42,7 @@ from app.scheduler.report_job import (
     _SETTING_KEY_REPORT_LAST_SENT_AT,
     run_test_report,
     send_batch_report,
+    send_list_alert,
 )
 from app.scheduler.report_message import build_report_message
 from app.scheduler.report_sections import collect_kakao_new_episodes, collect_unregistered_new_episodes
@@ -90,5 +91,6 @@ __all__ = [
     "run_kakao_catalog_refresh_job",
     "run_test_report",
     "send_batch_report",
+    "send_list_alert",
     "run_report_tick",
 ]

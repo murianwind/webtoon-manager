@@ -6,13 +6,19 @@ from types import SimpleNamespace as NS
 from app import db, job_status, kakao_api, kakao_page_auth as auth, naver_api, scheduler
 from app.config import get_settings
 db.get_connection()
+# 이 테스트는 리포트에 담기는 섹션의 내용/반복 여부를 본다 — 언제 얹히는지(하루 한 번)는 test_list_alert.py/test_list_alert_flow.py가 본다. 그래서 매 묶음에 얹히게 둔다.
+from app import list_alert
+list_alert.should_attach = lambda now: True
+import app.scheduler as _scheduler                                                                                 # 신규 웹툰 수집은 이 테스트의 관심사가 아니라 비워 둔다(실제 네트워크를 부르지 않게)
+async def _no_new_titles(session, settings): return []
+_scheduler.report_sections.collect_naver_new_titles = _no_new_titles; _scheduler.report_sections.collect_kakao_new_titles = _no_new_titles
 
 ST = get_settings()
 S = NS(request_timeout_seconds=5, artist_scan_concurrency=3, delay_seconds=0, cookie_file_path=ST.cookie_file_path)
 def logs(): return "\n".join(job_status.snapshot()["report"]["log"])
 
 # ── 네이버: 성인 작품은 쿠키 없이는 회차 목록이 비어서 온다(실제 네이버 동작 — 성인 쿠키 만료 감지도 이 전제를 쓴다) ──
-NAVER_ITEMS = [NS(title_id="1", title_name="일반작", has_update=True, is_adult=False), NS(title_id="2", title_name="초임계지옥", has_update=True, is_adult=True)]
+NAVER_ITEMS = [NS(title_id="1", title_name="일반작", has_update=True, is_adult=False, is_new=False), NS(title_id="2", title_name="초임계지옥", has_update=True, is_adult=True, is_new=False)]
 naver_calls = []
 async def fake_list(session, timeout): return list(NAVER_ITEMS)
 async def fake_latest(session, title_id, timeout, cookies=None):
@@ -22,7 +28,7 @@ async def fake_latest(session, title_id, timeout, cookies=None):
 naver_api.fetch_full_webtoon_list = fake_list; naver_api.fetch_latest_episode_no = fake_latest
 
 # ── 카카오: 같은 규칙(19세는 로그인 쿠키로 조회) ──
-KAKAO_ITEMS = [{"title_id": 11, "title_name": "카카오일반", "has_update": True, "is_adult": False}, {"title_id": 12, "title_name": "카카오19금", "has_update": True, "is_adult": True}]
+KAKAO_ITEMS = [{"title_id": 11, "title_name": "카카오일반", "has_update": True, "is_adult": False, "is_new": False}, {"title_id": 12, "title_name": "카카오19금", "has_update": True, "is_adult": True, "is_new": False}]
 kakao_calls = []
 async def fake_catalog(session, timeout, use_cache=True): return [dict(i) for i in KAKAO_ITEMS]
 async def fake_kakao_latest(session, series_id, timeout, cookies=None):

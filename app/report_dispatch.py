@@ -96,6 +96,19 @@ def set_quiet_hours(items) -> None:
     repository.set_setting(QUIET_KEY, json.dumps(parse_quiet_hours(items), ensure_ascii=False))
 
 
+def quiet_end_minutes(weekday: int) -> list[int]:
+    """그 요일(0=월)에 끝나는 발송하지 않는 시간들의 종료 시각(그날 0시부터의 분, 작은 것부터). 요일은 시작하는 날 기준이라 자정을 넘기는 구간은 다음 날(주를 넘기면 월요일)에 끝난다."""
+    ends = []
+    for r in get_quiet_hours():
+        start = r["start_hour"] * 60 + r["start_minute"]
+        length = (r["end_hour"] * 60 + r["end_minute"] - start) % _DAY
+        for day in [VALID_DAYS.index(d) for d in r["days"]] or range(7):
+            end = (day * _DAY + start + length) % _WEEK
+            if end // _DAY == weekday:
+                ends.append(end % _DAY)
+    return sorted(ends)
+
+
 def is_quiet(now: datetime) -> bool:
     """지금이 발송하지 않는 시간인가(한국시간 기준, 끝 시각은 포함하지 않는다)."""
     local = now.astimezone(_KST)

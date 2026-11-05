@@ -4,6 +4,7 @@
 import asyncio
 import logging
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import aiohttp
@@ -14,7 +15,7 @@ from app import (
     download_roots,
     repository,
 )
-from app import download_pacing, kakao_page_download, report_dispatch, viewer_scan, waitfree_sync
+from app import discord_config, download_pacing, kakao_page_download, list_alert, report_dispatch, viewer_scan, waitfree_sync
 from app import webtoon_server_client
 from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
 from app.config import get_settings
@@ -324,6 +325,40 @@ class UnregisteredNewEpisodesSettingOut(BaseModel):
 
 class UnregisteredNewEpisodesSettingIn(BaseModel):
     enabled: bool
+
+
+class ListAlertTimeIn(BaseModel):
+    time: str | None = None  # "HH:MM" — 비우면(null) 정한 시각을 지운다
+
+
+class ListAlertSettingOut(BaseModel):
+    time: str | None  # 사용자가 정한 발송 시각(없으면 null)
+    default_time: str  # 정한 시각도 발송하지 않는 시간도 없을 때 쓰는 기본 시각
+    discord_configured: bool  # 디스코드 웹훅이 설정돼 있다(이 설정은 그때만 화면에 나온다)
+    quiet_hours_set: bool  # 발송하지 않는 시간이 하나라도 있다(있으면 그 시간이 끝난 뒤 첫 리포트에 같이 나간다 — 정한 시각을 유지하기로 한 경우만 그 시각)
+    mode: str  # 지금 적용되는 방식: "time"(정한/기본 시각에 단독) 또는 "quiet"(발송하지 않는 시간이 끝난 뒤)
+
+
+def _list_alert_setting() -> dict:
+    return {
+        "time": list_alert.get_time(), "default_time": list_alert.DEFAULT_TIME, "discord_configured": bool(discord_config.get_webhook_url()),
+        "quiet_hours_set": bool(report_dispatch.get_quiet_hours()), "mode": list_alert.plan(datetime.now(timezone.utc)).mode,
+    }
+
+
+@router.get("/settings/list-alert", response_model=ListAlertSettingOut)
+async def get_list_alert_setting():
+    """웹툰 전체목록 알림(신규 웹툰 + 새 에피소드)의 발송 시각과, 화면이 시각 입력칸을 보일지 판단하는 값."""
+    return await asyncio.to_thread(_list_alert_setting)
+
+
+@router.post("/settings/list-alert", response_model=ListAlertSettingOut)
+async def set_list_alert_setting(payload: ListAlertTimeIn):
+    try:
+        await asyncio.to_thread(list_alert.set_time, payload.time)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return await asyncio.to_thread(_list_alert_setting)
 
 
 @router.get("/settings/report-unregistered-new-episodes", response_model=UnregisteredNewEpisodesSettingOut)

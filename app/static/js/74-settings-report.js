@@ -1,4 +1,4 @@
-// 설정: 다운로드 리포트 — 발송하지 않는 시간, 모으는 시간(N분), 다운로드 뒤 뷰어 서버 스캔
+// 설정: 다운로드 리포트 — 발송하지 않는 시간, 모으는 시간(N분), 새 에피소드 발송 시간, 다운로드 뒤 뷰어 서버 스캔
 // (index.html에서 파일 이름 순서대로 로드된다 — 클래식 스크립트라 최상위 선언은 전역으로 공유된다)
 
 const QUIET_DEFAULT = { start_hour: 23, start_minute: 0, end_hour: 6, end_minute: 0, days: [] };
@@ -47,6 +47,46 @@ function readQuietRows() {
   }));
 }
 
+// ── 새 에피소드 발송 시간(신규 웹툰 + 새 에피소드를 하루 한 번 보내는 시각) ──
+// 디스코드가 설정돼 있고 발송하지 않는 시간이 없을 때만 입력칸이 나온다. 발송하지 않는 시간이 있으면 그 시간이 끝난 뒤 첫 리포트에 같이 나가므로 안내만 보이고,
+// 시각을 먼저 정해 뒀다면 "유지 중" 줄로 남겨 사용자가 계속 쓸지 해제할지 정하게 한다.
+let listAlertState = { time: null, discord_configured: false, quiet_hours_set: false };
+
+function showListAlertSetting(data) {
+  listAlertState = data;
+  const hasTime = Boolean(data.time);
+  document.getElementById("list-alert-group").classList.toggle("hidden", !data.discord_configured);
+  document.getElementById("list-alert-time-edit").classList.toggle("hidden", data.quiet_hours_set);
+  document.getElementById("list-alert-kept").classList.toggle("hidden", !(data.quiet_hours_set && hasTime));
+  document.getElementById("list-alert-quiet-hint").classList.toggle("hidden", !(data.quiet_hours_set && !hasTime));
+  document.getElementById("list-alert-time").value = data.time || "";
+  document.getElementById("list-alert-kept-text").textContent = hasTime
+    ? `새 에피소드 발송 시간 ${data.time}이(가) 유지되고 있습니다 — 발송하지 않는 시간이 있어도 이 시각에 신규 웹툰과 새 에피소드를 따로 보냅니다.`
+    : "";
+}
+
+async function loadListAlertSetting() {
+  try {
+    showListAlertSetting(await apiCall("/api/settings/list-alert"));
+  } catch (e) {
+    // 조용히 무시 — 다음에 설정 화면을 열 때 다시 읽는다
+  }
+}
+
+async function saveListAlertTime(time, resultText) {
+  const resultEl = document.getElementById("list-alert-save-result");
+  resultEl.textContent = "";
+  try {
+    showListAlertSetting(await apiCall("/api/settings/list-alert", { method: "POST", body: JSON.stringify({ time: time || null }) }));
+    resultEl.textContent = resultText;
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+}
+
+document.getElementById("btn-save-list-alert").addEventListener("click", () => saveListAlertTime(document.getElementById("list-alert-time").value, "저장했습니다."));
+document.getElementById("btn-clear-list-alert").addEventListener("click", () => saveListAlertTime(null, ""));
+
 async function loadReportSettings() {
   try {
     const data = await apiCall("/api/settings/report");
@@ -57,6 +97,7 @@ async function loadReportSettings() {
   } catch (e) {
     document.getElementById("report-settings-save-result").textContent = e.message;
   }
+  loadListAlertSetting();
   loadViewerScanSettings();
 }
 
@@ -66,10 +107,20 @@ document.getElementById("btn-save-report-settings").addEventListener("click", as
   const resultEl = document.getElementById("report-settings-save-result");
   resultEl.textContent = "";
   try {
+    const quietRows = readQuietRows();
+    // 새 에피소드 발송 시간을 먼저 정해 둔 뒤 발송하지 않는 시간을 처음 설정하는 경우 — 안내하고 기존 발송 시간을 유지할지 묻는다
+    const needsListAlertChoice = quietRows.length > 0 && !listAlertState.quiet_hours_set && Boolean(listAlertState.time);
+    const keepListAlertTime = needsListAlertChoice
+      ? confirm(
+          `새 에피소드 발송 시간이 ${listAlertState.time}(으)로 설정되어 있습니다.\n\n발송하지 않는 시간을 설정하면, 발송 시간 설정 없이도 신규 웹툰과 새 에피소드가 발송하지 않는 시간이 끝난 뒤 처음 나가는 다운로드 리포트에 같이 나갑니다.\n\n기존 발송 시간(${listAlertState.time})을 유지할까요?\n[확인] 유지 — ${listAlertState.time}에 따로 보냅니다\n[취소] 해제 — 발송하지 않는 시간이 끝난 뒤 리포트에 같이 보냅니다`
+        )
+      : true;
     await apiCall("/api/settings/report", {
       method: "POST",
-      body: JSON.stringify({ quiet_hours: readQuietRows(), batch_minutes: Number(document.getElementById("report-batch-minutes").value) }),
+      body: JSON.stringify({ quiet_hours: quietRows, batch_minutes: Number(document.getElementById("report-batch-minutes").value) }),
     });
+    if (needsListAlertChoice && !keepListAlertTime) await apiCall("/api/settings/list-alert", { method: "POST", body: JSON.stringify({ time: null }) });
+    await loadListAlertSetting(); // 발송하지 않는 시간이 바뀌었으니 시각 입력칸/안내를 다시 정한다
     resultEl.style.color = "";
     resultEl.textContent = "저장했습니다.";
   } catch (e) {

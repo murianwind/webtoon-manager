@@ -9,13 +9,13 @@ from datetime import datetime, timedelta, timezone
 
 import aiohttp
 
-from app import discord_config, report_dispatch, report_seen, repository, viewer_scan
+from app import discord_config, list_alert, report_dispatch, report_seen, repository, viewer_scan
 
 
 from app.config import get_settings
 
 
-from app.scheduler.report_job import _SETTING_KEY_REPORT_LAST_SENT_AT, _report_job_lock, send_batch_report
+from app.scheduler.report_job import _SETTING_KEY_REPORT_LAST_SENT_AT, _report_job_lock, send_batch_report, send_list_alert
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +49,17 @@ async def run_report_tick(now: datetime | None = None) -> None:
     async with _report_tick_lock:
         scan = _TickScan()
         await _report_step(now, scan)
+        await _list_alert_step(now)
         await _advance_scan(now, scan)  # 리포트와 상관없이 요청된 스캔(아카이빙 등)이나 진행 중인 스캔 확인
+
+
+async def _list_alert_step(now: datetime) -> None:
+    """웹툰 전체목록 알림(신규 웹툰 + 새 에피소드)을 단독으로 보낼 때가 됐으면 보낸다 — 정해진 발송 시각이거나, 발송하지 않는 시간이 끝난 뒤 30분 안에 다운로드 리포트가
+    안 나간 경우(그 사이 리포트가 나갔으면 거기 얹혔으므로 오늘은 이미 끝난 것이다). 하루 한 번(list_alert)."""
+    if not list_alert.standalone_due(now):
+        return
+    async with _report_job_lock:
+        await send_list_alert(now)
 
 
 async def _report_step(now: datetime, scan: _TickScan) -> None:

@@ -9,15 +9,15 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 
-from app import discord_notify, job_status, report_dispatch, report_seen, repository, webtoon_server_client
+from app import discord_notify, job_status, list_alert, report_dispatch, report_seen, repository, webtoon_server_client
 
 
 from app.config import get_settings
 
 
 from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
-from app.scheduler.report_message import build_report_message
-from app.scheduler.report_sections import collect_new_episode_sections
+from app.scheduler.report_message import build_list_alert_message, build_report_message
+from app.scheduler.report_sections import collect_new_episode_sections, collect_new_title_section
 
 log = logging.getLogger(__name__)
 
@@ -42,10 +42,38 @@ async def run_test_report() -> None:
         await _run_report(test=True)
 
 
-async def send_batch_report(until: str) -> None:
+async def send_batch_report(until: str, now: datetime | None = None) -> None:
     """자동 발송 — 1분 확인(report_tick)이 묶음을 확정하고 부른다(그쪽에서 _report_job_lock을 잡고 있다). until: 이번 묶음의 끝 — 지난 발송 기준 시각부터 이 시각까지의 이력만 담고,
-    보낸 뒤(또는 보낼 것이 없을 때) 발송 기준 시각도 이 값으로 둔다. 받은 이력이 있을 때만 보내고(새 에피소드 요약은 이력과 함께만 나간다), 같은 회차는 한 번만 알린다."""
-    await _run_report(test=False, until=until)
+    보낸 뒤(또는 보낼 것이 없을 때) 발송 기준 시각도 이 값으로 둔다. 받은 이력이 있을 때만 보낸다. 웹툰 전체목록 알림(신규 웹툰 + 새 에피소드)은 하루 한 번,
+    list_alert.should_attach가 허락하는 리포트에만 얹힌다(발송하지 않는 시간이 끝난 뒤 처음 나가는 리포트). now: 지금 시각(테스트에서 바꿀 수 있게)."""
+    await _run_report(test=False, until=until, now=now)
+
+
+async def send_list_alert(now: datetime | None = None) -> None:
+    """웹툰 전체목록 알림(신규 웹툰 + 새 에피소드)만 따로 보낸다 — 정해진 발송 시각이나, 발송하지 않는 시간이 끝난 뒤 30분 안에 다운로드 리포트가 안 나갔을 때(report_tick이 부른다,
+    그쪽에서 _report_job_lock을 잡고 있다). 보낼 것이 없으면 아무것도 안 보내고 그날은 확인한 것으로 친다. 전송이 실패하면 그날 안에 다시 시도한다(list_alert.RETRY_MINUTES 뒤)."""
+    now = now or datetime.now(timezone.utc)
+    settings = get_settings()
+    job_status.start("report")
+    try:
+        async with aiohttp.ClientSession() as session:
+            naver_new, kakao_new = await collect_new_title_section(session, settings, force_test=False)
+            naver_eps, kakao_eps = await collect_new_episode_sections(session, settings, force_test=False)
+            message = build_list_alert_message(naver_new, kakao_new, naver_eps, kakao_eps, repository.get_setting("app_public_base_url") or "")
+            if not message:
+                job_status.log_line("report", "웹툰 전체목록 알림: 알릴 신규 웹툰/새 에피소드가 없습니다")
+            else:
+                await discord_notify.send_webhook_notification(session, message)
+                report_seen.remember(naver_eps, kakao_eps)
+                report_seen.remember_new(naver_new, kakao_new)
+                job_status.log_line("report", f"웹툰 전체목록 알림 발송 완료 (신규 웹툰 {len(naver_new) + len(kakao_new)}개, 새 에피소드 {len(naver_eps) + len(kakao_eps)}개)")
+        list_alert.mark_done(now)
+        job_status.finish("report", success=True)
+    except Exception as e:
+        log.error("웹툰 전체목록 알림 발송 중 예외: %s", e)
+        list_alert.note_failure(now)
+        job_status.log_line("report", f"오류: {e}")
+        job_status.finish("report", success=False)
 
 
 def _kst_day_range_utc(day) -> tuple[str, str]:
@@ -90,40 +118,54 @@ async def _resolve_reader_urls(session: aiohttp.ClientSession, settings, success
     return urls
 
 
-async def _send_message(session: aiohttp.ClientSession, settings, rows: list[dict], unregistered_new_episodes: list, kakao_new_episodes: list, used_fallback: bool) -> None:
+async def _send_message(
+    session: aiohttp.ClientSession, settings, rows: list[dict], unregistered_new_episodes: list, kakao_new_episodes: list, used_fallback: bool,
+    new_titles: list, kakao_new_titles: list,
+) -> None:
     """리포트 메시지를 만들어(받은 작품의 뷰어 링크 포함) 디스코드로 보낸다. 실패하면 예외가 그대로 올라간다."""
     success_rows = [r for r in rows if r["status"] == "success"]
     failed_rows = [r for r in rows if r["status"] == "failed"]
     reader_urls = await _resolve_reader_urls(session, settings, success_rows)
     message = build_report_message(
-        success_rows, failed_rows, reader_urls, unregistered_new_episodes, repository.get_setting("app_public_base_url") or "", kakao_new_episodes
+        success_rows, failed_rows, reader_urls, unregistered_new_episodes, repository.get_setting("app_public_base_url") or "", kakao_new_episodes,
+        new_titles=new_titles, kakao_new_titles=kakao_new_titles,
     )
     if used_fallback:
         message = "🧪 **[테스트 발송 — 오늘 기록 없어 어제 기록으로 대체됨]**\n" + message
     await discord_notify.send_webhook_notification(session, message)
 
 
-async def _run_report(*, test: bool, until: str | None = None) -> None:
+async def _run_report(*, test: bool, until: str | None = None, now: datetime | None = None) -> None:
     """리포트 한 통을 만들어 보낸다(test: 테스트 발송, 아니면 until까지의 묶음 발송)."""
+    now = now or datetime.now(timezone.utc)
     settings = get_settings()
     job_status.start("report")
     rows, used_fallback = _select_report_rows(test, until)
+    attach_list_alert = test or list_alert.should_attach(now)  # 웹툰 전체목록 알림은 테스트 발송이거나 오늘 얹을 차례인 리포트에만
+
     try:
         async with aiohttp.ClientSession() as session:
-            unregistered_new_episodes, kakao_new_episodes = await collect_new_episode_sections(session, settings, force_test=test)
-            # 자동 발송은 받은 이력이 있을 때만 보낸다(새 에피소드 요약은 이력과 함께만). 테스트 발송은 요약만 있어도 보낸다.
-            if not rows and (not test or (not unregistered_new_episodes and not kakao_new_episodes)):
+            naver_new, kakao_new, unregistered_new_episodes, kakao_new_episodes = [], [], [], []
+            if attach_list_alert:
+                naver_new, kakao_new = await collect_new_title_section(session, settings, force_test=test)
+                unregistered_new_episodes, kakao_new_episodes = await collect_new_episode_sections(session, settings, force_test=test)
+            # 자동 발송은 받은 이력이 있을 때만 보낸다(웹툰 전체목록 알림은 이력과 함께만). 테스트 발송은 알림만 있어도 보낸다.
+            has_list_alert = bool(naver_new or kakao_new or unregistered_new_episodes or kakao_new_episodes)
+            if not rows and (not test or not has_list_alert):
                 job_status.log_line("report", "발송할 내용 없음 (다운로드 기록도, 새 에피소드도 없음)")
                 if not test:
                     repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, until)
                 job_status.finish("report", success=True)
                 return
 
-            await _send_message(session, settings, rows, unregistered_new_episodes, kakao_new_episodes, used_fallback)
+            await _send_message(session, settings, rows, unregistered_new_episodes, kakao_new_episodes, used_fallback, naver_new, kakao_new)
             if not test:
                 # 전송이 성공한 뒤에만 기록(실패하면 다음에 다시 시도)
                 report_seen.remember(unregistered_new_episodes, kakao_new_episodes)
+                report_seen.remember_new(naver_new, kakao_new)
                 report_seen.remember_rows(rows)
+                if attach_list_alert:
+                    list_alert.mark_done(now)  # 얹을 차례였으면(알릴 것이 없었어도) 오늘은 확인한 것
 
         if not test:
             repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, until)

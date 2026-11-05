@@ -3,6 +3,7 @@
 
 import asyncio
 import logging
+import re
 
 
 import aiohttp
@@ -28,6 +29,22 @@ _UNREGISTERED_NEW_EPISODE_LIMIT = 20  # 미등록 신규 에피소드는 네이�
 # 에서 REPORT_LIST_LIMIT로 별도로 줄인다(둘을 분리해야 "후보에서 누락"과 "메시지에서
 # 생략 표시하며 자름"이 다른 문제라는 게 명확해진다).
 _KAKAO_NEW_EPISODE_CANDIDATE_LIMIT = 150
+_NEW_TITLE_LIMIT = 50  # 한 번에 알리는 신규 웹툰 수(신작은 하루에 많아야 몇 개라 넉넉하다)
+_AUTHOR_SPLIT_RE = re.compile(r"[,/·]")
+
+
+def _registered_author_names(platform: str) -> set[str]:
+    """등록해서 사용 중인(켜 둔) 작가의 이름 — 이 작가의 신작은 작가 알림이 따로 알려서 신규 웹툰 알림에서는 뺀다."""
+    return {author.author_name for author in repository.list_watched_authors(platform) if author.enabled and author.author_name}
+
+
+def _by_registered_author(names: list[str], registered: set[str]) -> bool:
+    return any(name.strip() in registered for name in names)
+
+
+def _is_new_not_yet_announced(platform: str, title_id, is_new: bool) -> bool:
+    """사이트의 신작 표시가 있는데 아직 신규 웹툰으로 알리지 않은 작품 — 새 에피소드가 아니라 신규 웹툰 섹션이 맡는다."""
+    return is_new and not report_seen.is_new_announced(platform, title_id)
 
 
 def _log_unchecked_adult(platform_label: str, titles: list[str], how_to_fix: str) -> None:
@@ -60,7 +77,11 @@ async def collect_unregistered_new_episodes(
         return record is None or record.status == repository.STATUS_UNREGISTERED
 
     hidden = await daily_plus.current_ids(settings.request_timeout_seconds, session)  # 매일+ 작품은 화면에서 숨기므로 알리지도 않는다(목록을 모르면 거르지 않음)
-    candidates = [item for item in items if item.has_update and item.title_id not in hidden and _not_subscribed_in_list(item.title_id)]
+    candidates = [
+        item for item in items
+        if item.has_update and item.title_id not in hidden and _not_subscribed_in_list(item.title_id)
+        and not _is_new_not_yet_announced("naver", item.title_id, item.is_new)  # 신규로 알리기 전의 신작은 신규 웹툰 섹션이 맡는다
+    ]
     candidates = candidates[:_UNREGISTERED_NEW_EPISODE_LIMIT]
     if not candidates:
         return []
@@ -115,7 +136,11 @@ async def collect_kakao_new_episodes(
         | {wt["title_id"] for wt in repository.list_kakao_webtoons_by_status(repository.STATUS_UNSUBSCRIBED)}
         | {wt["title_id"] for wt in repository.list_kakao_webtoons_by_status(repository.STATUS_ACTIVE)}
     )
-    candidates = [item for item in items if item["has_update"] and item["title_id"] not in skipped_ids]
+    candidates = [
+        item for item in items
+        if item["has_update"] and item["title_id"] not in skipped_ids
+        and not _is_new_not_yet_announced("kakao", item["title_id"], item["is_new"])
+    ]
     candidates = candidates[:_KAKAO_NEW_EPISODE_CANDIDATE_LIMIT]
     if not candidates:
         return []
@@ -166,3 +191,56 @@ async def collect_new_episode_sections(session: aiohttp.ClientSession, settings,
     if not force_test:
         naver_items, kakao_items = report_seen.filter_unseen(naver_items, kakao_items)
     return naver_items, kakao_items
+
+
+async def collect_naver_new_titles(session: aiohttp.ClientSession, settings) -> list[report_seen.NewNaver]:
+    """네이버 "웹툰 전체목록"의 신작(신규 표시) 중 미구독(기록이 없거나 "목록" 상태)·매일+ 아님·등록한 작가의 작품이 아닌 것 — (title_id, title_name). 알린 적 없는지는 호출하는 쪽에서 거른다.
+    실패해도 리포트는 계속 보내야 해서 목록을 못 받으면 빈 목록이다."""
+    try:
+        items = await naver_api.fetch_full_webtoon_list(session, settings.request_timeout_seconds)
+    except Exception as e:
+        log.error("신규 웹툰 확인 중 목록 조회 실패(무시하고 계속): %s", e)
+        return []
+    hidden = await daily_plus.current_ids(settings.request_timeout_seconds, session)
+    registered = _registered_author_names("naver")
+
+    def _not_subscribed_in_list(title_id: str) -> bool:
+        record = repository.get(title_id)
+        return record is None or record.status == repository.STATUS_UNREGISTERED
+
+    return [
+        (item.title_id, item.title_name) for item in items
+        if item.is_new and item.title_id not in hidden and _not_subscribed_in_list(item.title_id)
+        and not _by_registered_author(_AUTHOR_SPLIT_RE.split(item.author_summary or ""), registered)
+    ][:_NEW_TITLE_LIMIT]
+
+
+async def collect_kakao_new_titles(session: aiohttp.ClientSession, settings) -> list[report_seen.NewKakao]:
+    """카카오페이지 전체목록의 신작 중 구독 중/구독해제/제외됨이 아니고 등록한 작가의 작품이 아닌 것 — (title_id, title_name)."""
+    try:
+        items = await kakao_api.fetch_weekday_catalog(session, settings.request_timeout_seconds, use_cache=False)
+    except Exception as e:
+        log.error("카카오 신규 웹툰 확인 중 목록 조회 실패(무시하고 계속): %s", e)
+        return []
+    skipped_ids = (
+        repository.get_kakao_excluded_title_ids()
+        | {wt["title_id"] for wt in repository.list_kakao_webtoons_by_status(repository.STATUS_UNSUBSCRIBED)}
+        | {wt["title_id"] for wt in repository.list_kakao_webtoons_by_status(repository.STATUS_ACTIVE)}
+    )
+    registered = _registered_author_names("kakao")
+    return [
+        (item["title_id"], item["title_name"]) for item in items
+        if item["is_new"] and item["title_id"] not in skipped_ids and not _by_registered_author(item["author_names"], registered)
+    ][:_NEW_TITLE_LIMIT]
+
+
+async def collect_new_title_section(session: aiohttp.ClientSession, settings, *, force_test: bool) -> tuple[list[report_seen.NewNaver], list[report_seen.NewKakao]]:
+    """신규 웹툰 섹션(네이버, 카카오 순). 일반 발송에서는 이미 신규로 알린 작품을 뺀다 — 테스트 발송은 전부 보여준다."""
+    enabled = repository.get_setting("report_unregistered_new_episodes_enabled") != "0"
+    kakao_enabled = repository.get_setting("kakao_webtoons_enabled") == "1"
+    naver_items = await collect_naver_new_titles(session, settings) if enabled else []
+    kakao_items = await collect_kakao_new_titles(session, settings) if enabled and kakao_enabled else []
+    if not force_test:
+        naver_items, kakao_items = report_seen.filter_unannounced_new(naver_items, kakao_items)
+    return naver_items, kakao_items
+

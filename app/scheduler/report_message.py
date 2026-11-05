@@ -15,6 +15,8 @@ from app.constants import NAVER_DETAIL_URL_TEMPLATES
 log = logging.getLogger(__name__)
 
 REPORT_LIST_LIMIT = 40  # 디스코드 메시지 길이 제한 대비, 항목이 너무 많으면 일부만 나열
+NAVER_TITLE_PAGE_URL = "https://comic.naver.com/webtoon/list?titleId="  # 신규 웹툰의 "정보 보기"
+KAKAO_TITLE_PAGE_URL = "https://page.kakao.com/content/"
 
 
 def _platform_label(platform: str) -> str:
@@ -78,13 +80,47 @@ def _new_episode_lines(
     return lines
 
 
+def _new_title_lines(
+    new_titles: list[tuple[str, str]] | None, kakao_new_titles: list[tuple[int, str]] | None, app_public_base_url: str,
+) -> list[str]:
+    """신규 웹툰 한 줄씩(네이버, 카카오 순) — 웹툰명 옆에 "정보 보기"(작품 페이지)와 "목록 제외" 링크(앱 주소가 있을 때). 디스코드 웹훅은 버튼을 못 만들어서 링크로 보여 준다."""
+    lines = []
+    for title_id, title in new_titles or []:
+        line = f"• [네이버] {title} · [정보 보기](<{NAVER_TITLE_PAGE_URL}{title_id}>)"
+        if app_public_base_url:
+            line += f" · [목록 제외](<{app_public_base_url}/api/webtoons/{title_id}/exclude-confirm?title={quote(title)}>)"
+        lines.append(line)
+    for title_id, title in kakao_new_titles or []:
+        line = f"• [카카오] {title} · [정보 보기](<{KAKAO_TITLE_PAGE_URL}{title_id}>)"
+        if app_public_base_url:
+            line += f" · [목록 제외](<{app_public_base_url}/api/kakao-webtoons/{title_id}/exclude-confirm?title={quote(title)}>)"
+        lines.append(line)
+    return lines
+
+
+def _list_alert_sections(
+    new_titles, kakao_new_titles, unregistered_new_episodes, kakao_new_episodes, app_public_base_url: str,
+) -> list[str]:
+    """웹툰 전체목록 알림의 섹션들(신규 웹툰 → 새 에피소드) — 비어 있는 섹션은 뺀다. 다운로드 리포트에 얹을 때와 단독 알림이 같이 쓴다."""
+    parts: list[str] = []
+    title_lines = _new_title_lines(new_titles, kakao_new_titles, app_public_base_url)
+    if title_lines:
+        parts.extend(["", f"🆕 웹툰 전체목록 중 신규 웹툰 ({len(title_lines)}):", *_limited(title_lines)])
+    episode_lines = _new_episode_lines(unregistered_new_episodes, kakao_new_episodes, app_public_base_url)
+    if episode_lines:
+        parts.extend(["", f"🆕 웹툰 전체목록 중 새 에피소드 ({len(episode_lines)}):", *_limited(episode_lines)])
+    return parts
+
+
 def build_report_message(
     success_rows: list[dict], failed_rows: list[dict], reader_urls: dict[str, str],
     unregistered_new_episodes: list[tuple[str, str, int]] | None = None,
     app_public_base_url: str = "",
     kakao_new_episodes: list[tuple[int, str, str]] | None = None,
+    new_titles: list[tuple[str, str]] | None = None,
+    kakao_new_titles: list[tuple[int, str]] | None = None,
 ) -> str:
-    """예전 hermes webtoon_checker.py의 메시지 구조(다운로드됨/실패)를 그대로 따른다: 제목 줄 → 받은 작품 → (있으면) 실패 → (있으면) 새 에피소드.
+    """예전 hermes webtoon_checker.py의 메시지 구조(다운로드됨/실패)를 그대로 따른다: 제목 줄 → 받은 작품 → (있으면) 실패 → (있으면) 신규 웹툰 → (있으면) 새 에피소드.
     모든 링크는 <...>로 감싸서 디스코드가 미리보기(임베드)를 안 만들게 한다 — 링크가 여러 개 나열될 때 임베드가 줄줄이 생겨서 메시지가 너무 길어지는 문제가 있었다.
     카카오페이지 이력이 섞여 있으면 어느 플랫폼인지 앞에 붙인다(네이버만 있을 땐 예전 형식 그대로)."""
     today_label = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
@@ -98,8 +134,17 @@ def build_report_message(
     if failed_titles:
         parts.extend(["", f"❌ 실패한 작품 ({len(failed_titles)}):", *_limited(failed_titles)])
 
-    new_lines = _new_episode_lines(unregistered_new_episodes, kakao_new_episodes, app_public_base_url)
-    if new_lines:
-        parts.extend(["", f"🆕 웹툰 전체목록 중 새 에피소드 ({len(new_lines)}):", *_limited(new_lines)])
-
+    parts.extend(_list_alert_sections(new_titles, kakao_new_titles, unregistered_new_episodes, kakao_new_episodes, app_public_base_url))
     return "\n".join(parts)
+
+
+def build_list_alert_message(
+    new_titles: list[tuple[str, str]], kakao_new_titles: list[tuple[int, str]],
+    unregistered_new_episodes: list[tuple[str, str, int]], kakao_new_episodes: list[tuple[int, str, str]], app_public_base_url: str,
+) -> str:
+    """웹툰 전체목록 알림만 따로 보낼 때의 메시지(다운로드 이력 없이 신규 웹툰 + 새 에피소드). 보낼 섹션이 하나도 없으면 빈 문자열 — 호출하는 쪽이 보내지 않는다."""
+    sections = _list_alert_sections(new_titles, kakao_new_titles, unregistered_new_episodes, kakao_new_episodes, app_public_base_url)
+    if not sections:
+        return ""
+    today_label = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
+    return "\n".join([f"🔔 웹툰 전체목록 알림 ({today_label})", *sections])
