@@ -17,6 +17,7 @@ import aiohttp
 
 from app import daily_plus, kakao_catalog, kakao_page_download, kakao_status, naver_api, repository, tracker, weekday_lookup, weekdays
 from app.config import Settings
+from app.kakao_filters import is_excluded_title
 from app.models import TitlePage
 
 log = logging.getLogger(__name__)
@@ -100,7 +101,7 @@ def _kakao_targets(order: list[str], max_age: float, now: float) -> tuple[list[T
     skipped = 0
     for row in repository.get_kakao_webtoons_map().values():
         series_id = row["title_id"]
-        if row["is_finished"] or series_id in listed or series_id in hidden:
+        if row["is_finished"] or series_id in listed or series_id in hidden or is_excluded_title(row["title"]):  # 제목에 "단행본"이 있는 작품은 확인하지 않는다
             continue
         entry = lookups.get(str(series_id))
         if entry is not None:

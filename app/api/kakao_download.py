@@ -17,6 +17,7 @@ from app import (
 from app import kakao_api, kakao_records
 from app import kakao_page_auth
 from app import kakao_page_download
+from app.kakao_filters import EXCLUDED_MESSAGE, is_excluded_title
 from app.api.common import metadata_zip_response
 from app.config import get_settings
 from app.file_utils import remove_forbidden_str_kakao
@@ -211,6 +212,8 @@ async def kakao_manual_analyze(series_id: int):
     if listing is None:
         raise HTTPException(status_code=502, detail="카카오페이지에서 회차 목록을 가져오지 못했습니다. 작품 번호를 확인하거나 잠시 뒤 다시 시도해주세요.")
     series_item, episodes = listing
+    if is_excluded_title(series_item.get("title")):  # 제목에 "단행본"이 있는 작품은 분석 결과를 보여 주지 않는다
+        raise HTTPException(status_code=404, detail=EXCLUDED_MESSAGE)
     supported = kakao_page_download.waitfree_supported(series_item)
     waitfree_ready = supported and bool(tickets and tickets.waitfree_ready)  # 기다무가 없는 작품이면 이용권 응답이 "사용 가능"이어도 쓸 수 없다
     rental_ready = bool(tickets and tickets.rental_count > 0)  # 보유 대여권이 있어야 "대여권" 상태로 고를 수 있다

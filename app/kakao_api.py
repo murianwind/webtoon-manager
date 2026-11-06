@@ -21,6 +21,7 @@ import time
 import aiohttp
 
 from app.file_utils import title_key
+from app.kakao_filters import is_excluded_title
 
 log = logging.getLogger(__name__)
 
@@ -143,7 +144,7 @@ def image_url(kid: str, filename: str = IMAGE_FILENAME_ORIGINAL) -> str:
 
 def _card_to_item(card: dict) -> dict | None:
     series_id = card.get("series_id")
-    if series_id is None or card.get("category_uid") != WEBTOON_CATEGORY_UID:
+    if series_id is None or card.get("category_uid") != WEBTOON_CATEGORY_UID or is_excluded_title(card.get("title")):  # 제목에 "단행본"이 있으면 처음부터 뺀다(kakao_filters)
         return None
     badge = card.get("badge")
     return {
@@ -328,7 +329,7 @@ async def search_by_author(
             "is_finished": c.get("on_issue") == _ON_ISSUE_FINISHED,
         }
         for c in cards
-        if author_name in _split_author_names(c.get("authors"))
+        if author_name in _split_author_names(c.get("authors")) and not is_excluded_title(c.get("title"))
     ]
 
 
@@ -362,7 +363,7 @@ async def search_series_by_titles(
                     found.append(item)
                     matched = True
         if not matched:
-            candidates[title] = [{"title_id": c["series_id"], "title_name": c.get("title", "")} for c in cards[:3]]
+            candidates[title] = [{"title_id": c["series_id"], "title_name": c.get("title", "")} for c in cards if not is_excluded_title(c.get("title"))][:3]
     return found, candidates
 
 

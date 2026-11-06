@@ -14,6 +14,7 @@ import aiohttp
 from app import daily_plus, discord_notify, job_status, kakao_page_download, naver_api, repository
 from app.config import Settings
 from app.cookie_loader import get_adult_cookies
+from app.kakao_filters import is_excluded_title
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +74,8 @@ async def scan_kakao(client: kakao_page_download.KakaoPageClient, settings: Sett
     """구독해제 카카오 웹툰마다 작품 정보의 회차 수를 확인한다(작품마다 요청 한 번, 사이에 딜레이)."""
     items: list[NewEpisode] = []
     for row in repository.list_kakao_webtoons_by_status(repository.STATUS_UNSUBSCRIBED):
+        if is_excluded_title(row["title"]):  # 제목에 "단행본"이 있는 작품은 확인하지 않는다(kakao_filters)
+            continue
         series_id = row["title_id"]
         try:
             series_item = await client.fetch_series_item(series_id)

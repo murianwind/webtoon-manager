@@ -24,6 +24,7 @@ from app import archiver
 from app.config import get_settings
 
 from app import kakao_authors
+from app.kakao_filters import EXCLUDED_MESSAGE, is_excluded_title
 from app.api.common import (
     _is_author_auto_register_enabled,
     _render_exclude_confirm_html,
@@ -140,7 +141,7 @@ async def browse_kakao_list(refresh: bool = False):
     # 요일별 목록엔 지금 연재 중인 것만 나오므로, 장기 휴재 등으로 거기서 빠진 구독 이력 있는 작품은 DB 기록으로
     # 보완해서 계속 보여준다(제외됨은 계속 숨김). 카탈로그가 아직 비어 있는 첫 실행 중에는 이 보완이 목록 전체가 된다.
     for wt in tracked_map.values():
-        if wt["title_id"] in seen_ids or wt["status"] not in (
+        if wt["title_id"] in seen_ids or is_excluded_title(wt["title"]) or wt["status"] not in (
             repository.STATUS_ACTIVE, repository.STATUS_UNSUBSCRIBED, repository.STATUS_UNREGISTERED,
         ):
             continue
@@ -170,6 +171,7 @@ async def list_kakao_webtoons(status: str | None = None):
     ):
         raise HTTPException(status_code=400, detail="status는 active/unsubscribed/excluded 중 하나여야 합니다.")
     rows = await asyncio.to_thread(repository.list_kakao_webtoons_by_status, status) if status else []
+    rows = [r for r in rows if not is_excluded_title(r["title"])]  # 제목에 "단행본"이 있는 작품은 어느 탭에도 나오지 않는다(예전에 등록/제외한 기록이 남아 있어도)
     if status == repository.STATUS_UNSUBSCRIBED:
         # webtoons와 동일한 규칙 — 구독한 적 없는 건 "구독해제" 탭에 안 보인다.
         rows = [r for r in rows if r["ever_subscribed"]]
@@ -230,6 +232,8 @@ async def _kakao_about(series_id: int) -> dict | None:
 @router.post("/kakao-webtoons/{title_id}/subscribe", response_model=KakaoWebtoonOut)
 async def subscribe_kakao_webtoon(title_id: int, payload: KakaoWebtoonEntryIn):
     """구독 — 자동 다운로드 대상이 된다(네이버와 같고 뷰어 서버 설정과는 무관). 작품 정보를 받아 작가를 관심 작가로 등록하고, 결과를 실행 이력에 남긴다."""
+    if is_excluded_title(payload.title):
+        raise HTTPException(status_code=400, detail=EXCLUDED_MESSAGE)
     if not await asyncio.to_thread(repository.kakao_webtoon_exists, title_id):
         await asyncio.to_thread(
             repository.upsert_new_kakao_webtoon, title_id, payload.title, payload.thumbnail_url,

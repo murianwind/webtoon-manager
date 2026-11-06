@@ -23,11 +23,12 @@ def item(order, title=None, **k):
 class Site:
     """가짜 카카오페이지. rental=보유 대여권 수, waitfree=기다무 충전 여부, series_waitfree=작품에 기다무가 있는지,
     ticket_type=서버가 알려 주는 사용 가능 이용권, lose_response=응답이 유실되는 회차(서버는 처리함), fail_use=사용이 거절되는 회차, no_image=이미지가 안 오는 회차."""
-    def __init__(self, items, rental=3, waitfree=False, series_waitfree=True, ticket_type="RT01", lose_response=(), fail_use=(), lose_without_effect=(), no_image=(), ticket_my_fail=False, ticket_period=1440, series_period=0, on_issue="Y"):
+    def __init__(self, items, rental=3, waitfree=False, series_waitfree=True, ticket_type="RT01", lose_response=(), fail_use=(), lose_without_effect=(), no_image=(), ticket_my_fail=False, ticket_period=1440, series_period=0, on_issue="Y", series_title="작품"):
         self.items, self.rental, self.waitfree, self.series_waitfree, self.ticket_type = items, rental, waitfree, series_waitfree, ticket_type
         self.lose_response, self.fail_use, self.lose_without_effect, self.no_image = set(lose_response), set(fail_use), set(lose_without_effect), set(no_image)
         self.ticket_my_fail = ticket_my_fail   # 이용권 조회가 실패하는 경우(로그아웃/서버 오류)
         self.on_issue = on_issue   # 연재 상태(Y 연재/N 완결)
+        self.series_title = series_title   # 작품 제목(기본 "작품")
         self.ticket_period, self.series_period = ticket_period, series_period   # 기다무 충전 주기(분): 이용권 응답의 값 / 작품 정보의 값(0이면 필드 값이 0)
         self.posts, self.gets, self.opened = [], [], set()
     def _item(self, pid): return next(e["item"] for e in self.items if e["item"]["product_id"] == pid)
@@ -39,7 +40,7 @@ class Site:
                 e = json.loads(json.dumps(e))
                 if e["item"]["product_id"] in self.opened: e["item"]["service_property"] = {"purchase_info": {"purchase_type": "rent", "rent_expire_dt": "2099-01-01 00:00:00"}}
                 L.append(e)
-            return R(data={"result": {"series_item": {"id": 1, "is_waitfree": self.series_waitfree, "title": "작품", "authors": "가", "on_issue": self.on_issue, "sub_category": "액션", "age_grade": 0, "description": "d", "waitfree_period_by_minute": self.series_period},
+            return R(data={"result": {"series_item": {"id": 1, "is_waitfree": self.series_waitfree, "title": self.series_title, "authors": "가", "on_issue": self.on_issue, "sub_category": "액션", "age_grade": 0, "description": "d", "waitfree_period_by_minute": self.series_period},
                                       "list": L, "has_next": False}})
         if url.endswith("/ticket/my"):
             if self.ticket_my_fail: return R(status=500)

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from app import comicinfo, kakao_cover, kakao_records, repository, waitfree_sync
 from app.kakao_authors import split_authors
+from app.kakao_filters import EXCLUDED_MESSAGE, is_excluded_title
 from app.metadata_zip import COVER_MISSING, MetadataBundle
 
 from app.kakao_page_download.client import (
@@ -159,6 +160,8 @@ async def run_download(
     if listing is None:
         return RunResult([], [], None, DownloadPlan(mode="new_folder"), "회차 목록을 가져오지 못했습니다.")
     series_item, episodes = listing
+    if is_excluded_title(series_item.get("title")):  # 제목에 "단행본"이 있는 작품은 받지 않는다(kakao_filters)
+        return RunResult([], [], None, DownloadPlan(mode="new_folder"), EXCLUDED_MESSAGE)
     folder_title = title or series_item.get("title") or str(series_id)
     folder = series_folder(download_root, folder_title)
     plan = _plan_for_run(series_id, series_item, episodes, scan_existing_files(folder))
@@ -338,6 +341,9 @@ async def download_selected(
         result.not_found = sorted(set(numbers))
         return result
     series_item, episodes = listing
+    if is_excluded_title(series_item.get("title")):  # 제목에 "단행본"이 있는 작품은 받지 않는다(kakao_filters)
+        result.not_found = sorted(set(numbers))
+        return result
     result.title = title or series_item.get("title") or str(series_id)
     folder = series_folder(download_root, result.title)
     plan = plan_by_folder_rules(

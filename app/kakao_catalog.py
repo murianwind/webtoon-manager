@@ -25,6 +25,7 @@ import aiohttp
 from app import kakao_api, repository
 from app.config import get_settings
 from app.file_utils import title_key
+from app.kakao_filters import is_excluded_title
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +58,8 @@ def _load_persisted() -> None:
 def snapshot() -> tuple[list[dict], float | None]:
     """(목록, 받은 시각(에폭 초)) — 캐시에 있는 그대로. 네트워크는 부르지 않는다. 캐시가 없으면 ([], None)."""
     _load_persisted()
-    return list(_state["items"] or []), _state["fetched_at"]
+    # 예전에 받아 디스크에 남은 캐시에 제목에 "단행본"이 있는 작품이 들어 있을 수 있어서 읽을 때도 뺀다(kakao_filters)
+    return [item for item in (_state["items"] or []) if not is_excluded_title(item.get("title_name"))], _state["fetched_at"]
 
 
 def is_refreshing() -> bool:
