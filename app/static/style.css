@@ -809,6 +809,14 @@ select {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: pointer; /* 잘리면 눌러서 펼친다(15-expand-text.js) */
+}
+/* 잘려서(…) 보이는 글자를 눌러서 펼친 모양(15-expand-text.js) — 줄바꿈되고, 공백 없는 긴 문자열(경로, 파일 이름)도 화면 폭에 맞게 꺾인다 */
+.text-expanded {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  overflow-wrap: anywhere;
 }
 .job-history-delete-btn {
   font-size: 11px;

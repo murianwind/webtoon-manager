@@ -406,3 +406,9 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - **소스를 보는 가드**: `test_report_tests_isolated.py`(리포트를 보내 보는 테스트는 신규 웹툰 수집을 가짜로), `test_tests_isolated_from_network.py`(아카이빙 작업을 돌리는 테스트는 `check_and_update`를 가짜로).
 - **외부 접속 시도를 찾는 법**: 프로젝트 루트에 외부 호스트 조회를 파일에 기록하는 `sitecustomize.py`를 임시로 두고 `python tests/run_backend.py`를 돌리면 어느 테스트가 어느 호스트로 나가려 했는지 나온다(찾은 뒤 지운다 — 루트의 `sitecustomize.py`는 커밋하지 않는다).
 
+## 잘려서(…) 안 보이는 글자 펼치기 (눌러서 펼쳐지지 않는 목록)
+
+- **문제**: `.job-history-summary .job-history-time`(다운로드 이력/아카이빙 이력/아카이빙 대상의 가운데 칸)과 카카오 분석 표의 부제 칸(`#kakao-manual-table td:nth-child(3)`)은 `white-space: nowrap; overflow: hidden; text-overflow: ellipsis`라서 좁은 화면에서 내용이 "…"로 잘려도 볼 방법이 없었다(실행 이력은 항목을 누르면 로그가 펼쳐지는 별도 동작이 있어 그대로 둔다).
+- **방식**(`app/static/js/15-expand-text.js`): 문서 한 곳에서 클릭을 받아(위임 — 목록을 다시 그려도 항목마다 이벤트를 달 필요 없음) 위 선택자(`EXPANDABLE_TEXT_SELECTOR`)의 칸을 누르면 `.text-expanded`를 토글한다. **실제로 잘렸을 때만**(`scrollWidth > clientWidth + 1`) 펼치고, 이미 펼친 칸은 다시 누르면 접는다. 건드리지 않는 경우: 항목 안에 `.job-log`가 있는 눌러서 펼쳐지는 항목, 글자를 선택(`window.getSelection()`)하는 중. 새 칸을 대상으로 넣으려면 선택자에 추가하고 `test_expand_truncated_text.js`에 시나리오를 더한다(행 자체에 클릭 동작이 있는 곳은 충돌하지 않는지 먼저 확인).
+- **스타일**(`style.css`): `.text-expanded { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; overflow-wrap: anywhere; }`(공백 없는 긴 경로/파일 이름도 화면 폭에 맞게 꺾인다), 잘리는 칸은 `cursor: pointer`. jsdom은 레이아웃을 계산하지 않아서 테스트는 `scrollWidth/clientWidth`를 직접 정해 잘림을 흉내 내고, 스타일 규칙은 CSS 파일을 직접 읽어 확인한다(`tests/js/test_expand_truncated_text.js`, 변형 검사 12개 모두 잡음).
+
