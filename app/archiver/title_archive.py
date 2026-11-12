@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from app import kakao_cover, repository
+from app import kakao_cover, rclone_client, repository
 from app.archiver import cancel
 from app import kakao_records
 
@@ -35,6 +35,7 @@ from app.archiver.transfer import (
     _parse_rclone_target,
     _resolve_archive_dest_rclone,
     _title_folder,
+    purge_empty_zip_files_local,
     resolve_archive_dest,
 )
 
@@ -107,6 +108,23 @@ def _resolve_title_dest(dest_type: str, archive_root: str, rclone_config_path: s
         remote, rclone_dest_path = _parse_rclone_target(dest_target)
         return remote, rclone_dest_path, None
     return "", "", resolve_archive_dest(archive_root, title_name, base_path, force_subfolder=force_subfolder)
+
+
+def _purge_failed_leftovers(job: TitleArchiveJob, remote: str, rclone_dest_path: str, local_dest_dir: "Path | None", report: ProgressReport) -> None:
+    """이동을 시작하기 전에, 이 작품의 보관 폴더에 이전 이동이 실패하고 남은 0KB .zip 찌꺼기(예: OneDrive 업로드가 401로 실패하면 남는 빈 파일, 그래서 생긴 "(2)", "(3)")를 정리한다.
+    지우는 것은 크기가 정확히 0인 .zip뿐이다 — 크기가 있는 파일, 다른 종류의 파일, 로컬 원본은 건드리지 않는다. 목록을 못 읽으면 아무것도 안 지우고, 정리가 실패해도 이동은 계속한다."""
+    if cancel.is_requested():
+        return
+    try:
+        if job.dest_type == "rclone":
+            removed = rclone_client.purge_empty_zip_files(job.rclone_config_path, remote, rclone_dest_path)
+        else:
+            removed = purge_empty_zip_files_local(local_dest_dir)
+    except Exception as e:  # 정리는 덤이다 — 실패해도 이동을 막지 않는다
+        log.warning("[%s] 0KB 찌꺼기 정리 중 오류(무시하고 계속): %s", job.title_name, e)
+        return
+    if removed:
+        report.progress(f"[{job.title_name}] 이전 실패로 남은 0KB 파일 {len(removed)}개를 정리했습니다")
 
 
 def _move_title_files(files: list, dest: TitleDestination, report: ProgressReport) -> int:
@@ -191,6 +209,7 @@ def _archive_title(job: TitleArchiveJob, report: ProgressReport | None = None) -
         template=template, writer_names=job.writer_names or [], rclone_config_path=job.rclone_config_path,
         remote=remote, rclone_dest_path=rclone_dest_path, local_dest_dir=local_dest_dir,
     )
+    _purge_failed_leftovers(job, remote, rclone_dest_path, local_dest_dir, report)
     moved = _move_title_files(files, dest, report)
     if cancel.is_requested():
         return moved  # 중단했으면 정보 파일(info.xml 등)도 옮기지/복사하지 않는다

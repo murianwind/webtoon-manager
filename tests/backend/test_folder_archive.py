@@ -236,4 +236,37 @@ for n, data in (("info.xml", b'<ComicInfo><Web>https://page.kakao.com/content/99
 tmp4 = Path(tempfile.mkdtemp()) / "c.jpg"; tmp4.write_bytes(b"NEW4"); archiver.folder_archive._download_kakao_cover_to_temp_file = lambda sid: str(tmp4)
 moved, prog = bulk("rclone", "r:카카오T", "local", "일괄대상9b", regen=True); assert (A / "일괄대상9b" / "cover.jpg").read_bytes() == b"NEW4" and names(A / "일괄대상9b") == ["cover.jpg", "info.xml"] and not tmp4.exists()
 print("B8~B9) 일괄 표지 예외/임시 파일 OK")
+# 폴더 대상: 목적지의 0KB 파일(이전 업로드 실패의 찌꺼기)은 충돌이 아니다 — "이름 바꿔 저장"이어도 새 이름을 만들지 않고 그 이름으로 옮긴다(크기가 있는 파일은 예전처럼 충돌)
+fake.files.clear(); mk("원본F10", {"0001_1화.zip": "a", "0002_2화.zip": "b", "0003_3화.zip": "c"})
+fake.files[("r", "웹툰/대상F10/0001_1화.zip")] = b""; fake.files[("r", "웹툰/대상F10/0002_2화.zip")] = b"REAL"
+moved, prog, conf, fail = run(target("local", "원본F10", "rclone", "r:웹툰/대상F10"), policy="rename")
+assert remote("웹툰/대상F10") == ["웹툰/대상F10/0001_1화.zip", "웹툰/대상F10/0002_2화 (2).zip", "웹툰/대상F10/0002_2화.zip"], remote("웹툰/대상F10")
+assert fake.files[("r", "웹툰/대상F10/0001_1화.zip")] == b"a" and fake.files[("r", "웹툰/대상F10/0002_2화.zip")] == b"REAL" and len(conf) == 1 and conf[0][1] == "0002_2화.zip", (conf,)
+mk("원본F10L", {"0001_1화.zip": "a", "0002_2화.zip": "b", "0003_3화.zip": "c"}); mk("대상F10L", {"0001_1화.zip": b"", "0002_2화.zip": "REAL"})
+moved, prog, conf, fail = run(target("local", "원본F10L", "local", "대상F10L"), policy="rename")
+assert names(A / "대상F10L") == ["0001_1화.zip", "0002_2화 (2).zip", "0002_2화.zip"] and (A / "대상F10L" / "0001_1화.zip").read_bytes() == b"a" and len(conf) == 1, names(A / "대상F10L")
+print("F10) 폴더 대상 0KB 찌꺼기는 충돌 아님 OK")
+# 폴더 대상(로컬 → rclone): 올리기가 실패하면 원본은 그대로이고, 남은 0KB 찌꺼기는 지우며, 다음 실행은 같은 이름으로 올린다. 정리가 실패해도 원본은 그대로다
+fake.files.clear(); fake.deleted.clear(); fake.fail_move_names.clear()
+src = mk("원본F11", {"0001_1화.zip": "aaa", "0002_2화.zip": "bbb", "0003_3화.zip": "ccc"}); fake.fail_move_names.add("0001_1화.zip"); fake.leave_empty_on_fail = True
+moved, prog, conf, fail = run(target("local", "원본F11", "rclone", "r:웹툰/대상F11"), policy="rename")
+assert moved == 1 and (src / "0001_1화.zip").read_bytes() == b"aaa" and not (src / "0002_2화.zip").exists(), (moved, names(src))
+assert remote("웹툰/대상F11") == ["웹툰/대상F11/0002_2화.zip"] and fake.deleted == ["웹툰/대상F11/0001_1화.zip"], (remote("웹툰/대상F11"), fake.deleted)
+fake.fail_move_names.clear(); fake.leave_empty_on_fail = False
+moved, prog, conf, fail = run(target("local", "원본F11", "rclone", "r:웹툰/대상F11"), policy="rename")
+assert moved == 1 and remote("웹툰/대상F11") == ["웹툰/대상F11/0001_1화.zip", "웹툰/대상F11/0002_2화.zip"] and conf == [] and not (src / "0001_1화.zip").exists(), (remote("웹툰/대상F11"), conf)
+fake.files.clear(); fake.deleted.clear(); src = mk("원본F11b", {"0001_1화.zip": "aaa", "0002_2화.zip": "bbb"}); fake.fail_move_names.add("0001_1화.zip"); fake.leave_empty_on_fail = True; fake.fail_delete = True
+moved, prog, conf, fail = run(target("local", "원본F11b", "rclone", "r:웹툰/대상F11b"), keep_last=False)
+assert (src / "0001_1화.zip").read_bytes() == b"aaa" and fake.files.get(("r", "웹툰/대상F11b/0001_1화.zip")) == b"", "정리가 실패해도 원본은 그대로"
+fake.fail_move_names.clear(); fake.leave_empty_on_fail = False; fake.fail_delete = False
+# 원본이 이미 없어졌다면(올라갔는데 응답만 오류가 난 경우 등) 목적지는 건드리지 않는다 — 정리는 원본이 남아 있을 때만
+fake.files.clear(); fake.deleted.clear(); fake.fail_delete = False
+src = mk("원본F11c", {"0001_1화.zip": "aaa", "0002_2화.zip": "bbb"}); real_move_fn = rclone_client.move_file_to_remote
+def gone_then_fail(config_path, local_file_path, remote, dest_path, dest_file_name):
+    fake.files[(remote, f"{dest_path}/{dest_file_name}")] = b""; Path(local_file_path).unlink(); raise rclone_client.RcloneError("응답 오류")
+rclone_client.move_file_to_remote = gone_then_fail
+moved, prog, conf, fail = run(target("local", "원본F11c", "rclone", "r:웹툰/대상F11c"), keep_last=False)
+rclone_client.move_file_to_remote = real_move_fn
+assert fake.deleted == [] and fake.files.get(("r", "웹툰/대상F11c/0001_1화.zip")) == b"", (fake.deleted, "원본이 없으면 목적지를 건드리지 않는다")
+print("F11) 폴더 대상 업로드 실패: 원본 그대로, 0KB 정리 OK")
 print("\n전부 통과")

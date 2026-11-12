@@ -24,6 +24,7 @@ from app.archiver.transfer import (
     _cleanup_empty_dirs,
     _derive_folder_display_name,
     _find_metadata_files,
+    _is_real_file,
     _local_archive_path,
     _parse_rclone_target,
 )
@@ -58,12 +59,13 @@ def _bulk_move_collect_source_files(
 
 
 def _bulk_move_dest_exists(kind: str, dest_ctx, rel_path: str, rclone_config_path: str) -> bool:
+    """목적지에 "내용이 있는 같은 이름 파일"이 있는가 — 크기가 0인 파일은 이전 이동이 실패하고 남은 찌꺼기라 없는 것으로 본다(충돌 정책을 적용하지 않고 그 이름으로 옮긴다)."""
     if kind == "local":
-        return (dest_ctx / rel_path).exists()
+        return _is_real_file(dest_ctx / rel_path)
     remote, base_path = dest_ctx
     rel = PurePosixPath(rel_path)
     check_dir = f"{base_path}/{rel.parent}" if str(rel.parent) != "." else base_path
-    return rclone_client.file_exists(rclone_config_path, remote, check_dir, rel.name)
+    return rclone_client.file_exists(rclone_config_path, remote, check_dir, rel.name, ignore_empty=True)
 
 
 def _bulk_move_resolve_final_rel(
@@ -94,11 +96,28 @@ def _bulk_move_single_file(
     rel_path: str, final_rel: str, rclone_config_path: str,
 ) -> None:
     """파일 하나를 원본에서 목적지(final_rel 경로)로 옮긴다.
-    로컬-로컬은 shutil로, 원격이 하나라도 끼면 rclone moveto로 처리한다."""
+    로컬-로컬은 shutil로, 로컬→원격은 올라간 크기를 확인하는 업로드로, 원본이 원격인 경우는 rclone moveto로 처리한다(rclone은 복사가 끝나기 전에는 원본을 지우지 않는다)."""
     if src_kind == "local" and dest_kind == "local":
         dest_abs = dest_ctx / final_rel
         dest_abs.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src_ctx / rel_path), str(dest_abs))
+        return
+
+    if src_kind == "local" and dest_kind != "local":
+        # 로컬 원본을 원격으로 올릴 때는 올라간 크기를 확인한 뒤에만 원본을 지우는 업로드를 쓴다(rclone_client.move_file_to_remote). 실패하면 원본은 그대로이고,
+        # 업로드를 시작하면서 생긴 0KB 빈 파일만 정리한다(크기가 정확히 0일 때만, 못 지워도 무시).
+        remote, base_path = dest_ctx
+        dest_dir, _, dest_name = final_rel.rpartition("/")
+        dest_path = f"{base_path}/{dest_dir}" if base_path and dest_dir else (base_path or dest_dir)
+        try:
+            rclone_client.move_file_to_remote(rclone_config_path, str(src_ctx / rel_path), remote, dest_path, dest_name)
+        except Exception:
+            try:
+                if (src_ctx / rel_path).exists():
+                    rclone_client.delete_empty_file(rclone_config_path, remote, dest_path, dest_name)
+            except Exception as cleanup_error:  # 정리가 실패해도 원래의 업로드 실패를 그대로 알린다
+                log.warning("0KB 찌꺼기 정리 중 오류(무시): %s", cleanup_error)
+            raise
         return
 
     if src_kind == "local":

@@ -11,6 +11,7 @@ Docker Desktop이 WinFsp 가상 드라이브를 못 읽는 문제 자체를 우�
 import json
 import logging
 import subprocess
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -88,21 +89,91 @@ def create_folder(config_path: str, remote: str, path: str) -> None:
 
 
 def move_file_to_remote(config_path: str, local_file_path: str, remote: str, dest_path: str, dest_file_name: str) -> None:
-    """로컬 파일 하나를 원격의 지정한 파일명으로 업로드하고, 성공하면 로컬 원본을 지운다
-    (rclone moveto가 원자적으로 처리). 충돌 정책(덮어쓰기/건너뛰기/이름변경)은 호출부(archiver.py)가
-    is_folder_empty 등으로 미리 확인한 뒤 최종 파일명을 정해서 넘겨준다."""
+    """로컬 파일 하나를 원격의 지정한 파일명으로 올리고, **올라간 파일의 크기가 원본과 같다는 것을 확인한 뒤에만** 로컬 원본을 지운다.
+    rclone moveto에 맡기지 않고 직접 한다 — 복사(copyto)만 시키고, 원격에 올라간 크기를 읽어서 확인하고, 그다음에 원본을 지운다. 그래서 업로드가 어떤 이유로 실패해도
+    (인증 오류, 시간초과, 올라간 크기가 다름, 확인 실패) 원본은 절대 지워지지 않는다. 복사가 실패로 끝났어도 올라간 크기가 같으면(응답만 늦은 경우) 올라간 것으로 본다.
+    원본이 0KB면(다운로드가 깨졌을 수 있다) 아무것도 하지 않고 거절한다 — 깨진 파일을 보관하고 원본까지 없애지 않게. 충돌 정책(덮어쓰기/건너뛰기/이름변경)은 호출부(archiver)가 정해서 최종 파일명을 넘겨준다."""
+    local = Path(local_file_path)
+    try:
+        expected = local.stat().st_size
+    except OSError as e:
+        raise RcloneError(f"원본 파일을 읽을 수 없습니다: {local_file_path} ({e}) — 아무것도 옮기지 않았습니다") from e
+    if expected == 0:
+        raise RcloneError(f"원본 파일이 0KB입니다(다운로드가 깨졌을 수 있습니다): {local.name} — 옮기지 않고 원본을 그대로 둡니다")
     target = f"{remote}:{dest_path}/{dest_file_name}" if dest_path else f"{remote}:{dest_file_name}"
-    _run(config_path, ["moveto", local_file_path, target], timeout=_UPLOAD_TIMEOUT_SECONDS)
+    copy_error: RcloneError | None = None
+    try:
+        _run(config_path, ["copyto", local_file_path, target], timeout=_UPLOAD_TIMEOUT_SECONDS)  # 복사만 — 원본은 아직 그대로
+    except RcloneError as e:
+        copy_error = e
+    try:
+        actual = file_size(config_path, remote, dest_path, dest_file_name)
+    except RcloneError as check_error:
+        raise RcloneError(str(copy_error) if copy_error else f"올라간 파일을 확인하지 못했습니다: {check_error} — 원본을 그대로 둡니다") from check_error
+    if actual != expected:
+        if copy_error:
+            raise copy_error
+        raise RcloneError(f"올라간 파일의 크기가 원본과 다릅니다(원격 {actual if actual is not None else '없음'}, 원본 {expected}바이트): {local.name} — 원본을 그대로 둡니다")
+    if copy_error:
+        log.warning("rclone 복사가 오류로 끝났지만 올라간 크기가 원본과 같아 올라간 것으로 봅니다(%s): %s", copy_error, target)
+    local.unlink()  # 올라간 것이 확인된 뒤에만 원본을 지운다
 
 
-def file_exists(config_path: str, remote: str, path: str, file_name: str) -> bool:
+def file_size(config_path: str, remote: str, path: str, file_name: str) -> int | None:
+    """원격 폴더 안의 파일 크기(바이트). 그 이름의 파일이 없거나 크기 정보가 없으면 None, 목록을 읽지 못하면 RcloneError — 호출부가 "알 수 없음"으로 다루고 지우기 같은 일은 하지 않는다."""
+    target = f"{remote}:{path}" if path else f"{remote}:"
+    entries = json.loads(_run(config_path, ["lsjson", target]))
+    for entry in entries:
+        if entry.get("Name") == file_name:
+            size = entry.get("Size")
+            return size if isinstance(size, int) and size >= 0 else None
+    return None
+
+
+def delete_empty_file(config_path: str, remote: str, path: str, file_name: str) -> bool:
+    """크기가 **정확히 0**으로 확인되는 원격 파일 하나만 지운다 — 업로드 실패로 남은 빈 찌꺼기용. 크기가 있거나, 없거나, 크기를 확인하지 못했거나, 지우기가 실패하면 아무것도 안 지우고 False(예외 없음)."""
+    try:
+        if file_size(config_path, remote, path, file_name) != 0:
+            return False
+        delete_file(config_path, remote, path, file_name)
+    except RcloneError as e:
+        log.warning("0KB 찌꺼기 정리 실패(무시하고 계속) %s:%s/%s: %s", remote, path, file_name, e)
+        return False
+    return True
+
+
+def purge_empty_zip_files(config_path: str, remote: str, path: str) -> list[str]:
+    """원격 폴더 바로 아래의 **크기가 0인 .zip 파일만** 지우고 지운 이름을 돌려준다(이전 업로드 실패로 남은 찌꺼기). 크기가 있는 파일, .zip이 아닌 파일, 폴더, 크기 정보가 없는 파일은 그대로 둔다.
+    목록을 읽지 못하면 아무것도 지우지 않는다. 하나가 지워지지 않아도 나머지는 계속한다."""
+    target = f"{remote}:{path}" if path else f"{remote}:"
+    try:
+        entries = json.loads(_run(config_path, ["lsjson", target, "--files-only"]))
+    except RcloneError as e:
+        log.warning("0KB 찌꺼기 정리를 위한 목록 조회 실패(무시하고 계속) %s: %s", target, e)
+        return []
+    removed: list[str] = []
+    for entry in entries:
+        name = entry.get("Name", "")
+        if entry.get("IsDir") or not name.lower().endswith(".zip") or entry.get("Size") != 0:
+            continue
+        try:
+            delete_file(config_path, remote, path, name)
+        except RcloneError as e:
+            log.warning("0KB 찌꺼기 삭제 실패(무시하고 계속) %s/%s: %s", target, name, e)
+            continue
+        removed.append(name)
+    return removed
+
+
+def file_exists(config_path: str, remote: str, path: str, file_name: str, *, ignore_empty: bool = False) -> bool:
+    """원격에 그 이름의 파일이 있는가. 목록을 못 읽으면 False. ignore_empty=True면 크기가 0인 파일은 없는 것으로 본다(이전 업로드 실패의 찌꺼기 — 충돌로 치지 않는다, 크기를 모르면 있는 것으로 본다)."""
     target = f"{remote}:{path}" if path else f"{remote}:"
     try:
         output = _run(config_path, ["lsjson", target])
     except RcloneError:
         return False
     entries = json.loads(output)
-    return any(e["Name"] == file_name for e in entries)
+    return any(e["Name"] == file_name and not (ignore_empty and e.get("Size") == 0) for e in entries)
 
 
 def list_files_recursive(config_path: str, remote: str, path: str) -> list[str]:

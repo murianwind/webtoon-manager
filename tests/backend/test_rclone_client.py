@@ -3,6 +3,8 @@ subprocess.run을 가짜로 바꿔서 실제 rclone 없이 확인한다(archiver
 """
 import json
 import subprocess
+import tempfile
+from pathlib import Path
 
 from app import rclone_client as rc
 
@@ -10,10 +12,20 @@ CONFIG = "/cfg/rclone.conf"
 calls = []; outcome = {"stdout": "", "stderr": "", "code": 0, "raise": None}
 class Done:
     def __init__(self): self.stdout, self.stderr, self.returncode = outcome["stdout"], outcome["stderr"], outcome["code"]
+script = []   # 비어 있지 않으면 명령 하나마다 (stdout, stderr, code, 예외)를 차례로 쓴다 — 여러 명령이 이어지는 동작(복사 → 크기 확인 → 원본 삭제)을 본다
+class ScriptDone:
+    def __init__(self, stdout, stderr, code): self.stdout, self.stderr, self.returncode = stdout, stderr, code
 def fake_run(cmd, **kwargs):
     calls.append((cmd, kwargs))
+    if script:
+        stdout, stderr, code, exc = script.pop(0)
+        if exc: raise exc
+        return ScriptDone(stdout, stderr, code)
     if outcome["raise"]: raise outcome["raise"]
     return Done()
+ok_ = lambda stdout="": (stdout, "", 0, None)
+bad_ = lambda stderr="fail", exc=None: ("", stderr, 1, exc)
+def listing(*entries): return ok_(json.dumps([{"Name": n, "Size": s, "IsDir": False} for n, s in entries]))
 rc.subprocess.run = fake_run
 def respond(stdout="", stderr="", code=0, raise_=None): outcome.update(stdout=stdout, stderr=stderr, code=code); outcome["raise"] = raise_; calls.clear()
 last = lambda: calls[-1]
@@ -52,8 +64,7 @@ print("4) 폴더 비었는지 OK")
 
 # Scenario 5: 폴더 만들기/파일 올리기 — mkdir remote:경로, moveto는 업로드용 긴 제한(1800초). 경로가 없으면 remote:파일명
 respond(); rc.create_folder(CONFIG, "od", "a/b"); assert last()[0][3:] == ["mkdir", "od:a/b"]
-respond(); rc.move_file_to_remote(CONFIG, "/work/1.zip", "od", "웹툰/작품", "0001.zip"); cmd, kw = last(); assert cmd[3:] == ["moveto", "/work/1.zip", "od:웹툰/작품/0001.zip"] and kw["timeout"] == 1800
-respond(); rc.move_file_to_remote(CONFIG, "/work/1.zip", "od", "", "0001.zip"); assert last()[0][-1] == "od:0001.zip"
+# (파일 올리기는 복사 → 올라간 크기 확인 → 원본 삭제 순서다 — 아래 Scenario 8에서 본다. rclone moveto로 한 번에 옮기지 않는다)
 respond(); rc.moveto(CONFIG, "od:a.zip", "/work/a.zip"); cmd, kw = last(); assert cmd[3:] == ["moveto", "od:a.zip", "/work/a.zip"] and kw["timeout"] == 1800
 respond(); rc.copyto(CONFIG, "/work/i.xml", "od:a/i.xml"); cmd, kw = last(); assert cmd[3:] == ["copyto", "/work/i.xml", "od:a/i.xml"] and kw["timeout"] == 1800        # 복사는 원본을 지우지 않는다
 respond(); rc.delete_file(CONFIG, "od", "a", "cover.jpg"); assert last()[0][3:] == ["deletefile", "od:a/cover.jpg"]
@@ -76,4 +87,64 @@ respond(code=1, stderr="busy"); rc.rmdirs_if_empty(CONFIG, "od", "a/b")         
 respond("<xml/>"); assert rc.read_small_text_file(CONFIG, "od", "작품", "info.xml") == "<xml/>" and last()[0][3:] == ["cat", "od:작품/info.xml"]
 respond("<xml/>"); rc.read_small_text_file(CONFIG, "od", "", "info.xml"); assert last()[0][-1] == "od:info.xml"
 respond(code=1, stderr="not found"); assert rc.read_small_text_file(CONFIG, "od", "작품", "info.xml") is None
+
+# Scenario 8: 파일 크기 — 목록에서 그 이름의 Size를 읽는다(없으면 None). 목록을 못 읽으면 RcloneError(호출부가 "알 수 없음"으로 다룬다)
+script[:] = [listing(("a.zip", 10), ("b.zip", 0))]; assert rc.file_size(CONFIG, "od", "x", "b.zip") == 0 and last()[0][3:] == ["lsjson", "od:x"]
+script[:] = [listing(("a.zip", 10))]; assert rc.file_size(CONFIG, "od", "x", "c.zip") is None
+script[:] = [bad_("denied")]; assert "denied" in raises(rc.file_size, CONFIG, "od", "x", "a.zip")
+script[:] = [ok_(json.dumps([{"Name": "a.zip"}]))]; assert rc.file_size(CONFIG, "od", "x", "a.zip") is None                                       # 크기 정보가 없으면 모른다(0으로 보지 않는다)
+print("8) 파일 크기 OK")
+
+# Scenario 9: **원본 보호** — 올리기는 복사만 하고(moveto 금지), 올라간 파일의 크기가 원본과 같다는 것을 확인한 뒤에만 원본을 지운다. 어떤 실패에서도 원본은 그대로다
+work = Path(tempfile.mkdtemp()); data = b"x" * 10
+def make_local(content=data):
+    f = work / "1.zip"; f.write_bytes(content); return f
+def upload(f): rc.move_file_to_remote(CONFIG, str(f), "od", "웹툰/작품", "0001.zip")
+def names_of(): return [c[0][3] for c in calls]
+f = make_local(); script[:] = [ok_(), listing(("0001.zip", 10))]; calls.clear(); upload(f)                                         # 성공: 복사 → 크기 확인 → 원본 삭제
+assert names_of() == ["copyto", "lsjson"] and calls[0][0][3:] == ["copyto", str(f), "od:웹툰/작품/0001.zip"] and calls[0][1]["timeout"] == 1800 and calls[1][0][3:] == ["lsjson", "od:웹툰/작품"], calls
+assert not f.exists(), "확인된 뒤에는 원본이 지워진다(이동)"
+f = make_local(); script[:] = [ok_(), listing(("0001.zip", 10))]; rc.move_file_to_remote(CONFIG, str(f), "od", "", "0001.zip"); assert calls[-2][0][-1] == "od:0001.zip" and calls[-1][0][3:] == ["lsjson", "od:"]   # 경로 없으면 루트
+f = make_local(); script[:] = [bad_("401 Unauthorized"), listing(("0001.zip", 0))]; calls.clear()                                  # 복사 실패(0KB 자리표시 파일만 남음) → 실패, 원본 그대로
+assert "401" in raises(upload, f) and f.read_bytes() == data and "moveto" not in names_of(), (names_of(), f.exists())
+f = make_local(); script[:] = [bad_("timeout"), listing()]; assert "timeout" in raises(upload, f) and f.read_bytes() == data                # 복사 실패 + 목적지에 없음 → 실패, 원본 그대로
+f = make_local(); script[:] = [bad_("late timeout"), listing(("0001.zip", 10))]; upload(f); assert not f.exists(), "복사는 실패로 끝났지만 올라간 크기가 같으면 올라간 것이다(응답만 늦은 경우) — 성공 처리"
+f = make_local(); script[:] = [bad_("late timeout"), bad_("denied")]; assert "late timeout" in raises(upload, f) and f.read_bytes() == data     # 복사 실패 + 확인도 못 함 → 실패, 원본 그대로
+f = make_local(); script[:] = [ok_(), listing(("0001.zip", 7))]; message = raises(upload, f); assert "크기" in message and f.read_bytes() == data      # 크기가 다르면 → 실패, 원본 그대로
+f = make_local(); script[:] = [ok_(), listing(("0001.zip", 0))]; assert "크기" in raises(upload, f) and f.read_bytes() == data                     # 0KB로 올라갔다면 → 실패
+f = make_local(); script[:] = [ok_(), bad_("denied")]; assert "denied" in raises(upload, f) and f.read_bytes() == data                            # 올라간 파일을 확인하지 못하면 → 실패, 원본 그대로
+f = make_local(); script[:] = [ok_(), listing()]; assert "크기" in raises(upload, f) and f.read_bytes() == data                                  # 복사는 끝났다는데 목적지에 없으면 → 실패
+f = make_local(b""); script[:] = [ok_()]; calls.clear(); assert "0KB" in raises(upload, f) and calls == [] and f.exists(), "원본이 0KB면 아무것도 하지 않고 거절"     # 깨진 다운로드를 옮겨서 원본까지 없애지 않는다
+f = work / "없는파일.zip"; script[:] = [ok_()]; calls.clear(); assert "원본" in raises(upload, f) and calls == []
+script.clear()
+print("9) 원본 보호 OK")
+
+# Scenario 10: 0KB 찌꺼기 하나 지우기 — 크기가 정확히 0이라고 확인될 때만. 크기가 있거나 없거나 확인 실패면 지우지 않고 False
+script[:] = [listing(("a.zip", 0)), ok_()]; calls.clear(); assert rc.delete_empty_file(CONFIG, "od", "x", "a.zip") is True and names_of() == ["lsjson", "deletefile"] and calls[1][0][-1] == "od:x/a.zip"
+script[:] = [listing(("a.zip", 5))]; calls.clear(); assert rc.delete_empty_file(CONFIG, "od", "x", "a.zip") is False and names_of() == ["lsjson"], "크기가 있으면 안 지운다"
+script[:] = [listing(("b.zip", 0))]; calls.clear(); assert rc.delete_empty_file(CONFIG, "od", "x", "a.zip") is False and names_of() == ["lsjson"], "없으면 안 지운다"
+script[:] = [bad_("denied")]; calls.clear(); assert rc.delete_empty_file(CONFIG, "od", "x", "a.zip") is False and names_of() == ["lsjson"], "크기를 모르면 안 지운다"
+script[:] = [ok_(json.dumps([{"Name": "a.zip"}]))]; calls.clear(); assert rc.delete_empty_file(CONFIG, "od", "x", "a.zip") is False and names_of() == ["lsjson"], "크기 정보가 없으면 안 지운다"
+script[:] = [listing(("a.zip", 0)), bad_("401")]; assert rc.delete_empty_file(CONFIG, "od", "x", "a.zip") is False, "지우기가 실패해도 예외 없이 False"
+script.clear()
+print("10) 0KB 하나 지우기 OK")
+
+# Scenario 11: 폴더의 0KB .zip 정리 — 폴더 안 바로 아래의 파일 중 크기가 0인 .zip만(대소문자 무시). 크기가 있는 파일, .zip 아닌 파일, 폴더는 그대로. 지운 이름을 돌려준다. 목록 실패면 아무것도 안 지운다
+entries = json.dumps([{"Name": "z1.zip", "Size": 0, "IsDir": False}, {"Name": "z2 (2).ZIP", "Size": 0, "IsDir": False}, {"Name": "real.zip", "Size": 9, "IsDir": False},
+                      {"Name": "memo.txt", "Size": 0, "IsDir": False}, {"Name": "sub.zip", "Size": 0, "IsDir": True}, {"Name": "nosize.zip", "IsDir": False}])
+script[:] = [ok_(entries), ok_(), ok_()]; calls.clear(); assert rc.purge_empty_zip_files(CONFIG, "od", "x") == ["z1.zip", "z2 (2).ZIP"]
+assert names_of() == ["lsjson", "deletefile", "deletefile"] and [c[0][-1] for c in calls[1:]] == ["od:x/z1.zip", "od:x/z2 (2).ZIP"] and calls[0][0][3:] == ["lsjson", "od:x", "--files-only"], calls
+script[:] = [ok_(entries), bad_("401"), ok_()]; assert rc.purge_empty_zip_files(CONFIG, "od", "x") == ["z2 (2).ZIP"], "지우기가 실패한 것은 빼고 나머지는 계속"
+script[:] = [bad_("denied")]; calls.clear(); assert rc.purge_empty_zip_files(CONFIG, "od", "x") == [] and names_of() == ["lsjson"]
+script[:] = [ok_("[]")]; calls.clear(); assert rc.purge_empty_zip_files(CONFIG, "od", "") == [] and calls[0][0][-2:] == ["od:", "--files-only"]
+script.clear()
+print("11) 폴더 0KB .zip 정리 OK")
+
+# Scenario 12: 존재 확인에서 0KB를 빼기 — ignore_empty=True면 크기 0은 없는 것으로 본다(크기를 모르면 있는 것으로 본다). 기본값은 예전과 같다
+script[:] = [listing(("a.zip", 0))]; assert rc.file_exists(CONFIG, "od", "x", "a.zip") is True
+script[:] = [listing(("a.zip", 0))]; assert rc.file_exists(CONFIG, "od", "x", "a.zip", ignore_empty=True) is False
+script[:] = [listing(("a.zip", 3))]; assert rc.file_exists(CONFIG, "od", "x", "a.zip", ignore_empty=True) is True
+script[:] = [ok_(json.dumps([{"Name": "a.zip"}]))]; assert rc.file_exists(CONFIG, "od", "x", "a.zip", ignore_empty=True) is True
+script.clear()
+print("12) 존재 확인 0KB 제외 OK")
 print("ALL OK")

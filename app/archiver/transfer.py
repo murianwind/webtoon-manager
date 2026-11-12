@@ -115,6 +115,29 @@ def resolve_archive_dest(archive_root: str, title_name: str, base_path: str, *, 
     return dest
 
 
+def _is_real_file(path: Path) -> bool:
+    """목적지에 "내용이 있는 같은 이름 파일"이 있는가 — 크기가 0인 파일은 이전 이동이 실패하고 남은 찌꺼기라 파일로 치지 않는다(충돌 정책을 적용하지 않고 그 이름으로 옮긴다)."""
+    try:
+        return path.exists() and (not path.is_file() or path.stat().st_size > 0)
+    except OSError:
+        return path.exists()
+
+
+def purge_empty_zip_files_local(dest_dir: Path | None) -> list[str]:
+    """로컬 보관 폴더 바로 아래의 **크기가 0인 .zip만** 지우고 지운 이름을 돌려준다(이전 이동 실패의 찌꺼기). 크기가 있는 파일, .zip이 아닌 파일, 폴더는 그대로 둔다. 지우지 못하면 건너뛴다."""
+    if dest_dir is None or not dest_dir.is_dir():
+        return []
+    removed: list[str] = []
+    for entry in sorted(dest_dir.iterdir()):
+        try:
+            if entry.is_file() and entry.suffix.lower() == ".zip" and entry.stat().st_size == 0:
+                entry.unlink()
+                removed.append(entry.name)
+        except OSError as e:
+            log.warning("0KB 찌꺼기 삭제 실패(무시하고 계속) %s: %s", entry, e)
+    return removed
+
+
 def move_file_with_conflict_policy(src: Path, dest_dir: Path, policy: str, dest_filename: str | None = None) -> tuple[str | None, bool]:
     """src를 dest_dir로 옮긴다. dest_filename을 주면 원본 이름 대신 그 이름으로 저장한다
     (파일명 템플릿 적용용). 반환값은 (실제로 저장된 파일명(성공 시) 또는 None(건너뛴 경우),
@@ -122,7 +145,7 @@ def move_file_with_conflict_policy(src: Path, dest_dir: Path, policy: str, dest_
     policy: 'overwrite' | 'skip' | 'rename'"""
     name = dest_filename or src.name
     dest_path = dest_dir / name
-    had_conflict = dest_path.exists()
+    had_conflict = _is_real_file(dest_path)  # 0KB 찌꺼기는 충돌이 아니다
     if had_conflict:
         if policy == "skip":
             log.info("아카이빙 건너뜀 (이미 존재): %s", dest_path)
@@ -130,12 +153,21 @@ def move_file_with_conflict_policy(src: Path, dest_dir: Path, policy: str, dest_
         elif policy == "rename":
             stem, suffix = Path(name).stem, Path(name).suffix
             counter = 2
-            while dest_path.exists():
+            while _is_real_file(dest_path):
                 dest_path = dest_dir / f"{stem} ({counter}){suffix}"
                 counter += 1
         # overwrite는 dest_path 그대로 두고 shutil.move가 덮어쓰게 둔다
 
-    shutil.move(str(src), str(dest_path))
+    try:
+        shutil.move(str(src), str(dest_path))
+    except Exception:
+        # 옮기다 실패했다 — shutil.move는 복사가 끝난 뒤에만 원본을 지우므로 원본은 그대로다. 방금 목적지에 생긴 빈 파일만 정리하고(원본이 남아 있고 크기가 0일 때만) 오류는 그대로 올린다
+        try:
+            if src.exists() and dest_path.is_file() and dest_path.stat().st_size == 0:
+                dest_path.unlink()
+        except OSError:
+            pass
+        raise
     return dest_path.name, had_conflict
 
 
@@ -169,7 +201,7 @@ def _move_file_to_rclone_with_conflict_policy(
     rclone_config_path: str, src: Path, remote: str, dest_path: str, policy: str, dest_filename: str | None = None
 ) -> tuple[str | None, bool]:
     dest_name = dest_filename or src.name
-    had_conflict = rclone_client.file_exists(rclone_config_path, remote, dest_path, dest_name)
+    had_conflict = rclone_client.file_exists(rclone_config_path, remote, dest_path, dest_name, ignore_empty=True)  # 0KB 찌꺼기는 충돌이 아니다
     if had_conflict:
         if policy == "skip":
             log.info("아카이빙 건너뜀 (원격에 이미 존재): %s:%s/%s", remote, dest_path, dest_name)
@@ -178,7 +210,7 @@ def _move_file_to_rclone_with_conflict_policy(
             stem = Path(dest_name).stem
             suffix = Path(dest_name).suffix
             counter = 2
-            while rclone_client.file_exists(rclone_config_path, remote, dest_path, dest_name):
+            while rclone_client.file_exists(rclone_config_path, remote, dest_path, dest_name, ignore_empty=True):
                 dest_name = f"{stem} ({counter}){suffix}"
                 counter += 1
         # overwrite: 그대로 진행, rclone moveto가 덮어씀
@@ -199,6 +231,12 @@ def _move_file_to_rclone_with_conflict_policy(
                 e, remote, dest_path, dest_name,
             )
         else:
+            # 올리기가 실패했다 — 원본은 그대로 남아 있다(move_file_to_remote는 올라간 크기를 확인하기 전에는 지우지 않는다). 업로드를 시작하면서 목적지에 생긴 0KB 빈 파일만
+            # 정리한다(크기가 정확히 0이라고 확인될 때만, 못 지워도 무시) — 남겨 두면 다음 실행이 "같은 이름이 있다"고 보고 새 이름을 만든다
+            try:
+                rclone_client.delete_empty_file(rclone_config_path, remote, dest_path, dest_name)
+            except Exception as cleanup_error:  # 정리가 실패해도 원래의 업로드 실패를 그대로 알린다(정리 오류로 가리지 않는다)
+                log.warning("0KB 찌꺼기 정리 중 오류(무시): %s", cleanup_error)
             raise
     return dest_name, had_conflict
 
