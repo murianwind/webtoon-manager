@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath
 from xml.etree import ElementTree
 
 from app import kakao_cover, rclone_client, repository
+from app.archiver import cancel
 from app.zipper import _LEADING_DIGITS_RE
 
 from app.archiver.naming import (
@@ -228,7 +229,10 @@ def _prepare_folder_dest(target, rclone_config_path: str, archive_root: str, dis
 def _move_folder_files(rel_files: list, move: FolderMove, report: ProgressReport) -> int:
     """회차 zip들을 하나씩 옮기고(파일명 템플릿, 충돌 정책, 이력) 옮긴 개수를 돌려준다. 한 파일이 실패해도 나머지는 계속한다."""
     moved = 0
-    for _num, name in rel_files:
+    for index, (_num, name) in enumerate(rel_files):
+        if cancel.is_requested():  # 사용자가 중단을 눌렀다 — 남은 파일은 옮기지 않는다
+            report.progress(f"[{move.display_name}] 중단 요청으로 남은 {len(rel_files) - index}개 파일은 옮기지 않았습니다")
+            break
         try:
             dest_filename = None
             if move.template.strip():
@@ -347,6 +351,8 @@ def _archive_folder_target(
         ),
         ProgressReport(progress_callback, conflict_log, failure_log),
     )
+    if cancel.is_requested():
+        return moved  # 중단했으면 정보 파일 복사/이동과 원본 폴더 정리도 하지 않는다
     _transfer_folder_metadata(src_kind, src_ctx, dest_kind, dest_ctx, meta_names, regenerated_local_cover, keep_last, rclone_config_path, display_name)
     if not keep_last:
         _cleanup_source_folder(src_kind, src_ctx, rclone_config_path)

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 from app import kakao_cover, repository
+from app.archiver import cancel
 from app import kakao_records
 
 from app.archiver.folder_archive import (
@@ -111,7 +112,10 @@ def _resolve_title_dest(dest_type: str, archive_root: str, rclone_config_path: s
 def _move_title_files(files: list, dest: TitleDestination, report: ProgressReport) -> int:
     """회차 zip들을 하나씩 옮기고(파일명 템플릿 적용, 충돌 정책, 이력) 옮긴 개수를 돌려준다. 한 파일이 실패해도 나머지는 계속한다."""
     moved = 0
-    for _num, src in files:
+    for index, (_num, src) in enumerate(files):
+        if cancel.is_requested():  # 사용자가 중단을 눌렀다 — 지금까지 옮긴 것은 그대로 두고 남은 파일은 옮기지 않는다
+            report.progress(f"[{dest.title_name}] 중단 요청으로 남은 {len(files) - index}개 파일은 옮기지 않았습니다")
+            break
         try:
             dest_filename = (
                 render_archive_filename(dest.template, src.name, dest.title_name, dest.writer_names, zip_path_for_page_count=src) if dest.template else None
@@ -188,6 +192,8 @@ def _archive_title(job: TitleArchiveJob, report: ProgressReport | None = None) -
         remote=remote, rclone_dest_path=rclone_dest_path, local_dest_dir=local_dest_dir,
     )
     moved = _move_title_files(files, dest, report)
+    if cancel.is_requested():
+        return moved  # 중단했으면 정보 파일(info.xml 등)도 옮기지/복사하지 않는다
 
     if metadata_files:
         if job.dest_type == "rclone":
@@ -197,6 +203,20 @@ def _archive_title(job: TitleArchiveJob, report: ProgressReport | None = None) -
     return moved
 
 
+def _lookup_read_numbers(provider: ReadNumbersProvider | None, source, report: ProgressReport) -> tuple[bool, frozenset[int] | None]:
+    """뷰어에서 이 작품의 읽은 회차를 알아낸다 → (이 작품을 이번에 건너뛸지, 읽은 회차 번호). 조회 함수가 없으면(뷰어 미설정) 거르지 않는다.
+    조회 함수가 있는데 읽음 상태를 알 수 없으면(연결 실패, 작품을 못 찾음 등) **옮기지 않는다** — 예전에는 "알 수 없음"으로 보고 전부 옮겨서,
+    뷰어가 잠깐 불안정한 날 안 읽은 회차까지 이동했다. 건너뛴 것은 진행 로그와 실패 목록(디스코드 알림)에 남긴다."""
+    if provider is None:
+        return False, None
+    read_numbers = provider(source.title, source.kakao)
+    if read_numbers is None:
+        report.progress(f"[{source.title}] 뷰어의 읽음 상태를 확인하지 못해 이번에는 옮기지 않습니다")
+        report.failure(source.title, "(읽음 상태 확인 실패)", "뷰어의 읽음 상태를 확인하지 못해 옮기지 않았습니다(다음 실행에서 다시 확인합니다)")
+        return True, None
+    return False, read_numbers
+
+
 def run_periodic_archive(
     archive_root: str, download_root: str, rclone_config_path: str = "",
     progress_callback=None, conflict_log: list | None = None, failure_log: list | None = None,
@@ -204,10 +224,12 @@ def run_periodic_archive(
 ) -> int:
     """지정된(enabled) 웹툰/폴더 대상 전부, 마지막 파일 보존하며 이동. 반환값은 전체 이동 개수.
     read_numbers_provider(선택): (작품 제목, 카카오 여부) -> 뷰어에서 읽은 회차 번호 집합(조회 실패면 None). 주면 웹툰 대상은
-    읽은 회차만 옮긴다(폴더 대상은 뷰어 작품과 짝지을 수 없어 그대로)."""
+    읽은 회차만 옮기고, 읽음 상태를 알 수 없는 작품은 옮기지 않는다(폴더 대상은 뷰어 작품과 짝지을 수 없어 그대로)."""
     policy = get_conflict_policy()
     total = 0
     for target in repository.list_archive_targets():
+        if cancel.is_requested():
+            break  # 중단 요청 — 남은 대상은 시작하지 않는다
         if not target.enabled:
             continue
         if target.source_type == "folder":
@@ -219,15 +241,18 @@ def run_periodic_archive(
         source = resolve_webtoon_source(target.title_id)
         if source is None:
             continue
+        report = ProgressReport(progress_callback, conflict_log, failure_log)
+        skip, read_numbers = _lookup_read_numbers(read_numbers_provider, source, report)
+        if skip:
+            continue
         total += _archive_title(
             TitleArchiveJob(
                 archive_root=archive_root, download_root=(kakao_download_root or download_root) if source.kakao else download_root,
                 title_id=target.title_id, title_name=source.title, base_path=target.dest_base_path, policy=policy, trigger_type="periodic", keep_last=True,
                 dest_type=target.dest_type, rclone_config_path=rclone_config_path, writer_names=source.writer_names,
-                filename_template_preset_id=target.filename_template_preset_id, kakao=source.kakao,
-                read_numbers=read_numbers_provider(source.title, source.kakao) if read_numbers_provider else None,
+                filename_template_preset_id=target.filename_template_preset_id, kakao=source.kakao, read_numbers=read_numbers,
             ),
-            ProgressReport(progress_callback, conflict_log, failure_log),
+            report,
         )
     return total
 
@@ -235,8 +260,10 @@ def run_periodic_archive(
 def manual_archive_now(
     archive_root: str, download_root: str, title_ids: list[str], rclone_config_path: str = "",
     progress_callback=None, full_move: bool = False, kakao_download_root: str | None = None,
+    read_numbers_provider: ReadNumbersProvider | None = None,
 ) -> int:
-    """수동 실행 — 기본은 지정된 것과 동일 규칙(마지막 파일 보존).
+    """수동 실행 — 기본은 지정된 것과 동일 규칙(마지막 파일 보존, 뷰어가 설정돼 있으면 읽은 회차만 — read_numbers_provider, 읽음 상태를 알 수 없는 작품은 옮기지 않음).
+    완결 처리(full_move)와 폴더 대상은 읽음 상태를 보지 않는다.
     full_move=True면 완결 자동이동과 동일하게 마지막 파일까지 전부 옮기고, 다 옮긴 뒤
     다운로드 폴더가 비면 그 폴더도 정리한다 — "완결 처리했는데 자동이동 설정을 안 켜놨던"
     웹툰을 그때그때 수동으로 완전히 정리하고 싶을 때 쓰는 용도라, 연재 중인 웹툰에도
@@ -247,6 +274,8 @@ def manual_archive_now(
     trigger_type = "manual_finish" if full_move else "manual"
     total = 0
     for title_id in title_ids:
+        if cancel.is_requested():
+            break  # 중단 요청 — 남은 대상은 시작하지 않는다
         target = repository.get_archive_target(title_id)
         if target is None:
             continue
@@ -265,11 +294,14 @@ def manual_archive_now(
         root = (kakao_download_root or download_root) if source.kakao else download_root
         own_failures: list = []
         report = ProgressReport(progress_callback, None, own_failures)
+        skip, read_numbers = _lookup_read_numbers(None if full_move else read_numbers_provider, source, report)
+        if skip:
+            continue
         total += _archive_title(
             TitleArchiveJob(
                 archive_root=archive_root, download_root=root, title_id=title_id, title_name=source.title, base_path=target.dest_base_path,
                 policy=policy, trigger_type=trigger_type, keep_last=not full_move, dest_type=target.dest_type, rclone_config_path=rclone_config_path,
-                writer_names=source.writer_names, filename_template_preset_id=target.filename_template_preset_id, kakao=source.kakao,
+                writer_names=source.writer_names, filename_template_preset_id=target.filename_template_preset_id, kakao=source.kakao, read_numbers=read_numbers,
             ),
             report,
         )
@@ -302,6 +334,8 @@ def process_pending_finish_archives(
 
     total = 0
     for title_id in repository.list_pending_finish_archive():
+        if cancel.is_requested():
+            break  # 중단 요청 — 남은 대기열은 건드리지 않고 다음 실행에서 이어서 처리한다
         source = resolve_webtoon_source(title_id)
         if source is None:
             repository.remove_pending_finish_archive(title_id)

@@ -627,7 +627,9 @@
         ⚠️ 선택한 웹툰은 위 체크된 항목 전부 <strong>마지막 파일까지 예외 없이</strong> 이동되고, 다운로드 폴더에 아무것도 안 남으면 <strong>그 폴더 자체가 삭제</strong>됩니다.
         아직 연재 중인 작품이어도 그대로 실행되니, 완결/보관 목적이 맞는 웹툰만 체크했는지 다시 한번 확인하세요. 되돌릴 수 없습니다.
       </p>
-      <button id="btn-run-archive-now" style="margin-top: 10px;">지금 이동</button>
+      <p class="hint" style="margin-top: 10px;">웹툰 뷰어 서버 주소가 설정돼 있으면 <strong>뷰어에서 읽은 회차만</strong> 옮깁니다(읽지 않았거나 읽는 중인 회차와 마지막 회차는 다운로드 폴더에 남습니다). 뷰어의 읽음 상태를 <strong>확인하지 못하면 그 작품은 옮기지 않습니다</strong>(다음 실행에서 다시 확인). "완결 처리로 이동"과 폴더 대상은 읽음 상태를 보지 않습니다.</p>
+  <button id="btn-run-archive-now" style="margin-top: 10px;">지금 이동</button>
+  <button id="btn-cancel-archive" class="hidden" style="margin-top: 10px;">중단</button>
       <div class="job-status-block">
         <h3>아카이빙 상태 <span id="archive-status-badge" class="badge">idle</span></h3>
         <div id="archive-log" class="job-log"></div>

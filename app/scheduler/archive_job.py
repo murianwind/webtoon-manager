@@ -2,11 +2,13 @@
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 import logging
 
 import aiohttp
 
 from app import archiver, discord_notify, download_roots, job_status, rclone_updater, repository, retention, viewer_scan, webtoon_server_client
+from app.archiver import cancel
 from app.archiver.title_archive import ReadNumbersProvider
 from app.config import get_settings
 from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
@@ -29,6 +31,17 @@ def _build_read_numbers_provider(
         )
         return future.result()
     return provider
+
+
+@asynccontextmanager
+async def read_numbers_provider_for(settings):
+    """뷰어 서버 주소가 설정돼 있으면 읽은 회차를 묻는 조회 함수(동기)를, 아니면 None을 준다 — 정기 아카이빙과 "지금 이동"(수동)이 같이 쓴다. 뷰어 세션은 이 블록이 끝나면 닫힌다."""
+    server_url = await asyncio.to_thread(repository.get_setting, _SETTING_KEY_WEBTOON_SERVER_URL)
+    if not server_url:
+        yield None
+        return
+    async with aiohttp.ClientSession() as viewer_session:
+        yield _build_read_numbers_provider(asyncio.get_running_loop(), viewer_session, server_url, settings.request_timeout_seconds)
 
 
 def _cleanup_old_archive_history() -> None:
@@ -61,6 +74,7 @@ async def run_archive_job() -> None:
         return
     async with _archive_job_lock:
         settings = get_settings()
+        cancel.reset()  # 지난 중단 요청을 이어받지 않는다
         job_status.start("archive")
         try:
             update_result = await rclone_updater.check_and_update()
@@ -71,12 +85,7 @@ async def run_archive_job() -> None:
         conflicts: list[tuple[str, str, str]] = []
         failures: list[tuple[str, str, str]] = []
         try:
-            server_url = await asyncio.to_thread(repository.get_setting, _SETTING_KEY_WEBTOON_SERVER_URL)
-            async with aiohttp.ClientSession() as viewer_session:
-                provider = (  # 뷰어 서버가 설정돼 있을 때만 — 뷰어에서 읽지 않은 회차는 옮기지 않는다(조회 실패한 작품은 거르지 않음)
-                    _build_read_numbers_provider(asyncio.get_running_loop(), viewer_session, server_url, settings.request_timeout_seconds)
-                    if server_url else None
-                )
+            async with read_numbers_provider_for(settings) as provider:  # 뷰어 서버가 설정돼 있을 때만 — 뷰어에서 읽지 않은 회차와 읽음 상태를 알 수 없는 작품은 옮기지 않는다
                 moved = await asyncio.to_thread(
                     archiver.run_periodic_archive, settings.archive_root, download_roots.naver_root(settings), settings.rclone_config_path,
                     lambda msg: job_status.log_line("archive", msg), conflicts, failures,
@@ -90,6 +99,8 @@ async def run_archive_job() -> None:
                 lambda msg: job_status.log_line("archive", msg), conflicts, failures, download_roots.kakao_root(settings),
             )
             job_status.log_line("archive", f"완결 구독해제 대기열 {pending_moved}개 파일 이동 완료")
+            if cancel.is_requested():
+                job_status.log_line("archive", f"사용자 요청으로 중단했습니다 (이미 옮긴 {moved + pending_moved}개 파일은 그대로, 남은 파일은 다음 실행에서 이어서 옮깁니다)")
             viewer_scan.note_library_changed(moved + pending_moved)  # 파일을 옮겼으면 뷰어 서버가 다시 훑게 한다(연동이 켜져 있을 때만)
             _cleanup_old_archive_history()
 

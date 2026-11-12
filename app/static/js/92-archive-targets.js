@@ -385,6 +385,34 @@ document.getElementById("btn-run-archive-now").addEventListener("click", async (
   }
 });
 
+// 실행 중일 때만 "중단" 버튼을 보인다 — 누르면 확인한 뒤 중단을 요청한다(지금 옮기는 파일은 끝까지 옮긴 뒤 멈춘다). 요청한 뒤에는 끝날 때까지 다시 누르지 못하게 "요청됨"으로 둔다.
+function updateArchiveCancelButton(running) {
+  const btn = document.getElementById("btn-cancel-archive");
+  btn.classList.toggle("hidden", !running);
+  if (!running) {
+    btn.disabled = false;
+    btn.textContent = "중단"; // 다음 실행은 처음 상태로
+  }
+}
+
+document.getElementById("btn-cancel-archive").addEventListener("click", async () => {
+  if (!confirm("실행 중인 아카이빙을 중단할까요?\n지금 옮기는 파일은 끝까지 옮긴 뒤 멈추고, 이미 옮긴 파일은 그대로입니다. 남은 파일은 다음 실행에서 옮깁니다.")) return;
+  const btn = document.getElementById("btn-cancel-archive");
+  btn.disabled = true;
+  try {
+    const result = await apiCall("/api/archive/cancel", { method: "POST" });
+    if (result.status === "idle") {
+      alert("실행 중이 아닙니다.");
+      await refreshArchiveJobStatus();
+      return;
+    }
+    btn.textContent = "중단 요청됨 — 파일 하나가 끝나면 멈춥니다";
+  } catch (e) {
+    btn.disabled = false;
+    alert(e.message);
+  }
+});
+
 async function refreshArchiveJobStatus() {
   let statuses;
   try {
@@ -397,6 +425,7 @@ async function refreshArchiveJobStatus() {
   document.getElementById("archive-status-badge").textContent = s.status;
   renderJobLog("archive", s.log || []);
   document.getElementById("btn-run-archive-now").disabled = s.status === "running";
+  updateArchiveCancelButton(s.status === "running");
   if (s.status === "running") {
     archiveWasRunning = true;
   } else {
@@ -441,6 +470,7 @@ async function resumeArchiveJobStatusIfRunning() {
     document.getElementById("archive-status-badge").textContent = s.status;
     renderJobLog("archive", s.log || []);
     document.getElementById("btn-run-archive-now").disabled = true;
+    updateArchiveCancelButton(true);
     archiveWasRunning = true;
     archiveRunFullMove = null; // 이 화면이 시작한 실행이 아니라서 종류를 모른다 — 끝나면 목록만 갱신
     startArchiveJobPolling();

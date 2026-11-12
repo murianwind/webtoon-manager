@@ -16,9 +16,11 @@ from app import (
     viewer_scan,
 )
 from app import archiver
+from app.archiver import cancel
 from app import rclone_client
 from app import rclone_updater
 from app.config import get_settings
+from app.scheduler.archive_job import read_numbers_provider_for
 from app.path_guard import PathOutsideRootError, resolve_under_root
 
 from app.api.common import (
@@ -607,6 +609,7 @@ class ArchiveRunIn(BaseModel):
 @router.post("/archive/run")
 async def run_archive_now(payload: ArchiveRunIn):
     settings = get_settings()
+    cancel.reset()  # 지난 중단 요청을 이어받지 않는다
     job_status.start("archive")
 
     async def _run():
@@ -617,19 +620,25 @@ async def run_archive_now(payload: ArchiveRunIn):
             job_status.log_line("archive", f"rclone 업데이트 확인 중 오류(무시하고 계속): {e}")
 
         try:
+            # 뷰어 서버가 설정돼 있으면 읽은 회차만 옮기고 읽음 상태를 알 수 없는 작품은 옮기지 않는다(완결 처리 이동은 읽음 상태를 보지 않는다)
+            async with read_numbers_provider_for(settings) as provider:
+                if payload.title_ids:
+                    moved = await asyncio.to_thread(
+                        archiver.manual_archive_now, settings.archive_root, download_roots.naver_root(settings), payload.title_ids, settings.rclone_config_path,
+                        lambda msg: job_status.log_line("archive", msg), payload.full_move, download_roots.kakao_root(settings), provider,
+                    )
+                else:
+                    all_ids = [t.title_id for t in repository.list_archive_targets() if t.enabled]
+                    moved = await asyncio.to_thread(
+                        archiver.manual_archive_now, settings.archive_root, download_roots.naver_root(settings), all_ids, settings.rclone_config_path,
+                        lambda msg: job_status.log_line("archive", msg), False, download_roots.kakao_root(settings), provider,
+                    )
+            if cancel.is_requested():
+                job_status.log_line("archive", "사용자 요청으로 중단했습니다 (이미 옮긴 파일은 그대로, 남은 파일은 다음 실행에서 이어서 옮깁니다)")
             if payload.title_ids:
-                moved = await asyncio.to_thread(
-                    archiver.manual_archive_now, settings.archive_root, download_roots.naver_root(settings), payload.title_ids, settings.rclone_config_path,
-                    lambda msg: job_status.log_line("archive", msg), payload.full_move, download_roots.kakao_root(settings),
-                )
                 job_status.log_line("archive", f"{moved}개 파일 이동 완료")
                 viewer_scan.note_library_changed(moved)  # 옮긴 파일이 있으면 뷰어 서버가 다시 훑게 한다(연동이 켜져 있을 때만)
             else:
-                all_ids = [t.title_id for t in repository.list_archive_targets() if t.enabled]
-                moved = await asyncio.to_thread(
-                    archiver.manual_archive_now, settings.archive_root, download_roots.naver_root(settings), all_ids, settings.rclone_config_path,
-                    lambda msg: job_status.log_line("archive", msg), False, download_roots.kakao_root(settings),
-                )
                 job_status.log_line("archive", f"지정 웹툰 {moved}개 파일 이동 완료")
 
                 pending_moved = await asyncio.to_thread(
@@ -646,6 +655,17 @@ async def run_archive_now(payload: ArchiveRunIn):
 
     asyncio.create_task(_run())
     return {"status": "started"}
+
+
+@router.post("/archive/cancel")
+async def cancel_archive():
+    """실행 중인 아카이빙을 중단한다 — 지금 옮기는 파일은 끝까지 옮긴 뒤 멈추고 남은 파일과 남은 작품은 옮기지 않는다(정기 실행과 "지금 이동" 모두).
+    실행 중이 아니면 요청을 받지 않는다(남은 요청이 다음 실행에 영향을 주지 않게)."""
+    if job_status.snapshot()["archive"]["status"] != "running":
+        return {"status": "idle"}
+    cancel.request()
+    job_status.log_line("archive", "중단 요청을 받았습니다 — 지금 옮기는 파일을 끝낸 뒤 멈춥니다")
+    return {"status": "requested"}
 
 
 @router.get("/archive/history")
