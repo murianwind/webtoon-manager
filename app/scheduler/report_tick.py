@@ -49,8 +49,11 @@ async def run_report_tick(now: datetime | None = None) -> None:
     async with _report_tick_lock:
         scan = _TickScan()
         await _report_step(now, scan)
-        await _list_alert_step(now)
         await _advance_scan(now, scan)  # 리포트와 상관없이 요청된 스캔(아카이빙 등)이나 진행 중인 스캔 확인
+        try:
+            await _list_alert_step(now)  # 하루 한 번 도는 웹툰 전체목록 알림 — 네트워크로 오래 걸릴 수 있어서 뷰어 새로고침 뒤에 두고, 오류가 나도 이 확인을 망가뜨리지 않는다
+        except Exception as e:
+            log.error("웹툰 전체목록 알림 단계 오류(무시하고 계속): %s", e)
 
 
 async def _list_alert_step(now: datetime) -> None:

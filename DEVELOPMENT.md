@@ -443,3 +443,8 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - **오류 전문은 그대로 로그에**: `title_archive`/`folder_archive`의 `report.progress(f"[…] 이동 실패: {파일} — {e}")`가 실행 로그(`job_status`)와 서버 로그에 전체 오류를 남기는 것은 바뀌지 않았다. `failure_log` 튜플(제목, 파일, 오류 전문)도 그대로 — 줄이는 것은 알림을 만드는 마지막 단계뿐이다.
 - **테스트**: `test_archive_failure_reason.py`(실제 알림의 오류 문구 — OneDrive 401, SharePoint 503 HTML 등 — 와 이 앱의 문구를 사유로 줄이는 규칙), `test_archive_job.py` 시나리오 5/5b(묶기, 상한, 글자 제한, 오류 전문이 알림에 없음), `test_archive_empty_leftovers.py`(로그에는 오류 전문이 남음). 변형 검사 21개 모두 잡음.
 
+## 1분 확인 단계의 순서와 격리 (뷰어 새로고침 보호)
+
+- `report_tick.run_report_tick`의 순서는 **다운로드 리포트 단계(`_report_step`) → 웹툰 서버 새로고침(`_advance_scan`) → 웹툰 전체목록 알림(`_list_alert_step`)**이다. 알림 단계는 하루 한 번이지만 네트워크(네이버/카카오 목록 조회)로 오래 걸릴 수 있어서, 다운로드/아카이빙 뒤에 뷰어 서버를 다시 훑게 하는 새로고침이 그 알림에 밀리지 않도록 새로고침 뒤에 둔다. 알림 단계는 `try/except`로 감싸서 오류가 나면 로그만 남기고 넘어간다(그렇지 않으면 알림 설정 값이 깨졌을 때 매분 예외가 나서 새로고침 진행이 영영 건너뛰어질 수 있다).
+- 새로고침을 요청하는 곳(바뀌지 않음): 다운로드 묶음 확정 때 `_request_scan_for_batch`, 아카이빙(정기/수동/폴더 일괄 이동/중단 포함)이 파일을 옮긴 뒤 `viewer_scan.note_library_changed(옮긴 수)`. 진행은 `_advance_scan`이 `viewer_scan.tick`으로 한다. 테스트: `test_viewer_scan_requests.py`, `test_viewer_scan_settings.py`, `test_report_dispatch.py`, `test_archive_job.py`(옮긴 수 합계 전달), `test_report_tick_isolation.py`(순서와 격리, 변형 검사 4개 모두 잡음).
+
