@@ -400,7 +400,7 @@
       </div>
       <div class="field-group">
         <label for="kp-cookie-json">카카오페이지 로그인 쿠키 (다운로드용)</label>
-        <p class="field-hint">카카오페이지 작품을 받으려면 로그인 쿠키가 필요합니다. 크롬에서 page.kakao.com에 로그인한 뒤 <strong>Cookie-Editor</strong> 확장에서 Export → JSON으로 복사해서 아래에 그대로 붙여넣으세요. 필수 쿠키: _kau, _kpwtkn, _T_ANO, _kahai, _kawlt, _kpdid (선택: _karmt — 있으면 같이 쓰고, 없어도 됩니다). 보통 약 30일 유지되고, 로그인이 풀리거나 만료가 가까워지면 디스코드로 알려드립니다. 쿠키는 암호화해서 저장하며 백업에는 포함되지 않습니다(복원한 뒤에는 다시 붙여넣어야 합니다).</p>
+        <p class="field-hint">카카오페이지 작품을 받으려면 로그인 쿠키가 필요합니다. 크롬에서 page.kakao.com에 로그인한 뒤 <strong>Cookie-Editor</strong> 확장에서 Export → JSON으로 복사해서 아래에 그대로 붙여넣으세요. 필수 쿠키: _kau, _kpwtkn, _kahai, _kawlt, _kpdid (선택: _karmt, _T_ANO — 있으면 같이 쓰고, 없어도 됩니다). 보통 약 30일 유지되고, 로그인이 풀리거나 만료가 가까워지면 디스코드로 알려드립니다. 쿠키는 암호화해서 저장하며 백업에는 포함되지 않습니다(복원한 뒤에는 다시 붙여넣어야 합니다).</p>
         <textarea id="kp-cookie-json" rows="4" spellcheck="false" placeholder='[{"domain": ".kakao.com", "name": "_kau", ...}, ...]'></textarea>
         <div class="registry-add-row">
           <button id="btn-kp-cookie-save">쿠키 저장</button>

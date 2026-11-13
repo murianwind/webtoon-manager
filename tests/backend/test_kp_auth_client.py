@@ -1,6 +1,7 @@
 """쿠키 처리(_karmt 선택 포함)와 카카오페이지 클라이언트 테스트."""
 import asyncio
 import json
+import os
 import time
 from http.cookies import SimpleCookie
 
@@ -117,8 +118,8 @@ asyncio.run(t4())
 
 
 # ════════ 1-2. _karmt는 선택 쿠키 ════════
-assert "_karmt" not in auth.REQUIRED_COOKIES and "_karmt" in auth.OPTIONAL_COOKIES and len(auth.REQUIRED_COOKIES) == 6
-no_karmt = auth.parse_cookie_export(cookie_export())                                      # 필수 6개만 있어도 통과
+assert "_karmt" not in auth.REQUIRED_COOKIES and "_karmt" in auth.OPTIONAL_COOKIES and len(auth.REQUIRED_COOKIES) == 5
+no_karmt = auth.parse_cookie_export(cookie_export())                                      # 필수 5개만 있어도 통과
 assert "_karmt" not in {x["name"] for x in no_karmt} and auth.cookie_status(no_karmt)["missing"] == [] and auth.cookie_status(no_karmt)["optional_present"] == []
 with_karmt = auth.parse_cookie_export(cookie_export(extra=("_karmt",)))                    # 있으면 알아본다
 assert "_karmt" in {x["name"] for x in with_karmt} and auth.cookie_status(with_karmt)["optional_present"] == ["_karmt"]
@@ -131,6 +132,28 @@ try: auth.parse_cookie_export(cookie_export(names=[n for n in REQ if n != "_kau"
 except ValueError as e: assert "_kau" in str(e) and "_karmt" not in str(e)
 else: raise AssertionError("필수 쿠키 누락을 못 잡음")
 print("1-2) _karmt 선택 처리 OK (없어도 통과, 있으면 인식, 만료 계산엔 미포함)")
+
+# ════════ 1-3. _T_ANO도 선택 쿠키 — 없어도 통과하고, 있으면 인식해서 요청에 같이 보내며, 만료 계산에는 안 쓴다 ════════
+assert "_T_ANO" not in auth.REQUIRED_COOKIES and "_T_ANO" in auth.OPTIONAL_COOKIES and set(auth.OPTIONAL_COOKIES) == {"_karmt", "_T_ANO"}, (auth.REQUIRED_COOKIES, auth.OPTIONAL_COOKIES)
+assert set(auth.REQUIRED_COOKIES) == {"_kau", "_kpwtkn", "_kahai", "_kawlt", "_kpdid"}, auth.REQUIRED_COOKIES
+no_ano = auth.parse_cookie_export(cookie_export())                                         # _T_ANO 없이도 통과
+assert "_T_ANO" not in {x["name"] for x in no_ano} and auth.cookie_status(no_ano)["missing"] == [] and "_T_ANO" not in auth.cookie_status(no_ano)["optional_present"]
+with_ano = auth.parse_cookie_export(cookie_export(extra=("_T_ANO",)))                       # 있으면 알아본다
+assert auth.cookie_status(with_ano)["optional_present"] == ["_T_ANO"] and auth.cookie_map(with_ano)["_T_ANO"] == "x"                   # 요청에 같이 보내지도록 값이 남는다
+both = auth.parse_cookie_export(cookie_export(extra=("_karmt", "_T_ANO"))); assert auth.cookie_status(both)["optional_present"] == ["_karmt", "_T_ANO"]
+items = json.loads(cookie_export(extra=("_T_ANO",)))                                        # _T_ANO가 먼저 만료돼도 만료 계산엔 안 쓴다(필수 쿠키 기준)
+for it in items:
+    if it["name"] == "_T_ANO": it["expirationDate"] = time.time() + 1 * 86400
+assert auth.cookie_status(auth.parse_cookie_export(json.dumps(items)))["days_left"] >= 19
+try: auth.parse_cookie_export(cookie_export(names=[n for n in REQ if n != "_kau"]))        # 필수가 빠지면 _kau만 말하고 _T_ANO는 말하지 않는다
+except ValueError as e: assert "_kau" in str(e) and "_T_ANO" not in str(e), str(e)
+else: raise AssertionError("필수 쿠키 누락을 못 잡음")
+assert "_T_ANO" not in auth.cookie_status(None)["missing"] and len(auth.cookie_status(None)["missing"]) == 5      # 저장된 쿠키가 없을 때 안내하는 필수 목록에도 없다
+# 설정 화면의 안내 문구: 필수 목록에는 _T_ANO가 없고 선택 쪽에 있다
+hint = [l for l in open(os.path.join(os.path.dirname(__file__), "..", "..", "app", "static", "index.html"), encoding="utf-8").read().split("\n") if "필수 쿠키:" in l][0]
+required_part, optional_part = hint.split("(선택", 1)
+assert "_T_ANO" not in required_part and "_T_ANO" in optional_part and "_karmt" in optional_part, hint[:400]
+print("1-3) _T_ANO 선택 처리 OK (없어도 통과, 있으면 인식, 만료 계산엔 미포함, 안내 문구)")
 
 # ════════ 5. 회차 목록(여러 페이지) — 번호는 사이트 회차 순서(order_value) ════════
 SERIES = "닥터 최태수"

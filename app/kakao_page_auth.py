@@ -19,10 +19,10 @@ from app import crypto, discord_config, discord_notify, repository
 
 log = logging.getLogger(__name__)
 
-# 사용자가 확인해준 로그인에 필요한 쿠키(필수 6개 + 선택 1개)
-REQUIRED_COOKIES = ("_kau", "_kpwtkn", "_T_ANO", "_kahai", "_kawlt", "_kpdid")
-# 있으면 알아보고(요청에 같이 보내고) 없으면 무시하는 쿠키 — 없어도 로그인 검사/만료 계산에 영향이 없다
-OPTIONAL_COOKIES = ("_karmt",)
+# 로그인에 필요한 쿠키(필수 5개 + 선택 2개)
+REQUIRED_COOKIES = ("_kau", "_kpwtkn", "_kahai", "_kawlt", "_kpdid")
+# 있으면 알아보고(요청에 같이 보내고) 없으면 무시하는 쿠키 — 없어도 쿠키 검증/로그인 검사/만료 계산에 영향이 없다(_T_ANO도 여기다: 없어도 저장되고, 있으면 같이 보낸다)
+OPTIONAL_COOKIES = ("_karmt", "_T_ANO")
 SETTING_KEY = "kakao_page_cookies"
 _ALERT_EXPIRED_KEY = "kakao_page_alert_expired_at"
 _ALERT_SOON_KEY = "kakao_page_alert_soon_at"
