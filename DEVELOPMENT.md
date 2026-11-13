@@ -436,3 +436,10 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - **정리가 일어나는 때**: ① 업로드가 실패하면 방금 남은 0KB를 지운다(`delete_empty_file`, **원본이 남아 있을 때만**, 정리 오류는 원래 실패를 가리지 않고 무시) — 로컬 이동도 실패하면 새로 생긴 빈 파일만 지운다. ② 작품 이동을 시작할 때 보관 폴더의 0KB .zip을 정리한다(`title_archive._purge_failed_leftovers`, 진행 로그 "이전 실패로 남은 0KB 파일 N개를 정리했습니다", 중단 요청이 있으면 건너뜀, 실패해도 이동은 계속).
 - **테스트**: `test_rclone_client.py`(복사→크기 확인→삭제 순서와 모든 실패 조합에서 원본이 남는 것, 0KB 정리 규칙), `test_archive_empty_leftovers.py`(작품 대상: 실패 뒤 정리, 정리 실패, 재실행은 같은 이름, 쌓인 찌꺼기 정리, 진짜 파일 충돌은 그대로, skip 정책, 확인 못 하면 안 지움, **모든 실패 모드에서 원본 보호**, 로컬), `test_folder_archive.py`(F10~F11: 폴더 대상). 변형 검사 파이썬 36개 모두 잡음. 가짜 rclone(`fake_rclone.py`)에 `leave_empty_on_fail`(실패하면 0KB 자리표시 파일이 남음), `fail_delete`(지우기도 실패), `deleted`(지운 파일 기록)와 `file_size`/`delete_empty_file`/`purge_empty_zip_files`를 더했다.
 
+## 아카이빙 실패 알림을 한 줄 사유로 묶기 (오류 전문은 로그에만)
+
+- **배경**: 정기 아카이빙 알림은 실행마다 1건이지만, 이동 실패 항목마다 rclone이 남긴 오류 전문(여러 줄, 재시도 3번 분량)이 그대로 붙어서 길고 읽기 어려웠다(서비스 장애로 같은 오류가 여러 파일에서 나면 특히).
+- **구현**: `app/archiver/failure_reason.py`의 `summarize(error) -> 한 줄 사유(60자 이하)` — 정규식 규칙을 위에서부터 처음 맞는 것으로(순서가 의미: 이 앱이 만든 문구[읽음 상태/0KB/올라간 파일] → 401 → 403 → 429 → 5xx → 저장 공간 → 네트워크 → 시간 초과. 504 "Gateway Timeout"이 시간 초과로 분류되지 않도록 5xx가 앞). 모르는 오류는 첫 줄(공백만인 줄 제외)을 60자로 잘라 쓰고, 비면 "알 수 없는 오류". 같은 사유는 같은 문구여야 묶인다. `scheduler/archive_job.build_archive_issue_message(conflicts, failures)`가 알림 본문을 만든다 — 충돌은 5건까지(`_MAX_CONFLICT_LINES`) 풀고 "- 외 N건", 실패는 "❌ 이동 실패 N건" 아래에 사유별 한 줄("- 사유 (N건): 제목: 파일, … 외 K건", 예 3개 `_MAX_EXAMPLES_PER_REASON`, 사유 5가지 `_MAX_REASON_LINES`, 나머지는 "- 그 밖의 사유 M가지 (K건)"), 실패가 있을 때만 끝에 로그 안내 줄(`_LOG_POINTER`). 제목/파일 이름이 아주 길면 `_MAX_MESSAGE_LENGTH`(1900자)로 중간을 줄이고 안내 줄은 남긴다.
+- **오류 전문은 그대로 로그에**: `title_archive`/`folder_archive`의 `report.progress(f"[…] 이동 실패: {파일} — {e}")`가 실행 로그(`job_status`)와 서버 로그에 전체 오류를 남기는 것은 바뀌지 않았다. `failure_log` 튜플(제목, 파일, 오류 전문)도 그대로 — 줄이는 것은 알림을 만드는 마지막 단계뿐이다.
+- **테스트**: `test_archive_failure_reason.py`(실제 알림의 오류 문구 — OneDrive 401, SharePoint 503 HTML 등 — 와 이 앱의 문구를 사유로 줄이는 규칙), `test_archive_job.py` 시나리오 5/5b(묶기, 상한, 글자 제한, 오류 전문이 알림에 없음), `test_archive_empty_leftovers.py`(로그에는 오류 전문이 남음). 변형 검사 21개 모두 잡음.
+

@@ -1,4 +1,4 @@
-"""아카이빙 작업(scheduler/archive_job.py) — 정기 아카이빙 + 완결 대기열을 돌리고, 문제(이름 충돌/이동 실패)를 모아서 한 번에 알리며, 뷰어 서버가 있으면 "읽은 회차만 옮긴다".
+"""아카이빙 작업(scheduler/archive_job.py) — 정기 아카이빙 + 완결 대기열을 돌리고, 문제(이름 충돌/이동 실패)를 모아서 한 번에 알리며(실패는 한 줄 사유로 줄여 같은 사유끼리 묶고, 오류 전문은 알림에 싣지 않는다 — 로그에 남는다), 뷰어 서버가 있으면 "읽은 회차만 옮긴다".
 실제 파일 이동(archiver)과 rclone 업데이트는 가짜로 바꾸고, 이 작업이 "무엇을 부르고/실패를 어떻게 다루고/무엇을 알리는지"를 확인한다.
 """
 import asyncio
@@ -70,7 +70,8 @@ print("4) 뷰어 읽은 회차 조회 OK")
 
 # Scenario 5: 이름 충돌/이동 실패는 모아서 디스코드로 한 번에 알린다(건마다 알리면 스팸). 문제가 없으면 알리지 않는다
 reset(); sent.clear(); seen["with_issues"] = True; run()
-assert len(sent) == 1 and "📦 **아카이빙 실행 알림**" in sent[0] and "⚠️ 파일명 충돌 1건" in sent[0] and "- 충돌작품: 001.zip (이름 바꿔 저장)" in sent[0] and "❌ 이동 실패 1건" in sent[0] and "- 실패작품: 002.zip — 권한 없음" in sent[0], sent
+assert len(sent) == 1 and "📦 **아카이빙 실행 알림**" in sent[0] and "⚠️ 파일명 충돌 1건" in sent[0] and "- 충돌작품: 001.zip (이름 바꿔 저장)" in sent[0] and "❌ 이동 실패 1건" in sent[0] and "- 권한 없음 (1건): 실패작품: 002.zip" in sent[0], sent
+assert "🔎 자세한 오류는" in sent[0] and "로그" in sent[0], sent
 print("5) 문제 모아서 알림 OK")
 msg = []
 async def collect(session, text): msg.append(text)
@@ -78,6 +79,38 @@ discord_notify.send_webhook_notification = collect
 asyncio.run(aj._notify_archive_issues(None, [("a", "1.zip", "skip"), ("b", "2.zip", "overwrite"), ("c", "3.zip", "새정책")], []))
 assert "(건너뜀)" in msg[0] and "(덮어씀)" in msg[0] and "(새정책)" in msg[0] and "이동 실패" not in msg[0], msg                      # 정책 이름은 한글로, 모르는 정책은 그대로
 discord_notify.send_webhook_notification = discord_fake(sent)
+
+# Scenario 5b: 알림은 사유를 한 줄로 줄이고 같은 사유끼리 묶는다 — rclone 오류 전문(여러 줄)을 파일마다 싣지 않는다. 자세한 오류는 로그에 있다고 안내한다
+RCLONE_401 = ("2026/11/13 08:18:34 NOTICE: 0015_15화 (3).zip: Failed to cancel multipart upload: HTTP error 401 (401 Unauthorized) returned body: \"\"\n"
+              "2026/11/13 08:18:34 ERROR : 0015_15화.zip: Failed to copy: HTTP error 401 (401 Unauthorized) returned body: \"\"\n2026/11/13 08:18:34 ERROR : Attempt 1/3 failed with 1 errors and: HTTP error 401")
+RCLONE_503 = 'low level retry 1/10 (error HTTP error 503 (503 Service Unavailable) returned body: "<!DOCTYPE html>...Sharepoint Online...")'
+build = lambda c, f: aj.build_archive_issue_message(c, f)
+five = [(f"작품{i}", f"00{i}_{i}화.zip", RCLONE_401) for i in range(1, 6)]
+m1 = build([], five)
+assert m1.count("❌ 이동 실패 5건") == 1 and "- 보관 위치 접근 거절(401) — 서비스 장애나 로그인 만료 가능 (5건): 작품1: 001_1화.zip, 작품2: 002_2화.zip, 작품3: 003_3화.zip 외 2건" in m1, m1
+assert "Attempt" not in m1 and "returned body" not in m1 and "2026/11/13" not in m1 and "Failed to copy" not in m1, m1                  # 오류 전문은 알림에 없다
+assert "🔎 자세한 오류는 앱의 아카이빙 로그(수동 실행 화면 · 설정의 실행 이력)에서 확인하세요." in m1 and len(m1) < 400, (len(m1), m1)
+mixed = [("A", "1.zip", RCLONE_401), ("B", "2.zip", RCLONE_503), ("C", "3.zip", RCLONE_401), ("D", "4.zip", "특이한 오류"), ("E", "5.zip", RCLONE_503), ("F", "6.zip", RCLONE_401)]
+m2 = build([], mixed).split("\n")
+bullets = [l for l in m2 if l.startswith("- ")]
+assert bullets == ["- 보관 위치 접근 거절(401) — 서비스 장애나 로그인 만료 가능 (3건): A: 1.zip, C: 3.zip, F: 6.zip",
+                   "- 보관 위치 서버 일시 오류(5xx) — 잠시 후 다시 시도 (2건): B: 2.zip, E: 5.zip", "- 특이한 오류 (1건): D: 4.zip"], bullets          # 사유별로 묶고, 처음 나온 순서
+assert "❌ 이동 실패 6건" in m2
+# 사유가 많으면 앞의 5가지만, 나머지는 한 줄로. 충돌도 5건까지만
+many_reasons = [(f"작품{i}", f"{i}.zip", f"서로 다른 오류 {i}") for i in range(8)]
+m3 = build([("c%d" % i, f"{i}.zip", "rename") for i in range(8)], many_reasons)
+assert sum(1 for l in m3.split("\n") if l.startswith("- ") and "건):" in l) == 5 and "- 그 밖의 사유 3가지 (3건)" in m3, m3
+assert "⚠️ 파일명 충돌 8건" in m3 and "- 외 3건" in m3 and m3.count("(이름 바꿔 저장)") == 5, m3
+# 아주 많은 실패와 아주 긴 오류여도 디스코드 글자 제한(2000자) 안에 들어간다 — 요약만 나가므로 오류 길이와 무관
+huge = build([("c", f"{i}.zip", "skip") for i in range(300)], [(f"긴제목{i}" * 5, f"{i}" * 40 + ".zip", ("x" * 3000) + str(i)) for i in range(200)])
+assert len(huge) <= 1900 and "❌ 이동 실패 200건" in huge and huge.rstrip().endswith("확인하세요."), (len(huge), huge[-200:])
+# 제목/파일 이름이 아주 길어서 사유가 가짓수 제한 안인데도 길이를 넘는 경우 — 안내 줄은 남기고 중간을 줄여 글자 제한을 지킨다
+long_names = build([], [("T" * 400 + str(i), "f" * 300 + ".zip", RCLONE_401) for i in range(3)] + [("U" * 400, "g" * 300 + ".zip", RCLONE_503)])
+assert len(long_names) <= 1900 and "…" in long_names and long_names.endswith("확인하세요.") and "❌ 이동 실패 4건" in long_names, (len(long_names), long_names[-150:])
+# 충돌만 있으면 실패 부분과 로그 안내는 없다. 실패만 있으면 충돌 부분이 없다
+only_conflicts = build([("a", "1.zip", "skip")], []); assert "⚠️ 파일명 충돌 1건" in only_conflicts and "이동 실패" not in only_conflicts and "🔎" not in only_conflicts, only_conflicts
+only_failures = build([], five[:1]); assert "충돌" not in only_failures and "❌ 이동 실패 1건" in only_failures
+print("5b) 알림은 한 줄 사유로 묶어서 OK")
 
 # Scenario 6: 겹치는 실행은 건너뛴다(시간 제한 안에 끝나야 한다 — 건너뛰지 않으면 같은 락을 기다리며 멈춘다)
 async def overlap():

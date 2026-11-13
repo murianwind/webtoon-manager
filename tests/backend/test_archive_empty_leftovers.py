@@ -42,6 +42,7 @@ reset(); src = make("묵향", [1, 2, 3]); fake.fail_move_names.add("0001_1화.zi
 moved, prog, conf, fail = call("묵향")
 assert moved == 1 and (src / "0001_1화.zip").read_bytes() == b"zip1" * 10 and not (src / "0002_2화.zip").exists(), local_names(src)      # 1화 원본 그대로, 2화는 정상 이동
 assert fail and fail[0][:2] == ("묵향", "0001_1화.zip"), fail
+assert any("이동 실패: 0001_1화.zip — 업로드 실패: 0001_1화.zip" in m_ for m_ in prog), prog                                         # 실행 로그에는 오류 전문이 그대로 남는다(알림은 한 줄 사유로 줄여 나간다)
 assert "웹툰/묵향/0001_1화.zip" not in remote("") and remote("웹툰/묵향/").get("0002_2화.zip") == 40, remote("")                        # 0KB 찌꺼기는 지워졌고 2화는 올라갔다
 assert fake.deleted == ["웹툰/묵향/0001_1화.zip"], fake.deleted
 print("1) 실패 뒤 0KB 찌꺼기 정리 OK (원본 그대로)")

@@ -9,6 +9,7 @@ import aiohttp
 
 from app import archiver, discord_notify, download_roots, job_status, rclone_updater, repository, retention, viewer_scan, webtoon_server_client
 from app.archiver import cancel
+from app.archiver.failure_reason import summarize as summarize_failure
 from app.archiver.title_archive import ReadNumbersProvider
 from app.config import get_settings
 from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
@@ -49,23 +50,52 @@ def _cleanup_old_archive_history() -> None:
     retention.cleanup_history("archive", "archive_history_retention_days", repository.delete_archive_history_older_than, "아카이빙 이력")
 
 
+_MAX_CONFLICT_LINES = 5  # 알림에 풀어서 보여 주는 충돌 수(나머지는 "외 N건")
+_MAX_REASON_LINES = 5  # 알림에 보여 주는 실패 사유 가짓수(나머지는 한 줄로)
+_MAX_EXAMPLES_PER_REASON = 3  # 사유마다 보여 주는 예(제목: 파일) 수
+_MAX_MESSAGE_LENGTH = 1900  # 디스코드 글자 제한(2000자) 안에 들어오게 하는 한도
+_LOG_POINTER = "🔎 자세한 오류는 앱의 아카이빙 로그(수동 실행 화면 · 설정의 실행 이력)에서 확인하세요."
+
+
+def build_archive_issue_message(conflicts: list[tuple[str, str, str]], failures: list[tuple[str, str, str]]) -> str:
+    """아카이빙 실행 알림 본문. 충돌은 파일마다 한 줄(5건까지), 실패는 **한 줄 사유로 줄여서 같은 사유끼리 묶는다**(사유마다 예 3개까지) — rclone 오류 전문(여러 줄)을 파일마다 싣지 않는다.
+    자세한 오류는 실행 로그에 그대로 남아 있고, 알림 끝에서 로그를 보라고 안내한다. 어떤 입력이어도 디스코드 글자 제한 안에 들어온다."""
+    policy_label = {"skip": "건너뜀", "overwrite": "덮어씀", "rename": "이름 바꿔 저장"}
+    lines = ["📦 **아카이빙 실행 알림**"]
+    if conflicts:
+        lines.append(f"⚠️ 파일명 충돌 {len(conflicts)}건")
+        for title_name, file_name, policy in conflicts[:_MAX_CONFLICT_LINES]:
+            lines.append(f"- {title_name}: {file_name} ({policy_label.get(policy, policy)})")
+        if len(conflicts) > _MAX_CONFLICT_LINES:
+            lines.append(f"- 외 {len(conflicts) - _MAX_CONFLICT_LINES}건")
+    if failures:
+        by_reason: dict[str, list[tuple[str, str]]] = {}
+        for title_name, file_name, error in failures:
+            by_reason.setdefault(summarize_failure(error), []).append((title_name, file_name))  # 처음 나온 순서를 지킨다
+        lines.append(f"❌ 이동 실패 {len(failures)}건")
+        reasons = list(by_reason.items())
+        for reason, items in reasons[:_MAX_REASON_LINES]:
+            examples = ", ".join(f"{title_name}: {file_name}" for title_name, file_name in items[:_MAX_EXAMPLES_PER_REASON])
+            more = f" 외 {len(items) - _MAX_EXAMPLES_PER_REASON}건" if len(items) > _MAX_EXAMPLES_PER_REASON else ""
+            lines.append(f"- {reason} ({len(items)}건): {examples}{more}")
+        if len(reasons) > _MAX_REASON_LINES:
+            rest = reasons[_MAX_REASON_LINES:]
+            lines.append(f"- 그 밖의 사유 {len(rest)}가지 ({sum(len(items) for _, items in rest)}건)")
+        lines.append(_LOG_POINTER)
+    message = "\n".join(lines)
+    if len(message) > _MAX_MESSAGE_LENGTH:  # 제목/파일 이름이 아주 길 때의 안전장치 — 안내 줄은 남기고 중간을 줄인다
+        tail = ("\n" + _LOG_POINTER) if failures else ""
+        message = message[: _MAX_MESSAGE_LENGTH - len(tail) - 1] + "…" + tail
+    return message
+
+
 async def _notify_archive_issues(
     session: aiohttp.ClientSession, conflicts: list[tuple[str, str, str]], failures: list[tuple[str, str, str]]
 ) -> None:
     """주기 아카이빙(완결 자동이동 포함) 실행 중 이름 충돌을 처리했거나 실패한 게
     있으면 한 번에 모아서 디스코드로 알린다 — 다운로드 실패 요약과 같은 패턴
-    (건마다 알리면 스팸이 되니 실행 끝날 때 요약 1건)."""
-    policy_label = {"skip": "건너뜀", "overwrite": "덮어씀", "rename": "이름 바꿔 저장"}
-    lines = ["📦 **아카이빙 실행 알림**"]
-    if conflicts:
-        lines.append(f"⚠️ 파일명 충돌 {len(conflicts)}건")
-        for title_name, file_name, policy in conflicts:
-            lines.append(f"- {title_name}: {file_name} ({policy_label.get(policy, policy)})")
-    if failures:
-        lines.append(f"❌ 이동 실패 {len(failures)}건")
-        for title_name, file_name, error in failures:
-            lines.append(f"- {title_name}: {file_name} — {error}")
-    await discord_notify.send_webhook_notification(session, "\n".join(lines))
+    (건마다 알리면 스팸이 되니 실행 끝날 때 요약 1건). 본문은 build_archive_issue_message."""
+    await discord_notify.send_webhook_notification(session, build_archive_issue_message(conflicts, failures))
 
 
 async def run_archive_job() -> None:
