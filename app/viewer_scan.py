@@ -8,7 +8,7 @@
 - 네트워크 드라이브는 스캔이 15~30분 걸릴 수 있어서 요청을 오래 붙잡지 않는다: 시작 요청(POST /api/integration/rescan)은 바로 돌아오고 이후 진행 상태(GET /api/integration/scan-status)만 본다.
   최대 대기 시간(기본 45분)이 지나면 추적을 멈춘다. 뷰어가 이 연동을 지원하지 않거나(404) 토큰이 안 맞거나(401·403) 연결 오류면 그 요청은 버리고 다시 시도하지 않는다.
 - 뷰어는 로그인(PROFILES_ENABLED)이 켜져 있어도 쓸 수 있게 별도 토큰(뷰어의 INTEGRATION_TOKEN)으로 인증한다 — 토큰은 암호화해서 저장한다.
-상태는 설정 테이블에 JSON 한 덩어리로 저장해서 재시작해도 이어진다. 진행 로그는 리포트 상태 로그("report")에 남는다.
+상태는 설정 테이블에 JSON 한 덩어리로 저장해서 재시작해도 이어진다. 진행 로그는 실행 이력의 "웹툰 서버 연동"(viewer_server)에 스캔 주기(요청 → 시작 → 끝/건너뜀/추적 중단)마다 한 건으로 남는다.
 """
 import logging
 from datetime import datetime, timedelta, timezone
@@ -74,6 +74,7 @@ def _empty_state() -> dict:
         "done_started_at": None,  # 끝까지 확인된 가장 최근 스캔의 시작 시각 — 이 시각 이전의 변경은 반영됐다
         "foreign_wait": False,  # 뷰어가 이미 스캔 중이라(우리가 시작한 게 아님) 끝나기를 기다리는 중
         "watermark": None,  # 다운로드 묶음을 여기까지는 스캔 대상으로 따졌다(같은 이력을 다시 따지지 않게)
+        "cycle_failed": False,  # 지금 스캔 주기(실행 이력 한 건)에서 건너뛰거나 추적을 포기한 일이 있었다 — 주기가 끝날 때 오류로 남긴다
     }
 
 
@@ -95,8 +96,28 @@ def has_work() -> bool:
     return bool(state["requested_at"]) or (bool(state["started_at"]) and not state["finished"])
 
 
-def request(when: datetime) -> None:
-    """when 시각에 뷰어가 훑어야 할 변경(새로 받거나 옮긴 파일)이 생겼다고 기록한다 — 연동이 준비돼 있을 때만."""
+# ── 실행 이력("웹툰 서버 연동") — 스캔 주기 하나(요청 ~ 끝/건너뜀/추적 중단)가 이력 한 건 ──
+_JOB = "viewer_server"
+
+
+def _cycle_log(line: str) -> None:
+    """스캔 주기의 진행 줄을 남긴다 — 진행 중인 주기가 없으면(처음이거나 컨테이너가 다시 시작됐다) 새로 시작한다."""
+    if job_status.snapshot()[_JOB]["status"] != "running":
+        job_status.start(_JOB)
+    job_status.log_line(_JOB, line)
+
+
+def _end_cycle() -> None:
+    """할 일이 더 없을 때 스캔 주기를 끝내고 이력으로 저장한다(건너뛰거나 추적을 포기한 일이 있었으면 오류). 진행 중인 주기가 없으면 아무것도 안 한다."""
+    if job_status.snapshot()[_JOB]["status"] != "running":
+        return
+    failed = bool(load_state().get("cycle_failed"))
+    update_state(cycle_failed=False)
+    job_status.finish(_JOB, success=not failed)
+
+
+def request(when: datetime, reason: str = "") -> None:
+    """when 시각에 뷰어가 훑어야 할 변경(새로 받거나 옮긴 파일)이 생겼다고 기록한다 — 연동이 준비돼 있을 때만. reason: 실행 이력에 남길 사유(어디서 생긴 변경인지)."""
     if not is_ready():
         return
     with _STATE.lock:
@@ -106,12 +127,13 @@ def request(when: datetime) -> None:
             return  # 이미 그 변경 뒤에 시작한 스캔이 있다 — 그 스캔이 덮는다
         if state["requested_at"] is None or state["requested_at"] < when_iso:
             update_state(requested_at=when_iso)
+            _cycle_log(f"스캔 필요: {reason or '새 파일'}")
 
 
-def note_library_changed(count: int, when: datetime | None = None) -> None:
-    """파일을 옮기는 작업(아카이빙/일괄 이동)이 끝났을 때 부른다 — 하나라도 옮겼으면 스캔을 요청한다."""
+def note_library_changed(count: int, when: datetime | None = None, source: str = "아카이빙") -> None:
+    """파일을 옮기는 작업(아카이빙/일괄 이동)이 끝났을 때 부른다 — 하나라도 옮겼으면 스캔을 요청한다. source: 실행 이력에 남길 출처(정기 아카이빙, 지금 이동, 폴더 일괄 이동 등)."""
     if count > 0:
-        request(when or datetime.now(timezone.utc))
+        request(when or datetime.now(timezone.utc), reason=f"{source}에서 파일 {count}개를 옮김")
 
 
 def set_watermark(when: datetime) -> None:
@@ -140,22 +162,25 @@ async def tick(session, now: datetime, timeout_seconds: int) -> None:
         state = update_state(requested_at=None)  # 이미 덮인 요청
 
     if state["started_at"] and not state["finished"]:  # 우리가 시작한 스캔이 도는 중
-        if now - datetime.fromisoformat(state["started_at"]) >= max_wait:
-            job_status.log_line("report", f"뷰어 서버 스캔이 {get_max_wait_minutes()}분 안에 끝나지 않아 더 이상 추적하지 않습니다")
-            state = update_state(finished=True)
+        elapsed = now - datetime.fromisoformat(state["started_at"])
+        if elapsed >= max_wait:
+            _cycle_log(f"웹툰 서버 스캔이 {get_max_wait_minutes()}분 안에 끝나지 않아 더 이상 추적하지 않습니다")
+            state = update_state(finished=True, cycle_failed=True)
         else:
             status = await webtoon_server_client.scan_status(session, base_url, token, timeout_seconds)
             if status is None or status.get("running"):
-                return  # 아직 도는 중 — 새 스캔은 끝난 뒤에
-            job_status.log_line("report", "뷰어 서버 스캔이 끝났습니다")
+                return  # 아직 도는 중 — 새 스캔은 끝난 뒤에(상태 확인은 이력에 줄을 남기지 않는다)
+            _cycle_log(f"스캔이 끝났습니다 (시작 후 {int(elapsed.total_seconds() // 60)}분)")
             state = update_state(finished=True, done_started_at=state["started_at"])
 
     if not state["requested_at"]:
+        _end_cycle()  # 스캔이 끝났고 대기 중인 요청도 없다 — 이 주기를 이력으로 저장한다
         return
     if state["foreign_wait"]:  # 뷰어가 다른 이유로 스캔 중 — 끝나면 시작
         if now - datetime.fromisoformat(state["requested_at"]) >= max_wait:
-            job_status.log_line("report", f"뷰어 서버의 스캔이 {get_max_wait_minutes()}분 안에 끝나지 않아 스캔 요청을 건너뜁니다")
-            update_state(requested_at=None, foreign_wait=False)
+            _cycle_log(f"웹툰 서버의 스캔이 {get_max_wait_minutes()}분 안에 끝나지 않아 스캔 요청을 건너뜁니다")
+            update_state(requested_at=None, foreign_wait=False, cycle_failed=True)
+            _end_cycle()
             return
         status = await webtoon_server_client.scan_status(session, base_url, token, timeout_seconds)
         if status is None or status.get("running"):
@@ -163,12 +188,14 @@ async def tick(session, now: datetime, timeout_seconds: int) -> None:
         state = update_state(foreign_wait=False)
     result = await webtoon_server_client.start_scan(session, base_url, token, timeout_seconds)
     if result == "started":
-        job_status.log_line("report", "뷰어 서버 스캔을 시작했습니다")
+        _cycle_log("웹툰 서버에 스캔을 시작시켰습니다")
         update_state(started_at=_iso(now), finished=False, requested_at=None)
     elif result == "running":
-        job_status.log_line("report", "뷰어 서버가 이미 스캔 중이라 그 스캔이 끝난 뒤에 시작합니다")
+        _cycle_log("웹툰 서버가 이미 스캔 중이라 끝난 뒤 시작합니다")
         update_state(foreign_wait=True)
     else:
-        job_status.log_line("report", "뷰어 서버 스캔을 시킬 수 없어서(연동 미지원/인증 실패/연결 오류) 건너뜁니다")
-        update_state(requested_at=None)
+        reason = "연동을 쓸 수 없어(연동 미지원, 주소·토큰 확인 필요)" if result == "unsupported" else "연결하지 못해"
+        _cycle_log(f"웹툰 서버에 {reason} 스캔을 건너뜁니다")
+        update_state(requested_at=None, cycle_failed=True)
+        _end_cycle()
 

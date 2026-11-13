@@ -124,6 +124,13 @@ async def api():
         body = {"source_type": "local", "source_path": "a", "source_local_root": "archive", "dest_type": "local", "dest_path": "b", "dest_local_root": "archive"}
         reset(); api_archive.archiver.bulk_move_folder = lambda *a, **k: 0; await c.post("/api/archive/bulk-move", json=body); await wait_idle(); assert state()["requested_at"] is None
         reset(); api_archive.archiver.bulk_move_folder = lambda *a, **k: 7; await c.post("/api/archive/bulk-move", json=body); await wait_idle(); assert state()["requested_at"] is not None
+        assert any("폴더 일괄 이동에서 파일 7개를 옮김" in l for l in logs), logs                                                         # 실행 이력("웹툰 서버 연동")의 스캔 사유에 출처가 들어간다
+        reset(); api_archive.archiver.manual_archive_now = fake_manual(4); await c.post("/api/archive/run", json={"title_ids": ["1"], "full_move": True}); await wait_idle()
+        assert any("지금 이동(수동)에서 파일 4개를 옮김" in l for l in logs), logs
+        api_archive.archiver.process_pending_finish_archives = lambda *a, **k: 5
+        reset(); api_archive.archiver.manual_archive_now = fake_manual(0); await c.post("/api/archive/run", json={}); await wait_idle()
+        assert any("지금 이동(수동)에서 파일 5개를 옮김" in l for l in logs), logs
+        api_archive.archiver.process_pending_finish_archives = lambda *a, **k: 0
 asyncio.run(api())
 print("9) 수동 아카이빙/일괄 이동 OK")
 # Scenario 10: 상태 저장은 동시에 일어나도 서로 덮어쓰지 않는다(JSON 한 덩어리를 읽고-바꾸고-쓰기) — 아카이빙이 끝났다는 알림과 1분 확인이 서로 다른 스레드에서 겹쳐도 요청이 사라지지 않아야 한다

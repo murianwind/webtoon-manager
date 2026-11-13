@@ -104,6 +104,7 @@ def _request_scan_for_batch(cutoff: str) -> None:
     """확정된 묶음(이전 확인 시점 ~ cutoff)에 새로 받은 회차(성공)가 있으면 뷰어 스캔을 요청한다. 같은 이력을 다시 따지지 않게 워터마크를 옮긴다."""
     since = viewer_scan.load_state()["watermark"] or repository.get_setting(_SETTING_KEY_REPORT_LAST_SENT_AT)
     cutoff_at = datetime.fromisoformat(cutoff)
-    if since and any(row["status"] == "success" for row in repository.list_episode_history_window(since, cutoff)):
-        viewer_scan.request(cutoff_at)
+    downloaded = sum(1 for row in repository.list_episode_history_window(since, cutoff) if row["status"] == "success") if since else 0
+    if downloaded:
+        viewer_scan.request(cutoff_at, reason=f"다운로드 {downloaded}건 완료")
     viewer_scan.set_watermark(cutoff_at)

@@ -28,6 +28,7 @@ _SETTING_KEY_REPORT_LAST_SENT_AT = report_dispatch.LAST_SENT_KEY
 
 
 _SETTING_KEY_WEBTOON_SERVER_URL = "webtoon_server_url"
+_MAX_LINK_LINES = 10  # 실행 이력에 풀어서 남기는 "링크를 못 찾은 작품" 수
 
 
 _KST = ZoneInfo("Asia/Seoul")
@@ -110,11 +111,22 @@ async def _resolve_reader_urls(session: aiohttp.ClientSession, settings, success
     urls: dict[str, str] = {}
     if not webtoon_server_url:
         return urls
+    missing: list[str] = []  # 링크를 못 찾은 작품(표시 이름)
+    looked_up = 0
     for platform, folder_name, key_prefix in (("naver", remove_forbidden_str, ""), ("kakao", remove_forbidden_str_kakao, "kakao:")):
         for title in sorted({r["title_name"] for r in success_rows if (r.get("platform") or "naver") == platform}):
+            looked_up += 1
             url = await webtoon_server_client.fetch_reader_url(session, webtoon_server_url, folder_name(title), settings.request_timeout_seconds)
             if url:
                 urls[f"{key_prefix}{title}"] = url
+            else:
+                missing.append(f"[카카오] {title}" if platform == "kakao" else title)
+    if looked_up:  # 실행 이력("웹툰 서버 연동")에 이번 리포트의 링크 조회 결과를 한 건으로 남긴다
+        lines = [f"다운로드 리포트 — 웹툰 서버에서 바로가기 링크를 조회했습니다 ({looked_up}개 작품: 성공 {looked_up - len(missing)}, 실패 {len(missing)})"]
+        lines += [f"- {name}: 링크를 찾지 못함" for name in missing[:_MAX_LINK_LINES]]
+        if len(missing) > _MAX_LINK_LINES:
+            lines.append(f"… 외 {len(missing) - _MAX_LINK_LINES}개 작품")
+        job_status.record_event("viewer_server", lines, success=not missing)
     return urls
 
 

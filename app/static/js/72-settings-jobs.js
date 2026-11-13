@@ -149,7 +149,7 @@ async function loadJobHistoryPage() {
   await loadJobHistory();
 }
 
-const JOB_NAME_LABEL = { discovery: "신작 스캔", download: "다운로드", manual: "수동 다운로드", registry: "작가/태그 재동기화", subscription: "구독/작가 등록", metadata_sync: "메타 동기화", report: "다운로드 리포트", quick_scan: "빠른 상태 스캔" };
+const JOB_NAME_LABEL = { discovery: "신작 스캔", download: "다운로드", manual: "수동 다운로드", registry: "작가/태그 재동기화", subscription: "구독/작가 등록", metadata_sync: "메타 동기화", report: "다운로드 리포트", quick_scan: "빠른 상태 스캔", viewer_server: "웹툰 서버 연동" };
 
 async function loadJobHistory() {
   const container = document.getElementById("job-history-list");

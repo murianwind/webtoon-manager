@@ -621,7 +621,7 @@ async def run_archive_now(payload: ArchiveRunIn):
 
         try:
             # 뷰어 서버가 설정돼 있으면 읽은 회차만 옮기고 읽음 상태를 알 수 없는 작품은 옮기지 않는다(완결 처리 이동은 읽음 상태를 보지 않는다)
-            async with read_numbers_provider_for(settings) as provider:
+            async with read_numbers_provider_for(settings, source="지금 이동(수동)") as provider:
                 if payload.title_ids:
                     moved = await asyncio.to_thread(
                         archiver.manual_archive_now, settings.archive_root, download_roots.naver_root(settings), payload.title_ids, settings.rclone_config_path,
@@ -637,7 +637,7 @@ async def run_archive_now(payload: ArchiveRunIn):
                 job_status.log_line("archive", "사용자 요청으로 중단했습니다 (이미 옮긴 파일은 그대로, 남은 파일은 다음 실행에서 이어서 옮깁니다)")
             if payload.title_ids:
                 job_status.log_line("archive", f"{moved}개 파일 이동 완료")
-                viewer_scan.note_library_changed(moved)  # 옮긴 파일이 있으면 뷰어 서버가 다시 훑게 한다(연동이 켜져 있을 때만)
+                viewer_scan.note_library_changed(moved, source="지금 이동(수동)")  # 옮긴 파일이 있으면 뷰어 서버가 다시 훑게 한다(연동이 켜져 있을 때만)
             else:
                 job_status.log_line("archive", f"지정 웹툰 {moved}개 파일 이동 완료")
 
@@ -646,7 +646,7 @@ async def run_archive_now(payload: ArchiveRunIn):
                     lambda msg: job_status.log_line("archive", msg), None, None, download_roots.kakao_root(settings),
                 )
                 job_status.log_line("archive", f"완결 구독해제 대기열 {pending_moved}개 파일 이동 완료")
-                viewer_scan.note_library_changed(moved + pending_moved)
+                viewer_scan.note_library_changed(moved + pending_moved, source="지금 이동(수동)")
 
             job_status.finish("archive", success=True)
         except Exception as e:
@@ -771,7 +771,7 @@ async def bulk_move(payload: BulkMoveIn):
             # (주기/수동/완결 이동과 동일한 단위) — 여기서 요약 한 줄을 따로 더
             # 남기면 파일 단위 기록과 중복/불일치하므로 더 이상 남기지 않는다.
             job_status.log_line("bulk_move", f"완료 — {moved}개 파일 이동")
-            viewer_scan.note_library_changed(moved)  # 폴더 일괄 이동도 보관 폴더에 파일을 만들므로 뷰어 서버가 다시 훑게 한다
+            viewer_scan.note_library_changed(moved, source="폴더 일괄 이동")  # 폴더 일괄 이동도 보관 폴더에 파일을 만들므로 뷰어 서버가 다시 훑게 한다
             job_status.finish("bulk_move", success=True)
         except ValueError as e:
             job_status.log_line("bulk_move", f"오류: {e}")

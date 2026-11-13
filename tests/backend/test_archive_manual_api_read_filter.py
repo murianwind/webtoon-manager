@@ -45,6 +45,8 @@ async def main():
         repository.set_setting("webtoon_server_url", "http://viewer:8000"); READ["value"] = frozenset({1, 2})
         src = make("수동API작", [1, 2, 3, 4]); log = await run_and_wait(c, title_ids=["911"])
         assert left(src) == ["0003 3화.zip", "0004 4화.zip"] and "읽지 않은 1개 회차는 건너뜀" in log and asked == ["수동API작"], (left(src), log)
+        history = [e for e in repository.list_job_history(50) if e["job_name"] == "viewer_server"]                                                    # 실행 이력("웹툰 서버 연동")에 조회 결과가 남는다
+        assert history and "지금 이동(수동) — 웹툰 서버에 읽은 회차를 조회했습니다 (1개 작품: 성공 1, 실패 0)" in history[0]["log"][0] and "- 수동API작: 읽은 회차 2개" in history[0]["log"][1], history
         print("1) 뷰어 설정 시 읽은 회차만 OK")
         # Scenario 2: 선택 없이(활성 대상 전부) 실행해도 같다
         src = make("수동API작", [11, 12, 13]); READ["value"] = frozenset({11}); log = await run_and_wait(c)

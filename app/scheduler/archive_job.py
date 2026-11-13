@@ -34,15 +34,44 @@ def _build_read_numbers_provider(
     return provider
 
 
+_MAX_LOOKUP_LINES = 30  # 실행 이력에 작품별로 풀어서 남기는 조회 수(나머지는 개수만)
+
+
+def _record_read_lookups(source: str, lookups: list[tuple[str, bool, "frozenset[int] | None"]]) -> None:
+    """이번 실행에서 뷰어 서버에 읽은 회차를 조회한 결과를 실행 이력("웹툰 서버 연동") 한 건으로 남긴다 — 작품별로 읽은 회차 수 또는 조회 실패(옮기지 않음). 조회가 없었으면 남기지 않는다."""
+    if not lookups:
+        return
+    failed = sum(1 for _, _, result in lookups if result is None)
+    lines = [f"{source} — 웹툰 서버에 읽은 회차를 조회했습니다 ({len(lookups)}개 작품: 성공 {len(lookups) - failed}, 실패 {failed})"]
+    for title_name, kakao, result in lookups[:_MAX_LOOKUP_LINES]:
+        label = f"[카카오] {title_name}" if kakao else title_name
+        lines.append(f"- {label}: " + ("조회 실패 → 옮기지 않음" if result is None else f"읽은 회차 {len(result)}개"))
+    if len(lookups) > _MAX_LOOKUP_LINES:
+        lines.append(f"… 외 {len(lookups) - _MAX_LOOKUP_LINES}개 작품")
+    job_status.record_event("viewer_server", lines, success=failed == 0)
+
+
 @asynccontextmanager
-async def read_numbers_provider_for(settings):
-    """뷰어 서버 주소가 설정돼 있으면 읽은 회차를 묻는 조회 함수(동기)를, 아니면 None을 준다 — 정기 아카이빙과 "지금 이동"(수동)이 같이 쓴다. 뷰어 세션은 이 블록이 끝나면 닫힌다."""
+async def read_numbers_provider_for(settings, source: str = "아카이빙"):
+    """뷰어 서버 주소가 설정돼 있으면 읽은 회차를 묻는 조회 함수(동기)를, 아니면 None을 준다 — 정기 아카이빙과 "지금 이동"(수동)이 같이 쓴다. 뷰어 세션은 이 블록이 끝나면 닫힌다.
+    조회한 결과는 블록이 끝날 때(오류로 끝나도) 실행 이력에 한 건으로 남긴다(source: 정기 아카이빙/지금 이동(수동))."""
     server_url = await asyncio.to_thread(repository.get_setting, _SETTING_KEY_WEBTOON_SERVER_URL)
     if not server_url:
         yield None
         return
+    lookups: list[tuple[str, bool, frozenset[int] | None]] = []
     async with aiohttp.ClientSession() as viewer_session:
-        yield _build_read_numbers_provider(asyncio.get_running_loop(), viewer_session, server_url, settings.request_timeout_seconds)
+        inner = _build_read_numbers_provider(asyncio.get_running_loop(), viewer_session, server_url, settings.request_timeout_seconds)
+
+        def provider(title_name: str, kakao: bool) -> frozenset[int] | None:
+            result = inner(title_name, kakao)
+            lookups.append((title_name, kakao, result))
+            return result
+
+        try:
+            yield provider
+        finally:
+            _record_read_lookups(source, lookups)
 
 
 def _cleanup_old_archive_history() -> None:
@@ -115,7 +144,7 @@ async def run_archive_job() -> None:
         conflicts: list[tuple[str, str, str]] = []
         failures: list[tuple[str, str, str]] = []
         try:
-            async with read_numbers_provider_for(settings) as provider:  # 뷰어 서버가 설정돼 있을 때만 — 뷰어에서 읽지 않은 회차와 읽음 상태를 알 수 없는 작품은 옮기지 않는다
+            async with read_numbers_provider_for(settings, source="정기 아카이빙") as provider:  # 뷰어 서버가 설정돼 있을 때만 — 뷰어에서 읽지 않은 회차와 읽음 상태를 알 수 없는 작품은 옮기지 않는다
                 moved = await asyncio.to_thread(
                     archiver.run_periodic_archive, settings.archive_root, download_roots.naver_root(settings), settings.rclone_config_path,
                     lambda msg: job_status.log_line("archive", msg), conflicts, failures,
@@ -131,7 +160,7 @@ async def run_archive_job() -> None:
             job_status.log_line("archive", f"완결 구독해제 대기열 {pending_moved}개 파일 이동 완료")
             if cancel.is_requested():
                 job_status.log_line("archive", f"사용자 요청으로 중단했습니다 (이미 옮긴 {moved + pending_moved}개 파일은 그대로, 남은 파일은 다음 실행에서 이어서 옮깁니다)")
-            viewer_scan.note_library_changed(moved + pending_moved)  # 파일을 옮겼으면 뷰어 서버가 다시 훑게 한다(연동이 켜져 있을 때만)
+            viewer_scan.note_library_changed(moved + pending_moved, source="정기 아카이빙")  # 파일을 옮겼으면 뷰어 서버가 다시 훑게 한다(연동이 켜져 있을 때만)
             _cleanup_old_archive_history()
 
             if conflicts or failures:

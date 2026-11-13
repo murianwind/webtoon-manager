@@ -29,7 +29,7 @@ def fake_pending(archive_root, download_root, rclone_config, log_fn, conflicts, 
 rclone_updater.check_and_update = fake_update
 archiver.run_periodic_archive, archiver.process_pending_finish_archives = fake_periodic, fake_pending
 sent = []; discord_notify.send_webhook_notification = discord_fake(sent)
-noted = []; viewer_scan.note_library_changed = lambda count, when=None: noted.append(count)
+noted = []; note_sources = []; viewer_scan.note_library_changed = lambda count, when=None, source="": (noted.append(count), note_sources.append(source))
 run = lambda: asyncio.run(aj.run_archive_job())
 snap = lambda: job_status.snapshot()["archive"]
 text = lambda: "\n".join(snap()["log"])
@@ -38,7 +38,7 @@ text = lambda: "\n".join(snap()["log"])
 reset(); noted.clear(); sent.clear(); run()
 assert snap()["status"] == "success" and "rclone 최신" in text() and "지정 웹툰 2개 파일 이동 완료" in text() and "완결 구독해제 대기열 1개 파일 이동 완료" in text(), text()
 assert seen["periodic"]["provider"] is None, "뷰어 서버가 없으면 읽은 회차로 거르지 않는다"
-assert noted == [3] and sent == [], (noted, sent)
+assert noted == [3] and sent == [] and note_sources == ["정기 아카이빙"], (noted, sent, note_sources)                      # 실행 이력의 스캔 사유에 쓰이는 출처
 print("1) 정상 실행 OK")
 
 # Scenario 2: rclone 업데이트 확인이 실패해도 무시하고 계속한다(오류 문구만 로그에)

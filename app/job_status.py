@@ -36,6 +36,7 @@ _statuses: dict[str, _JobStatus] = {
     "quick_scan": _JobStatus(),
     "archive": _JobStatus(),
     "bulk_move": _JobStatus(),
+    "viewer_server": _JobStatus(),  # 웹툰 서버(뷰어)와 주고받은 일 — 스캔 주기, 읽은 회차 조회, 바로가기 링크 조회
 }
 
 
