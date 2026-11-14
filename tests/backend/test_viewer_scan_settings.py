@@ -14,25 +14,27 @@ import app.main as m
 from fakes import AsyncResponse as Resp
 class Session:
     def __init__(self, outcome): self.outcome, self.calls = outcome, []
-    def _call(self, method, url, headers, timeout):
-        self.calls.append((method, url, headers, timeout.total))
+    def _call(self, method, url, headers, timeout, payload):
+        self.calls.append((method, url, headers, timeout.total, payload))
         if isinstance(self.outcome, BaseException): raise self.outcome
         return self.outcome
-    def post(self, url, headers=None, timeout=None): return self._call("POST", url, headers, timeout)
-    def get(self, url, headers=None, timeout=None): return self._call("GET", url, headers, timeout)
+    def post(self, url, headers=None, timeout=None, json=None): return self._call("POST", url, headers, timeout, json)
+    def get(self, url, headers=None, timeout=None, params=None): return self._call("GET", url, headers, timeout, params)
 run = lambda coro: asyncio.run(coro)
 
-# Scenario 1: 스캔 시작 — 인증 헤더와 주소(끝 슬래시 정리), 응답 해석
-for status, data, expected in ((200, {"started": True}, "started"), (200, {"started": False, "running": True}, "running"), (404, None, "unsupported"), (401, None, "unsupported"), (403, None, "unsupported"), (500, None, "error")):
-    s = Session(Resp(status, data)); assert run(client.start_scan(s, "http://viewer/", "토큰", 7)) == expected, (status, expected)
-assert s.calls == [("POST", "http://viewer/api/integration/rescan", {"X-Integration-Token": "토큰"}, 7)], s.calls
-assert run(client.start_scan(Session(ConnectionError("연결 안 됨")), "http://viewer", "t", 5)) == "error"                      # 연결 오류도 "error" — 리포트는 그대로 간다
+# Scenario 1: 스캔 시작 — 인증 헤더와 주소(끝 슬래시 정리), 범위(scope)를 본문으로, 응답 해석(뷰어가 범위를 아는지는 응답에 scope가 있는지로)
+for status, data, expected in ((200, {"started": True, "scope": "fast"}, ("started", True)), (200, {"started": False, "running": True, "scope": "fast"}, ("running", True)),
+                               (200, {"started": True}, ("started", False)), (200, {"started": False, "running": True}, ("running", False)),           # 옛 뷰어: 범위를 모른다
+                               (404, None, ("unsupported", False)), (401, None, ("unsupported", False)), (403, None, ("unsupported", False)), (500, None, ("error", False))):
+    s = Session(Resp(status, data)); assert run(client.start_scan(s, "http://viewer/", "토큰", 7, "fast")) == expected, (status, expected)
+assert s.calls == [("POST", "http://viewer/api/integration/rescan", {"X-Integration-Token": "토큰"}, 7, {"scope": "fast"})], s.calls
+assert run(client.start_scan(Session(ConnectionError("연결 안 됨")), "http://viewer", "t", 5, "all")) == ("error", False)      # 연결 오류도 "error" — 리포트는 그대로 간다
 # Scenario 2: 스캔 상태 — running이 들어 있는 응답만 인정, 못 읽으면 None(다음 확인 때 다시)
-assert run(client.scan_status(Session(Resp(200, {"running": True, "last_scan_at": "x"})), "http://viewer", "t", 5)) == {"running": True, "last_scan_at": "x"}
-assert run(client.scan_status(Session(Resp(200, {"running": False})), "http://viewer", "t", 5)) == {"running": False}
+assert run(client.scan_status(Session(Resp(200, {"running": True, "last_scan_at": "x"})), "http://viewer", "t", 5, "fast")) == {"running": True, "last_scan_at": "x"}
+assert run(client.scan_status(Session(Resp(200, {"running": False})), "http://viewer", "t", 5, "fast")) == {"running": False}
 for bad in (Resp(200, {"nothing": 1}), Resp(200, ["x"]), Resp(500, None), Resp(404, None), ConnectionError("끊김")):
-    assert run(client.scan_status(Session(bad), "http://viewer", "t", 5)) is None
-s = Session(Resp(200, {"running": False})); run(client.scan_status(s, "http://viewer/", "토큰", 3)); assert s.calls == [("GET", "http://viewer/api/integration/scan-status", {"X-Integration-Token": "토큰"}, 3)]
+    assert run(client.scan_status(Session(bad), "http://viewer", "t", 5, "fast")) is None
+s = Session(Resp(200, {"running": False})); run(client.scan_status(s, "http://viewer/", "토큰", 3, "slow")); assert s.calls == [("GET", "http://viewer/api/integration/scan-status", {"X-Integration-Token": "토큰"}, 3, {"scope": "slow"})], s.calls   # 범위를 물어본다
 print("1~2) 클라이언트 OK")
 
 async def api():

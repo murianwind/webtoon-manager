@@ -26,8 +26,8 @@ LAST_SENT = "report_last_sent_at"
 sent = []; SCAN = {}; SECTIONS = {"naver": [], "kakao": []}; VIEWER = {}
 fake_send = discord_fake(sent, result=None)
 discord_notify.send_webhook_notification = fake_send
-async def fake_start(session, base, token, timeout): SCAN["start"].append((base, token)); return SCAN["start_result"]
-async def fake_status(session, base, token, timeout): SCAN["poll"] += 1; return {"running": SCAN["running"]}
+async def fake_start(session, base, token, timeout, scope): SCAN["start"].append((base, token)); SCAN["scopes"].append(scope); return SCAN["start_result"], True
+async def fake_status(session, base, token, timeout, scope): SCAN["poll"] += 1; return {"running": SCAN["running"]}
 webtoon_server_client.start_scan = fake_start; webtoon_server_client.scan_status = fake_status
 async def fake_sections(session, settings, *, force_test): return list(SECTIONS["naver"]), list(SECTIONS["kakao"])
 scheduler.report_job.collect_new_episode_sections = fake_sections
@@ -37,7 +37,7 @@ discord_config.set_webhook_url("https://discord.com/api/webhooks/1/test")
 
 
 def reset(*, quiet=(), batch=10, scan=False, max_wait=45):
-    sent.clear(); SCAN.update(start=[], poll=0, start_result="started", running=True); SECTIONS.update(naver=[], kakao=[]); VIEWER.clear()
+    sent.clear(); SCAN.update(start=[], scopes=[], poll=0, start_result="started", running=True); SECTIONS.update(naver=[], kakao=[]); VIEWER.clear()
     with db.write_transaction() as cx: cx.execute("DELETE FROM episode_history")
     repository.set_setting(rd.STATE_KEY, None); repository.set_setting(viewer_scan.STATE_KEY, None); repository.set_setting(LAST_SENT, (T0 - timedelta(days=1)).astimezone(UTC).isoformat())
     rd.set_quiet_hours(list(quiet)); rd.set_batch_minutes(batch)
@@ -78,7 +78,7 @@ print("3) 발송하지 않는 시간 쌓기/몰아 보내기 OK")
 
 # Scenario 4: 뷰어 스캔 — 묶음이 확정되면 스캔을 한 번 시작하고 끝날 때까지 기다린 뒤 리포트(링크가 스캔 결과를 반영)
 reset(scan=True); add_row("스캔작품", T0); VIEWER["스캔작품"] = "http://viewer/s"; rd.note_download_finished(T0)
-tick(T0 + MIN(10)); assert SCAN["start"] == [("http://viewer", "secret-token")] and sent == [], "묶음 확정 때 스캔 시작, 끝나기 전에는 보내지 않는다"
+tick(T0 + MIN(10)); assert SCAN["start"] == [("http://viewer", "secret-token")] and SCAN["scopes"] == ["fast"] and sent == [], "묶음 확정 때 로컬 저장소 스캔 시작, 끝나기 전에는 보내지 않는다"
 tick(T0 + MIN(11)); tick(T0 + MIN(20)); assert len(SCAN["start"]) == 1 and SCAN["poll"] == 2 and sent == [], (SCAN, sent)        # 스캔은 한 번만 시작하고 진행 상태만 확인
 SCAN["running"] = False; tick(T0 + MIN(25)); assert len(sent) == 1 and "http://viewer/s" in sent[0] and len(SCAN["start"]) == 1
 assert state()["scan_started_at"] is None and state()["last_download_at"] is None
@@ -151,7 +151,7 @@ print("10) 시작 연결/1분 확인 작업/스케줄 API OK")
 # 실패만 있는 묶음은 스캔을 요청하지 않는다(새 파일이 없다). 할 일이 없는 확인은 서버에 아무 요청도 하지 않는다
 reset(scan=True); tick(T0)
 assert SCAN["start"] == [] and SCAN["poll"] == 0                                                                           # 대기 중인 것도 진행 중인 스캔도 없으면 조용하다
-viewer_scan.request(T0); tick(T0 + MIN(1)); assert len(SCAN["start"]) == 1                                                   # 아카이빙 같은 곳이 요청해서 스캔 시작(T0+1)
+viewer_scan.request(T0, scope="fast"); tick(T0 + MIN(1)); assert len(SCAN["start"]) == 1                                     # 다른 곳이 요청해서 로컬 스캔 시작(T0+1)
 add_row("먼저받음", T0); rd.note_download_finished(T0)                                                                       # 그 스캔이 시작되기 전에 받은 것
 tick(T0 + MIN(10)); assert sent == [] and len(SCAN["start"]) == 1, (sent, SCAN)                                              # 묶음 확정: 이미 시작한 스캔이 덮으니 새로 시작하지 않고 끝나기를 기다린다
 SCAN["running"] = False; tick(T0 + MIN(11)); assert len(sent) == 1 and "먼저받음" in sent[0] and len(SCAN["start"]) == 1

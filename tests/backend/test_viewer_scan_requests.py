@@ -20,8 +20,8 @@ UTC = timezone.utc
 T0 = datetime(2026, 10, 13, 3, 0, tzinfo=UTC)
 MIN = lambda n: timedelta(minutes=n)
 SCAN = {}
-async def fake_start(session, base, token, timeout): SCAN["start"].append((base, token)); return SCAN["start_result"]
-async def fake_status(session, base, token, timeout): SCAN["poll"] += 1; return SCAN["status"]
+async def fake_start(session, base, token, timeout, scope): SCAN["start"].append((base, token)); return SCAN["start_result"], True
+async def fake_status(session, base, token, timeout, scope): SCAN["poll"] += 1; return SCAN["status"]
 webtoon_server_client.start_scan = fake_start; webtoon_server_client.scan_status = fake_status
 logs = []
 viewer_scan.job_status.log_line = lambda job, line: logs.append(line)
@@ -32,40 +32,40 @@ def reset(*, ready=True, max_wait=45):
     repository.set_setting(viewer_scan.STATE_KEY, None)
     repository.set_setting("webtoon_server_url", "http://viewer" if ready else None); viewer_scan.set_config(enabled=ready, token="secret-token" if ready else "", max_wait_minutes=max_wait)
 def tick(now): asyncio.run(viewer_scan.tick(None, now, 5))
-def state(): return viewer_scan.load_state()
+def state(): return viewer_scan.load_state()["lanes"]["fast"]                      # 다운로드(로컬) 레인
 
 # Scenario 1: 준비되지 않았으면(꺼짐/토큰 없음/주소 없음) 요청은 기록하지 않고 할 일도 없다 — 서버에 아무 요청도 안 간다
 for kw in ({"ready": False},):
-    reset(**kw); viewer_scan.request(T0); assert not viewer_scan.has_work() and state()["requested_at"] is None; tick(T0 + MIN(1)); assert SCAN["start"] == [] and SCAN["poll"] == 0
-reset(); repository.set_setting("webtoon_server_url", None); viewer_scan.request(T0); assert not viewer_scan.has_work()                    # 주소가 없으면
-reset(); viewer_scan.set_config(enabled=True, token=""); viewer_scan.request(T0); assert not viewer_scan.has_work()                        # 토큰을 지우면
-reset(); viewer_scan.set_config(enabled=False); viewer_scan.request(T0); assert not viewer_scan.has_work()                                 # 꺼 두면
+    reset(**kw); viewer_scan.request(T0, scope="fast"); assert not viewer_scan.has_work() and state()["requested_at"] is None; tick(T0 + MIN(1)); assert SCAN["start"] == [] and SCAN["poll"] == 0
+reset(); repository.set_setting("webtoon_server_url", None); viewer_scan.request(T0, scope="fast"); assert not viewer_scan.has_work()                    # 주소가 없으면
+reset(); viewer_scan.set_config(enabled=True, token=""); viewer_scan.request(T0, scope="fast"); assert not viewer_scan.has_work()                        # 토큰을 지우면
+reset(); viewer_scan.set_config(enabled=False); viewer_scan.request(T0, scope="fast"); assert not viewer_scan.has_work()                                 # 꺼 두면
 print("1) 준비 안 됨 OK")
 
 # Scenario 2: 변경 요청 → 한 번 시작(주소와 토큰으로) → 이후엔 진행 상태만 확인 → 끝나면 더 이상 아무것도 안 한다
-reset(); viewer_scan.request(T0)
-assert viewer_scan.has_work() and viewer_scan.covered_state(T0) == "waiting"
-tick(T0 + MIN(1)); assert SCAN["start"] == [("http://viewer", "secret-token")] and SCAN["poll"] == 0 and viewer_scan.covered_state(T0) == "waiting" and state()["requested_at"] is None
+reset(); viewer_scan.request(T0, scope="fast")
+assert viewer_scan.has_work() and viewer_scan.covered_state(T0, "fast") == "waiting"
+tick(T0 + MIN(1)); assert SCAN["start"] == [("http://viewer", "secret-token")] and SCAN["poll"] == 0 and viewer_scan.covered_state(T0, "fast") == "waiting" and state()["requested_at"] is None
 tick(T0 + MIN(2)); tick(T0 + MIN(3)); assert len(SCAN["start"]) == 1 and SCAN["poll"] == 2                                                   # 시작은 한 번, 진행 확인만
-SCAN["status"] = {"running": False}; tick(T0 + MIN(4)); assert viewer_scan.covered_state(T0) == "done" and not viewer_scan.has_work()
+SCAN["status"] = {"running": False}; tick(T0 + MIN(4)); assert viewer_scan.covered_state(T0, "fast") == "done" and not viewer_scan.has_work()
 tick(T0 + MIN(5)); assert SCAN["poll"] == 3 and len(SCAN["start"]) == 1                                                                     # 끝난 뒤에는 요청도 확인도 없다
 print("2) 시작/진행 확인/완료 OK")
 
 # Scenario 3: 같은 변경에 스캔을 두 번 시키지 않는다 — 이미 시작한 스캔보다 먼저 일어난 변경(또는 같은 시각)의 요청은 그 스캔이 덮는다. 더 늦은 변경은 끝난 뒤 다시
-reset(); viewer_scan.request(T0); tick(T0 + MIN(1))                                                                                          # 시작 시각 T0+1분
-viewer_scan.request(T0 + MIN(1)); assert viewer_scan.covered_state(T0 + MIN(1)) == "waiting"                                                  # 시작과 같은 시각 변경: 그 스캔이 덮는다
+reset(); viewer_scan.request(T0, scope="fast"); tick(T0 + MIN(1))                                                                                          # 시작 시각 T0+1분
+viewer_scan.request(T0 + MIN(1), scope="fast"); assert viewer_scan.covered_state(T0 + MIN(1), "fast") == "waiting"                                                  # 시작과 같은 시각 변경: 그 스캔이 덮는다
 tick(T0 + MIN(2)); assert len(SCAN["start"]) == 1
-viewer_scan.request(T0 + MIN(3))                                                                                                             # 스캔이 도는 중에 새 변경(시작 뒤)
-assert viewer_scan.covered_state(T0 + MIN(3)) == "waiting"
+viewer_scan.request(T0 + MIN(3), scope="fast")                                                                                                             # 스캔이 도는 중에 새 변경(시작 뒤)
+assert viewer_scan.covered_state(T0 + MIN(3), "fast") == "waiting"
 tick(T0 + MIN(4)); assert len(SCAN["start"]) == 1 and SCAN["poll"] == 2                                                                      # 진행 중에는 새로 시작하지 않는다
 SCAN["status"] = {"running": False}; tick(T0 + MIN(5)); assert len(SCAN["start"]) == 2                                                         # 끝나는 즉시(같은 확인에서) 다시 시작
-assert viewer_scan.covered_state(T0 + MIN(3)) == "waiting" and viewer_scan.covered_state(T0) == "done"
-SCAN["status"] = {"running": False}; tick(T0 + MIN(6)); assert viewer_scan.covered_state(T0 + MIN(3)) == "done" and len(SCAN["start"]) == 2
+assert viewer_scan.covered_state(T0 + MIN(3), "fast") == "waiting" and viewer_scan.covered_state(T0, "fast") == "done"
+SCAN["status"] = {"running": False}; tick(T0 + MIN(6)); assert viewer_scan.covered_state(T0 + MIN(3), "fast") == "done" and len(SCAN["start"]) == 2
 print("3) 중복 방지/스캔 중 새 변경 OK")
 
 # Scenario 4: 뷰어가 이미 스캔 중이면(자동 재스캔 등 우리가 시작하지 않은 스캔) 끝나기를 기다렸다가 시작한다 — 그 스캔은 우리 변경 전에 시작했을 수 있어서 그것만으로는 반영을 장담할 수 없다
-reset(); SCAN["start_result"] = "running"; viewer_scan.request(T0); tick(T0 + MIN(1))
-assert len(SCAN["start"]) == 1 and state()["foreign_wait"] is True and viewer_scan.covered_state(T0) == "waiting"
+reset(); SCAN["start_result"] = "running"; viewer_scan.request(T0, scope="fast"); tick(T0 + MIN(1))
+assert len(SCAN["start"]) == 1 and state()["foreign_wait"] is True and viewer_scan.covered_state(T0, "fast") == "waiting"
 tick(T0 + MIN(2)); tick(T0 + MIN(3)); assert len(SCAN["start"]) == 1 and SCAN["poll"] == 2                                                    # 끝날 때까지 상태만 확인
 SCAN["status"] = {"running": False}; SCAN["start_result"] = "started"; tick(T0 + MIN(4))
 assert len(SCAN["start"]) == 2 and state()["foreign_wait"] is False and state()["started_at"] == (T0 + MIN(4)).isoformat()                    # 끝나자마자 우리 스캔 시작
@@ -73,17 +73,17 @@ print("4) 이미 스캔 중이면 기다렸다 시작 OK")
 
 # Scenario 5: 연동이 없거나(unsupported)/연결 오류면 요청을 버린다 — 다시 시도하지 않고, "실패"로 알려서 리포트가 기다리지 않게 한다
 for result in ("unsupported", "error"):
-    reset(); SCAN["start_result"] = result; viewer_scan.request(T0); tick(T0 + MIN(1))
-    assert state()["requested_at"] is None and not viewer_scan.has_work() and viewer_scan.covered_state(T0) == "failed" and len(SCAN["start"]) == 1 and any("건너뜁니다" in l for l in logs)
+    reset(); SCAN["start_result"] = result; viewer_scan.request(T0, scope="fast"); tick(T0 + MIN(1))
+    assert state()["requested_at"] is None and not viewer_scan.has_work() and viewer_scan.covered_state(T0, "fast") == "failed" and len(SCAN["start"]) == 1 and any("건너뜁니다" in l for l in logs)
     tick(T0 + MIN(2)); tick(T0 + MIN(3)); assert len(SCAN["start"]) == 1                                                                      # 재시도 폭주 없음
 print("5) 연동 없음/오류는 버림 OK")
 
 # Scenario 6: 너무 오래 걸리면 추적을 멈춘다(최대 대기 45분) — 우리가 시작한 스캔을 계속 확인하지 않고, 남이 돌리는 스캔이 안 끝나면 요청을 버린다
-reset(max_wait=45); viewer_scan.request(T0); tick(T0 + MIN(1))
+reset(max_wait=45); viewer_scan.request(T0, scope="fast"); tick(T0 + MIN(1))
 tick(T0 + MIN(30)); assert SCAN["poll"] == 1 and viewer_scan.has_work()
 tick(T0 + MIN(46)); assert not viewer_scan.has_work() and SCAN["poll"] == 1 and any("추적" in l for l in logs), (SCAN, logs)                    # 시작(1분) + 45분 뒤 확인 없이 추적 중단
-reset(max_wait=45); SCAN["start_result"] = "running"; viewer_scan.request(T0); tick(T0 + MIN(1)); tick(T0 + MIN(30)); assert viewer_scan.has_work()
-tick(T0 + MIN(46)); assert not viewer_scan.has_work() and state()["requested_at"] is None and state()["foreign_wait"] is False and viewer_scan.covered_state(T0) == "failed"
+reset(max_wait=45); SCAN["start_result"] = "running"; viewer_scan.request(T0, scope="fast"); tick(T0 + MIN(1)); tick(T0 + MIN(30)); assert viewer_scan.has_work()
+tick(T0 + MIN(46)); assert not viewer_scan.has_work() and state()["requested_at"] is None and state()["foreign_wait"] is False and viewer_scan.covered_state(T0, "fast") == "failed"
 print("6) 오래 걸리면 추적 중단 OK")
 
 # Scenario 7: 변경이 생겼다고 알리는 곳 — 새 파일이 0개면 아무것도 안 하고, 1개 이상이면 요청한다
@@ -124,7 +124,7 @@ async def api():
         body = {"source_type": "local", "source_path": "a", "source_local_root": "archive", "dest_type": "local", "dest_path": "b", "dest_local_root": "archive"}
         reset(); api_archive.archiver.bulk_move_folder = lambda *a, **k: 0; await c.post("/api/archive/bulk-move", json=body); await wait_idle(); assert state()["requested_at"] is None
         reset(); api_archive.archiver.bulk_move_folder = lambda *a, **k: 7; await c.post("/api/archive/bulk-move", json=body); await wait_idle(); assert state()["requested_at"] is not None
-        assert any("폴더 일괄 이동에서 파일 7개를 옮김" in l for l in logs), logs                                                         # 실행 이력("웹툰 서버 연동")의 스캔 사유에 출처가 들어간다
+        assert any(l == "스캔 필요[로컬+원격]: 폴더 일괄 이동에서 파일 7개를 옮김" for l in logs), logs                                                         # 실행 이력("웹툰 서버 연동")의 스캔 사유에 출처가 들어간다
         reset(); api_archive.archiver.manual_archive_now = fake_manual(4); await c.post("/api/archive/run", json={"title_ids": ["1"], "full_move": True}); await wait_idle()
         assert any("지금 이동(수동)에서 파일 4개를 옮김" in l for l in logs), logs
         api_archive.archiver.process_pending_finish_archives = lambda *a, **k: 5
@@ -137,7 +137,10 @@ print("9) 수동 아카이빙/일괄 이동 OK")
 from concurrent.futures import ThreadPoolExecutor
 reset()
 with ThreadPoolExecutor(8) as pool: list(pool.map(lambda i: viewer_scan.update_state(**{f"k{i}": i}), range(120)))
-assert all(f"k{i}" in state() for i in range(120)), f"동시에 갱신하면 사라진다: {sum(1 for i in range(120) if f'k{i}' in state())}/120"
+assert all(f"k{i}" in viewer_scan.load_state() for i in range(120)), f"동시에 갱신하면 사라진다: {sum(1 for i in range(120) if f'k{i}' in viewer_scan.load_state())}/120"
+reset()
+with ThreadPoolExecutor(8) as pool: list(pool.map(lambda i: viewer_scan._update_lane("fast" if i % 2 else "slow", **{f"k{i}": i}), range(120)))
+lanes = viewer_scan.load_state()["lanes"]; assert all(f"k{i}" in lanes["fast" if i % 2 else "slow"] for i in range(120)), "레인별 갱신도 서로 지우지 않는다"
 reset()
 print("10) 동시 갱신 OK")
 print("ALL OK")

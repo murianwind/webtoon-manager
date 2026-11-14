@@ -77,7 +77,7 @@ async def _report_step(now: datetime, scan: _TickScan) -> None:
     since = repository.get_setting(_SETTING_KEY_REPORT_LAST_SENT_AT)
 
     if not state["scan_requested"]:
-        _request_scan_for_batch(cutoff)  # 이번 묶음에 새로 받은 게 있으면 뷰어 스캔 요청 — 리포트를 보내든 말든 뷰어는 새 파일을 훑어야 한다
+        _request_scan_for_batch(cutoff)  # 이번 묶음에 새로 받은 게 있으면 뷰어 스캔(로컬 저장소) 요청 — 리포트를 보내든 말든 뷰어는 새 파일을 훑어야 한다
         state = report_dispatch.update_state(scan_requested=True)
 
     rows = report_seen.filter_unseen_rows(repository.list_episode_history_window(since, cutoff)) if since else []
@@ -90,8 +90,8 @@ async def _report_step(now: datetime, scan: _TickScan) -> None:
         if not state["scan_started_at"]:
             state = report_dispatch.update_state(scan_started_at=started)
         waited = now - datetime.fromisoformat(started)
-        if viewer_scan.covered_state(datetime.fromisoformat(cutoff)) == "waiting" and waited < timedelta(minutes=viewer_scan.get_max_wait_minutes()):
-            return  # 뷰어 스캔이 끝나기를 기다린다(그 뒤에 리포트의 바로가기 링크가 새 회차를 가리킨다)
+        if viewer_scan.covered_state(datetime.fromisoformat(cutoff), "fast") == "waiting" and waited < timedelta(minutes=viewer_scan.get_max_wait_minutes()):
+            return  # 로컬 저장소의 뷰어 스캔이 끝나기를 기다린다(그 뒤에 리포트의 바로가기 링크가 새 회차를 가리킨다) — 원격 드라이브 스캔(아카이빙)은 기다리지 않는다
         state = report_dispatch.update_state(scan_done=True)  # 반영됐거나(done), 스캔을 못 시켰거나(failed), 너무 오래 걸려서 — 기다리지 않는다
     if report_dispatch.is_quiet(now):
         return  # 발송하지 않는 시간 — 쌓아 둔 채 끝날 때까지 기다린다
@@ -106,5 +106,5 @@ def _request_scan_for_batch(cutoff: str) -> None:
     cutoff_at = datetime.fromisoformat(cutoff)
     downloaded = sum(1 for row in repository.list_episode_history_window(since, cutoff) if row["status"] == "success") if since else 0
     if downloaded:
-        viewer_scan.request(cutoff_at, reason=f"다운로드 {downloaded}건 완료")
+        viewer_scan.request(cutoff_at, scope="fast", reason=f"다운로드 {downloaded}건 완료")  # 다운로드는 로컬 폴더에 떨어지므로 로컬 저장소만 훑게 한다
     viewer_scan.set_watermark(cutoff_at)
