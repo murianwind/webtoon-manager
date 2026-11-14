@@ -456,3 +456,8 @@ README(사용자 설명서)에서 뺀 내부 동작 설명입니다. 코드를 �
 - **③ 바로가기 링크 조회**(`report_job._resolve_reader_urls`): 리포트마다 한 건 — "다운로드 리포트 — 웹툰 서버에서 바로가기 링크를 조회했습니다 (N개 작품: 성공 a, 실패 b)" + 링크를 못 찾은 작품(최대 `_MAX_LINK_LINES`=10).
 - **테스트**: `test_viewer_server_history.py`(스캔 주기 9가지 + 조회/링크 기록 3가지), `test_viewer_scan_requests.py`(수동 아카이빙/일괄 이동의 출처가 사유에 들어감), `test_archive_manual_api_read_filter.py`(지금 이동의 조회 이력), `test_archive_job.py`(정기 아카이빙의 출처), `tests/js/test_job_history_viewer_server.js`(화면 라벨/오류 줄). 변형 검사 파이썬 34개 모두 잡음.
 
+## 수동 실행 상단 버튼 줄의 모바일 레이아웃
+
+- **문제**: `.manual-run-buttons`(신작 스캔 / 빠른 상태 스캔 / 다운로드 대상 선택 / 다운로드 / 메타 동기화 / 리포트 발송)가 `display: flex`인데 `flex-wrap`이 없어서, 버튼이 여섯 개로 늘어난 뒤 좁은 화면에서 한 줄에 억지로 들어가려다 글자가 한 글자씩 세로로 쪼개지고 화면 밖으로 밀렸다(가로 스크롤).
+- **수정**(`style.css`): 줄에 `flex-wrap: wrap`, 버튼에 `white-space: nowrap`, 선택 상자에 `max-width: 100%`. **버튼을 이 줄에 더할 때도 줄바꿈이 되므로 따로 손볼 것이 없다.** jsdom은 레이아웃을 계산하지 않아서 `tests/js/test_manual_run_buttons_layout.js`가 스타일 규칙이 실제 파일에 있는지와 줄의 버튼 구성을 확인한다(변형 검사 4개 모두 잡음). 새 버튼 줄을 만들 때는 같은 이유로 `flex-wrap`을 먼저 고려한다.
+

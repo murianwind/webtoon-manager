@@ -530,8 +530,15 @@ select {
 
 .manual-run-buttons {
   display: flex;
+  flex-wrap: wrap; /* 좁은 화면(모바일)에서 버튼이 넘치면 다음 줄로 내려간다 — 한 줄에 억지로 넣으면 글자가 세로로 쪼개지고 화면 밖으로 밀린다 */
   gap: 8px;
   margin-bottom: 16px;
+}
+.manual-run-buttons button {
+  white-space: nowrap; /* 버튼 글자는 줄바꿈하지 않는다 */
+}
+.manual-run-buttons .run-target-select {
+  max-width: 100%; /* 선택 상자가 화면보다 커지지 않는다 */
 }
 
 .job-status-block { margin-top: 14px; }
