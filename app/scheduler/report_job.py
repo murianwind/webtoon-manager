@@ -16,7 +16,7 @@ from app.config import get_settings
 
 
 from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
-from app.scheduler.report_message import build_list_alert_message, build_report_message
+from app.scheduler.report_message import build_list_alert_message, build_report_message, build_stalled_message
 from app.scheduler.report_sections import collect_new_episode_sections, collect_new_title_section
 
 log = logging.getLogger(__name__)
@@ -73,6 +73,31 @@ async def send_list_alert(now: datetime | None = None) -> None:
     except Exception as e:
         log.error("웹툰 전체목록 알림 발송 중 예외: %s", e)
         list_alert.note_failure(now)
+        job_status.log_line("report", f"오류: {e}")
+        job_status.finish("report", success=False)
+
+
+async def send_stalled_alert(now: datetime | None = None) -> None:
+    """회차가 늘지 않는 작품 알림만 따로 보낸다 — 다운로드 리포트에 못 얹힌 날(report_tick이 부른다, 그쪽에서 _report_job_lock을 잡고 있다). 보낼 작품이 없으면
+    아무것도 안 보내고 그날은 확인한 것으로 친다. 전송이 실패하면 그날 안에 다시 시도한다(stalled_episodes.RETRY_MINUTES 뒤)."""
+    now = now or datetime.now(timezone.utc)
+    job_status.start("report")
+    try:
+        stalled = stalled_episodes.due(now)
+        message = build_stalled_message(stalled)
+        if not message:
+            job_status.log_line("report", "회차가 늘지 않는 웹툰 알림: 알릴 작품이 없습니다")
+        else:
+            async with aiohttp.ClientSession() as session:
+                if await discord_notify.send_webhook_notification(session, message) is False:  # 웹훅 전송은 실패해도 예외 대신 False를 돌려준다
+                    raise RuntimeError("웹훅 전송 실패")
+            stalled_episodes.mark_notified([item["title_id"] for item in stalled])
+            job_status.log_line("report", f"회차가 늘지 않는 웹툰 알림 발송 완료 ({len(stalled)}개)")
+        stalled_episodes.mark_done(now)
+        job_status.finish("report", success=True)
+    except Exception as e:
+        log.error("회차가 늘지 않는 웹툰 알림 발송 중 예외: %s", e)
+        stalled_episodes.note_failure(now)
         job_status.log_line("report", f"오류: {e}")
         job_status.finish("report", success=False)
 

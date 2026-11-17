@@ -6,10 +6,10 @@ import asyncio
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from app import db, discord_config, report_dispatch, report_seen, repository, stalled_episodes
+from app import db, discord_config, list_alert, report_dispatch, report_seen, repository, stalled_episodes
 db.get_connection()
 import app.scheduler as scheduler
-from app.scheduler import report_message
+from app.scheduler import report_message, report_tick
 
 KST = ZoneInfo("Asia/Seoul")
 def at(month, day, h=9, mi=0): return datetime(2026, month, day, h, mi, tzinfo=KST).astimezone(timezone.utc)
@@ -146,5 +146,65 @@ async def flow():
     before = len(sent); await scheduler.run_test_report(); assert len(sent) == before + 1 and "회차가 늘지 않는 카카오 웹툰" in sent[-1] and row(13)["stall_notified"] is False
     print("5) 리포트 연동 OK")
 
-tracking(); due(); timing(); message(); asyncio.run(flow())
+async def failing_send(session, text): raise RuntimeError("웹훅 실패")
+
+def reset_standalone(quiet=(), time=None):
+    seed()
+    for key in (stalled_episodes.SETTING_DONE, stalled_episodes.SETTING_RETRY, list_alert.SETTING_DONE, list_alert.SETTING_RETRY, report_seen.SETTING_KEY): repository.set_setting(key, None)
+    report_dispatch.set_quiet_hours(list(quiet)); list_alert.set_time(time); sent.clear()
+    scheduler.report_job.discord_notify.send_webhook_notification = fake_send
+    discord_config.set_webhook_url("https://discord.test/hook")
+
+async def tick(now):
+    before = len(sent); await report_tick.run_report_tick(now); return sent[before:]
+
+async def standalone():
+    D = 10
+    # Scenario 14: 발송하지 않는 시간도 시각도 없으면 오전 7시에 정체 알림만 따로 나간다(다운로드 리포트 없이) — 알림 기록과 오늘 처리가 남고 같은 날 다시 안 나간다
+    reset_standalone()
+    assert await tick(at(12, D, 6, 59)) == [], "7시 전에는 안 나간다"
+    (m,) = await tick(at(12, D, 7, 0)); assert "회차가 늘지 않는 카카오 웹툰" in m and "삼십일째" in m and "다운로드 리포트" not in m, m
+    assert row(10)["stall_notified"] is True and stalled_episodes.is_done(at(12, D, 7, 0))
+    assert await tick(at(12, D, 7, 1)) == [] and await tick(at(12, D, 12, 0)) == [], "하루 한 번"
+    # Scenario 15: 알릴 작품이 없으면 아무것도 안 보내고 그날은 확인한 것으로 친다
+    reset_standalone()
+    with db.write_transaction() as cx: cx.execute("UPDATE kakao_webtoons SET stall_notified = 1")
+    assert await tick(at(12, D, 7, 0)) == [] and stalled_episodes.is_done(at(12, D, 7, 0))
+    # Scenario 16: 발송하지 않는 시간(23~06시)이 있으면 끝난 뒤 30분까지 기다리고(그 안에 리포트가 나가면 거기 얹힌다), 30분이 지나면 따로 보낸다
+    reset_standalone([q(23, 0, 6, 0)])
+    assert await tick(at(12, D, 6, 29)) == []
+    (m,) = await tick(at(12, D, 6, 30)); assert "삼십일째" in m
+    reset_standalone([q(23, 0, 6, 0)])
+    (m,) = await batch(at(12, D, 6, 10)); assert "삼십일째" in m, "리포트가 먼저 나가면 거기 얹힌다"
+    assert await tick(at(12, D, 6, 40)) == [], "얹혔으니 따로 보내지 않는다"
+    # Scenario 17: 새 에피소드 발송 시각을 정해 뒀으면 그 시각에 맞춘다. 그 시각이 발송하지 않는 시간 안이면 끝날 때까지 미룬다
+    reset_standalone(time="09:00")
+    assert await tick(at(12, D, 8, 59)) == [] and len(await tick(at(12, D, 9, 0))) == 1
+    reset_standalone([q(23, 0, 6, 0)], time="03:00")
+    assert await tick(at(12, D, 3, 0)) == [], "발송하지 않는 시간에는 미룬다"
+    assert len(await tick(at(12, D, 6, 0))) == 1, "끝나면 그날 안에 나간다"
+    # Scenario 18: 디스코드가 없거나 기능이 꺼져 있으면 안 나간다
+    reset_standalone(); repository.set_setting(discord_config._KEY_WEBHOOK_URL, None); assert await tick(at(12, D, 7, 0)) == [] and not stalled_episodes.is_done(at(12, D, 7, 0))
+    reset_standalone(); stalled_episodes.set_days(0); assert await tick(at(12, D, 7, 0)) == []; stalled_episodes.set_days(30)
+    # Scenario 18-2: 그날 끝나는 발송하지 않는 시간이 없는 요일이면(발송하지 않는 시간은 있음) 단독 발송은 없고, 그날 첫 리포트에 얹기만 한다
+    reset_standalone([{"start_hour": 23, "start_minute": 0, "end_hour": 6, "end_minute": 0, "days": ["mon"]}])
+    assert report_dispatch.quiet_end_minutes(at(12, D).astimezone(KST).weekday()) == [] and stalled_episodes.standalone_due(at(12, D, 12, 0)) is False and await tick(at(12, D, 12, 0)) == []
+    (m,) = await batch(at(12, D, 12, 5)); assert "삼십일째" in m
+    # Scenario 19: 전송이 실패하면 알림 기록도 오늘 처리도 안 하고, 10분 뒤에 다시 시도한다(그 전엔 안 한다)
+    reset_standalone(); seed()
+    scheduler.report_job.discord_notify.send_webhook_notification = failing_send
+    assert await tick(at(12, D, 7, 0)) == [] and row(10)["stall_notified"] is False and not stalled_episodes.is_done(at(12, D, 7, 0))
+    scheduler.report_job.discord_notify.send_webhook_notification = fake_send
+    assert await tick(at(12, D, 7, 5)) == [], "10분 전에는 다시 안 한다"
+    assert len(await tick(at(12, D, 7, 10))) == 1 and row(10)["stall_notified"] is True
+    # Scenario 20: 웹훅이 예외 대신 False(전송 실패)를 돌려줘도 실패로 본다 — 기록하지 않고 다시 시도한다
+    reset_standalone()
+    async def returns_false(session, text): return False
+    scheduler.report_job.discord_notify.send_webhook_notification = returns_false
+    assert await tick(at(12, D, 7, 0)) == [] and row(10)["stall_notified"] is False and not stalled_episodes.is_done(at(12, D, 7, 0))
+    scheduler.report_job.discord_notify.send_webhook_notification = fake_send
+    assert len(await tick(at(12, D, 7, 10))) == 1
+    print("6) 단독 발송 OK")
+
+tracking(); due(); timing(); message(); asyncio.run(flow()); asyncio.run(standalone())
 print("ALL OK")

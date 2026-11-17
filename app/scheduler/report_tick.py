@@ -9,13 +9,13 @@ from datetime import datetime, timedelta, timezone
 
 import aiohttp
 
-from app import discord_config, list_alert, report_dispatch, report_seen, repository, viewer_scan
+from app import discord_config, list_alert, report_dispatch, report_seen, repository, stalled_episodes, viewer_scan
 
 
 from app.config import get_settings
 
 
-from app.scheduler.report_job import _SETTING_KEY_REPORT_LAST_SENT_AT, _report_job_lock, send_batch_report, send_list_alert
+from app.scheduler.report_job import _SETTING_KEY_REPORT_LAST_SENT_AT, _report_job_lock, send_batch_report, send_list_alert, send_stalled_alert
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +54,18 @@ async def run_report_tick(now: datetime | None = None) -> None:
             await _list_alert_step(now)  # 하루 한 번 도는 웹툰 전체목록 알림 — 네트워크로 오래 걸릴 수 있어서 뷰어 새로고침 뒤에 두고, 오류가 나도 이 확인을 망가뜨리지 않는다
         except Exception as e:
             log.error("웹툰 전체목록 알림 단계 오류(무시하고 계속): %s", e)
+        try:
+            await _stalled_step(now)  # 하루 한 번, 리포트에 못 얹힌 날의 회차가 늘지 않는 작품 알림 — 이것도 오류가 나도 이 확인을 망가뜨리지 않는다
+        except Exception as e:
+            log.error("회차가 늘지 않는 웹툰 알림 단계 오류(무시하고 계속): %s", e)
+
+
+async def _stalled_step(now: datetime) -> None:
+    """회차가 늘지 않는 작품 알림을 단독으로 보낼 때가 됐으면 보낸다 — 그날 다운로드 리포트에 얹히지 못했을 때(얹혔으면 오늘은 이미 끝난 것이다). 하루 한 번(stalled_episodes)."""
+    if not stalled_episodes.standalone_due(now):
+        return
+    async with _report_job_lock:
+        await send_stalled_alert(now)
 
 
 async def _list_alert_step(now: datetime) -> None:

@@ -2,18 +2,22 @@
 
 - 무엇을: 다운로드 때마다 회차 수(on_sale_count)를 기록해서(track), 같은 수가 N일(설정, 기본 30, 0이면 끔) 이상이면 대상이다(due). 휴재/완결 작품은 정체로 세지 않는다
   (연재 중이 아니면 기준일을 매번 오늘로 되돌려서, 연재로 돌아온 날부터 센다). 같은 정체는 한 번만 알리고, 회차가 늘면 다시 센다.
-- 언제: 하루(한국시간) 한 번 — 발송하지 않는 시간이 있으면 그날 가장 빠른 종료 시각 이후 첫 다운로드 리포트에, 없으면 그날 첫 리포트에 얹는다. 단독 발송은 없다.
-메시지 모양은 scheduler/report_message.py, 리포트에 얹는 일은 scheduler/report_job.py.
+- 언제: 하루(한국시간) 한 번 — 발송하지 않는 시간이 있으면 그날 가장 빠른 종료 시각 이후 첫 다운로드 리포트에, 없으면 그날 첫 리포트에 얹는다.
+  리포트가 안 나가는 날은 이 알림만 따로 보낸다(standalone_due) — 시각은 웹툰 전체목록 알림과 같은 규칙(list_alert.plan: 정해 둔 발송 시각, 없으면 발송하지 않는 시간이 끝난 뒤 30분,
+  둘 다 없으면 오전 7시)이고, 발송하지 않는 시간에는 미룬다. 보낼 작품이 없는 날도 "확인한 것"으로 친다.
+메시지 모양은 scheduler/report_message.py, 리포트에 얹거나 따로 보내는 일은 scheduler/report_job.py.
 """
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from app import report_dispatch, repository
+from app import discord_config, list_alert, report_dispatch, repository
 
 SETTING_DAYS = "stalled_episodes_days"  # 며칠 이상 회차가 안 늘면 알릴지(0이면 끔, 설정이 없으면 DEFAULT_DAYS)
 SETTING_DONE = "stalled_episodes_done_date"  # 마지막으로 알림을 처리한 날(한국시간 날짜, YYYY-MM-DD)
+SETTING_RETRY = "stalled_episodes_retry_at"  # 단독 전송이 실패했을 때 다시 시도할 수 있게 되는 시각(UTC ISO)
 DEFAULT_DAYS = 30
 MAX_DAYS = 365
+RETRY_MINUTES = 10  # 단독 전송이 실패하면 이만큼 뒤에 다시 시도한다
 
 _KST = ZoneInfo("Asia/Seoul")
 
@@ -83,3 +87,26 @@ def should_attach(now: datetime) -> bool:
     ends = report_dispatch.quiet_end_minutes(now.astimezone(_KST).weekday())
     local = now.astimezone(_KST)
     return not ends or local.hour * 60 + local.minute >= min(ends)
+
+
+def note_failure(now: datetime) -> None:
+    """단독 전송이 실패했다 — RETRY_MINUTES 뒤에 다시 시도한다(그날은 아직 한 것이 아니다)."""
+    repository.set_setting(SETTING_RETRY, (now + timedelta(minutes=RETRY_MINUTES)).isoformat())
+
+
+def _retry_blocked(now: datetime) -> bool:
+    value = repository.get_setting(SETTING_RETRY)
+    return bool(value) and now < datetime.fromisoformat(value)
+
+
+def standalone_due(now: datetime) -> bool:
+    """리포트에 못 얹혀서 이 알림만 따로 보낼 때가 됐는가 — 켜져 있고 오늘 아직 안 했고, 디스코드가 있고 발송하지 않는 시간이 아니고 재시도 대기 중이 아니며,
+    웹툰 전체목록 알림과 같은 기준 시각(list_alert.plan)이 지났을 때."""
+    if get_days() == 0 or is_done(now) or not discord_config.get_webhook_url() or report_dispatch.is_quiet(now) or _retry_blocked(now):
+        return False
+    current = list_alert.plan(now)
+    if current.anchor_minute is None:
+        return False
+    local = now.astimezone(_KST)
+    wait = list_alert.FALLBACK_MINUTES if current.mode == "quiet" else 0
+    return local.hour * 60 + local.minute >= current.anchor_minute + wait

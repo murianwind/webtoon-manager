@@ -120,6 +120,15 @@ def _list_alert_sections(
     return parts
 
 
+def build_stalled_message(stalled: list[dict]) -> str:
+    """회차가 늘지 않는 작품 알림만 따로 보낼 때의 메시지. 보낼 작품이 없으면 빈 문자열 — 호출하는 쪽이 보내지 않는다."""
+    lines = _stalled_lines(stalled)
+    if not lines:
+        return ""
+    today_label = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
+    return "\n".join([f"⏸️ 회차가 늘지 않는 카카오 웹툰 ({len(lines)}) — {today_label}", *_limited(lines)])
+
+
 def build_report_message(
     success_rows: list[dict], failed_rows: list[dict], reader_urls: dict[str, str],
     unregistered_new_episodes: list[tuple[str, str, int]] | None = None,
