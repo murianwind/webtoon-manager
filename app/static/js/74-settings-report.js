@@ -87,6 +87,39 @@ async function saveListAlertTime(time, resultText) {
 document.getElementById("btn-save-list-alert").addEventListener("click", () => saveListAlertTime(document.getElementById("list-alert-time").value, "저장했습니다."));
 document.getElementById("btn-clear-list-alert").addEventListener("click", () => saveListAlertTime(null, ""));
 
+// ── 회차가 늘지 않는 웹툰 알림(일) — 구독 중인 카카오 웹툰의 회차 수가 이 일수 이상 그대로면 하루 한 번 리포트에 얹는다(0이면 끔) ──
+function showStalledSetting(data) {
+  document.getElementById("stalled-days").value = data.days;
+  document.getElementById("stalled-days").max = data.max_days;
+  document.getElementById("stalled-off-hint").classList.toggle("hidden", data.days !== 0);
+}
+
+async function loadStalledSetting() {
+  try {
+    showStalledSetting(await apiCall("/api/settings/stalled-episodes"));
+  } catch (e) {
+    // 조용히 무시 — 다음에 설정 화면을 열 때 다시 읽는다
+  }
+}
+
+async function saveStalledSetting() {
+  const resultEl = document.getElementById("stalled-save-result");
+  const days = Number(document.getElementById("stalled-days").value);
+  resultEl.textContent = "";
+  if (document.getElementById("stalled-days").value.trim() === "" || !Number.isInteger(days) || days < 0 || days > 365) {
+    resultEl.textContent = "0~365 사이의 정수를 입력해 주세요(0이면 끔).";
+    return;
+  }
+  try {
+    showStalledSetting(await apiCall("/api/settings/stalled-episodes", { method: "POST", body: JSON.stringify({ days }) }));
+    resultEl.textContent = "저장했습니다.";
+  } catch (e) {
+    resultEl.textContent = e.message;
+  }
+}
+
+document.getElementById("btn-save-stalled").addEventListener("click", saveStalledSetting);
+
 async function loadReportSettings() {
   try {
     const data = await apiCall("/api/settings/report");
@@ -98,6 +131,7 @@ async function loadReportSettings() {
     document.getElementById("report-settings-save-result").textContent = e.message;
   }
   loadListAlertSetting();
+  loadStalledSetting();
   loadViewerScanSettings();
 }
 

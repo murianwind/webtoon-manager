@@ -80,6 +80,14 @@ def _new_episode_lines(
     return lines
 
 
+def _stalled_lines(stalled: list[dict] | None) -> list[str]:
+    """회차가 늘지 않는 카카오 웹툰 한 줄씩 — 작품명 · 마지막 회차 수 · 며칠째 그대로인지 + 작품 페이지 링크."""
+    return [
+        f"• [카카오] {item['title']} · {item['count']}화 · {item['days']}일째 그대로 [바로가기](<{KAKAO_TITLE_PAGE_URL}{item['title_id']}>)"
+        for item in stalled or []
+    ]
+
+
 def _new_title_lines(
     new_titles: list[tuple[str, str]] | None, kakao_new_titles: list[tuple[int, str]] | None, app_public_base_url: str,
 ) -> list[str]:
@@ -119,6 +127,7 @@ def build_report_message(
     kakao_new_episodes: list[tuple[int, str, str]] | None = None,
     new_titles: list[tuple[str, str]] | None = None,
     kakao_new_titles: list[tuple[int, str]] | None = None,
+    stalled: list[dict] | None = None,
 ) -> str:
     """예전 hermes webtoon_checker.py의 메시지 구조(다운로드됨/실패)를 그대로 따른다: 제목 줄 → 받은 작품 → (있으면) 실패 → (있으면) 신규 웹툰 → (있으면) 새 에피소드.
     모든 링크는 <...>로 감싸서 디스코드가 미리보기(임베드)를 안 만들게 한다 — 링크가 여러 개 나열될 때 임베드가 줄줄이 생겨서 메시지가 너무 길어지는 문제가 있었다.
@@ -135,6 +144,9 @@ def build_report_message(
         parts.extend(["", f"❌ 실패한 작품 ({len(failed_titles)}):", *_limited(failed_titles)])
 
     parts.extend(_list_alert_sections(new_titles, kakao_new_titles, unregistered_new_episodes, kakao_new_episodes, app_public_base_url))
+    stalled_lines = _stalled_lines(stalled)
+    if stalled_lines:
+        parts.extend(["", f"⏸️ 회차가 늘지 않는 카카오 웹툰 ({len(stalled_lines)}):", *_limited(stalled_lines)])
     return "\n".join(parts)
 
 

@@ -43,6 +43,7 @@ def _row_to_kakao_webtoon(row) -> dict:
         "finish_notified": bool(row["finish_notified"]), "finish_ack": bool(row["finish_ack"]),
         "ticket_notified_no": row["ticket_notified_no"], "caught_up_notified_no": row["caught_up_notified_no"],
         "new_episode_seen_no": row["new_episode_seen_no"], "waitfree_next_at": row["waitfree_next_at"],
+        "episode_count_seen": row["episode_count_seen"], "episode_count_since": row["episode_count_since"], "stall_notified": bool(row["stall_notified"]),
     }
 
 
@@ -156,6 +157,36 @@ def set_kakao_new_episode_seen(title_id: int, count: int) -> None:
     """구독해제 웹툰의 새 에피소드 알림 기준(마지막으로 확인한 회차 수)을 기록한다."""
     with write_transaction() as conn:
         conn.execute("UPDATE kakao_webtoons SET new_episode_seen_no = ?, updated_at = ? WHERE title_id = ?", (count, _now(), title_id))
+
+
+def set_kakao_episode_count(title_id: int, count: int, since: str) -> None:
+    """구독 중 작품의 회차 수와 그 수를 처음 본 날(한국시간 YYYY-MM-DD)을 기록한다. 새로 세는 것이므로 정체 알림 기록도 지운다."""
+    with write_transaction() as conn:
+        conn.execute(
+            "UPDATE kakao_webtoons SET episode_count_seen = ?, episode_count_since = ?, stall_notified = 0, updated_at = ? WHERE title_id = ?",
+            (count, since, _now(), title_id),
+        )
+
+
+def reset_kakao_episode_counts() -> None:
+    """모든 작품의 회차 수 기록과 정체 알림 기록을 지운다(기능을 다시 켤 때 처음부터 세려고)."""
+    with write_transaction() as conn:
+        conn.execute("UPDATE kakao_webtoons SET episode_count_seen = NULL, episode_count_since = NULL, stall_notified = 0 WHERE episode_count_seen IS NOT NULL OR stall_notified = 1")
+
+
+def list_kakao_stalled(since_on_or_before: str) -> list[dict]:
+    """구독 중이고 회차 수를 처음 본 날이 since_on_or_before(YYYY-MM-DD) 이전(같은 날 포함)인데 아직 알리지 않은 작품 — 오래 그대로인 순."""
+    rows = fetchall(
+        "SELECT * FROM kakao_webtoons WHERE status = ? AND stall_notified = 0 AND episode_count_since IS NOT NULL AND episode_count_since <= ? "
+        "ORDER BY episode_count_since, title_id", (STATUS_ACTIVE, since_on_or_before),
+    )
+    return [_row_to_kakao_webtoon(r) for r in rows]
+
+
+def mark_kakao_stall_notified(title_ids: list[int]) -> None:
+    """정체를 알린 작품들을 기록한다(회차가 늘기 전까지 다시 알리지 않는다)."""
+    with write_transaction() as conn:
+        conn.executemany("UPDATE kakao_webtoons SET stall_notified = 1, updated_at = ? WHERE title_id = ?", [(_now(), tid) for tid in title_ids])
 
 
 def acknowledge_kakao_finish(title_id: int) -> None:

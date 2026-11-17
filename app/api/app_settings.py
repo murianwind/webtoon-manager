@@ -15,7 +15,7 @@ from app import (
     download_roots,
     repository,
 )
-from app import discord_config, download_pacing, kakao_page_download, list_alert, report_dispatch, viewer_scan, waitfree_sync
+from app import discord_config, download_pacing, kakao_page_download, list_alert, report_dispatch, stalled_episodes, viewer_scan, waitfree_sync
 from app import webtoon_server_client
 from app.file_utils import remove_forbidden_str, remove_forbidden_str_kakao
 from app.config import get_settings
@@ -359,6 +359,35 @@ async def set_list_alert_setting(payload: ListAlertTimeIn):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return await asyncio.to_thread(_list_alert_setting)
+
+
+class StalledEpisodesIn(BaseModel):
+    days: int  # 며칠 이상 회차가 안 늘면 알릴지(0이면 끔)
+
+
+class StalledEpisodesOut(BaseModel):
+    days: int
+    default_days: int
+    max_days: int
+
+
+def _stalled_episodes_setting() -> dict:
+    return {"days": stalled_episodes.get_days(), "default_days": stalled_episodes.DEFAULT_DAYS, "max_days": stalled_episodes.MAX_DAYS}
+
+
+@router.get("/settings/stalled-episodes", response_model=StalledEpisodesOut)
+async def get_stalled_episodes_setting():
+    """회차가 늘지 않는 카카오 웹툰 알림의 기준 일수(0이면 끔)."""
+    return await asyncio.to_thread(_stalled_episodes_setting)
+
+
+@router.post("/settings/stalled-episodes", response_model=StalledEpisodesOut)
+async def set_stalled_episodes_setting(payload: StalledEpisodesIn):
+    try:
+        await asyncio.to_thread(stalled_episodes.set_days, payload.days)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return await asyncio.to_thread(_stalled_episodes_setting)
 
 
 @router.get("/settings/report-unregistered-new-episodes", response_model=UnregisteredNewEpisodesSettingOut)

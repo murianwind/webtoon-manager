@@ -15,9 +15,9 @@ def ep(number, *, accessible=False, blocked=False, hidden=False, free_change_dt=
                       page_count=2, hidden=hidden, waitfree_blocked=blocked, free_change_dt=free_change_dt)
 
 
-def result(*, to_download=(), locked=(), downloaded=(), ticket_used=None, failed=None, error=None, waitfree=True, title="작품"):
+def result(*, to_download=(), locked=(), downloaded=(), ticket_used=None, failed=None, error=None, waitfree=True, title="작품", finished=True):
     plan = kp.DownloadPlan(mode="compare", to_download=list(to_download), locked=list(locked))
-    return kp.RunResult(list(downloaded), [(n, f"{n}화") for n in downloaded], failed, plan, error, title=title, ticket_used=ticket_used, waitfree_supported=waitfree)
+    return kp.RunResult(list(downloaded), [(n, f"{n}화") for n in downloaded], failed, plan, error, title=title, ticket_used=ticket_used, waitfree_supported=waitfree, finished=finished)
 
 
 def judge():
@@ -87,6 +87,11 @@ async def notice():
     # Scenario 12: 대상이 아니면 아무것도 보내지 않는다
     await notify(900, result(locked=[ep(7)]))
     assert len(sent) == 2
+
+    # Scenario 13: 연재 중인 작품은 대여권이 필요해도 알리지 않고 기록도 남기지 않는다(완결작만 알린다)
+    repository.upsert_new_kakao_webtoon(901, "연재작")
+    await notify(901, result(locked=[ep(9, blocked=True, subtitle="최신화")], title="연재작", finished=False))
+    assert len(sent) == 2 and repository.get_kakao_webtoon(901)["ticket_notified_no"] is None
     print("알림 OK")
 
 

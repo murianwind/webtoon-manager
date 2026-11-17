@@ -92,6 +92,9 @@ CREATE TABLE IF NOT EXISTS kakao_webtoons (
     ticket_notified_no INTEGER,                  -- "대여권 충전이 필요합니다" 디스코드 알림을 보낸 회차 번호(같은 회차는 다시 알리지 않는다). NULL = 알린 적 없음
     caught_up_notified_no INTEGER,               -- "더 이상 받을 회차가 없습니다" 알림을 보낸 마지막 회차 번호(같은 마지막 회차는 다시 알리지 않는다). NULL = 아직 기준 없음
     new_episode_seen_no INTEGER,                 -- 구독해제 웹툰의 새 에피소드 알림용: 마지막으로 확인한 작품의 회차 수(on_sale_count). NULL = 아직 기준 없음
+    episode_count_seen INTEGER,                  -- 회차가 늘지 않는 작품 알림용: 구독 중 마지막으로 확인한 회차 수(on_sale_count). NULL = 아직 기록 없음
+    episode_count_since TEXT,                    -- 그 회차 수를 처음 본 날(한국시간 YYYY-MM-DD) — 연재가 아니게 되면 매번 그날로 되돌린다
+    stall_notified INTEGER NOT NULL DEFAULT 0,   -- 이번 정체를 이미 알렸으면 1(회차가 늘면 0으로)
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -201,6 +204,9 @@ _MIGRATIONS = [
     ("kakao_webtoons", "caught_up_notified_no", "ALTER TABLE kakao_webtoons ADD COLUMN caught_up_notified_no INTEGER"),
     ("webtoons", "new_episode_seen_no", "ALTER TABLE webtoons ADD COLUMN new_episode_seen_no INTEGER"),
     ("kakao_webtoons", "new_episode_seen_no", "ALTER TABLE kakao_webtoons ADD COLUMN new_episode_seen_no INTEGER"),
+    ("kakao_webtoons", "episode_count_seen", "ALTER TABLE kakao_webtoons ADD COLUMN episode_count_seen INTEGER"),
+    ("kakao_webtoons", "episode_count_since", "ALTER TABLE kakao_webtoons ADD COLUMN episode_count_since TEXT"),
+    ("kakao_webtoons", "stall_notified", "ALTER TABLE kakao_webtoons ADD COLUMN stall_notified INTEGER NOT NULL DEFAULT 0"),
     ("episode_history", "platform", "ALTER TABLE episode_history ADD COLUMN platform TEXT NOT NULL DEFAULT 'naver'"),
     ("archive_targets", "display_name", "ALTER TABLE archive_targets ADD COLUMN display_name TEXT NOT NULL DEFAULT ''"),
     ("archive_targets", "filename_template_preset_id", "ALTER TABLE archive_targets ADD COLUMN filename_template_preset_id INTEGER"),

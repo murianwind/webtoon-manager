@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 
-from app import discord_notify, job_status, list_alert, report_dispatch, report_seen, repository, webtoon_server_client
+from app import discord_notify, job_status, list_alert, report_dispatch, report_seen, repository, stalled_episodes, webtoon_server_client
 
 
 from app.config import get_settings
@@ -132,7 +132,7 @@ async def _resolve_reader_urls(session: aiohttp.ClientSession, settings, success
 
 async def _send_message(
     session: aiohttp.ClientSession, settings, rows: list[dict], unregistered_new_episodes: list, kakao_new_episodes: list, used_fallback: bool,
-    new_titles: list, kakao_new_titles: list,
+    new_titles: list, kakao_new_titles: list, stalled: list[dict],
 ) -> None:
     """리포트 메시지를 만들어(받은 작품의 뷰어 링크 포함) 디스코드로 보낸다. 실패하면 예외가 그대로 올라간다."""
     success_rows = [r for r in rows if r["status"] == "success"]
@@ -140,7 +140,7 @@ async def _send_message(
     reader_urls = await _resolve_reader_urls(session, settings, success_rows)
     message = build_report_message(
         success_rows, failed_rows, reader_urls, unregistered_new_episodes, repository.get_setting("app_public_base_url") or "", kakao_new_episodes,
-        new_titles=new_titles, kakao_new_titles=kakao_new_titles,
+        new_titles=new_titles, kakao_new_titles=kakao_new_titles, stalled=stalled,
     )
     if used_fallback:
         message = "🧪 **[테스트 발송 — 오늘 기록 없어 어제 기록으로 대체됨]**\n" + message
@@ -154,6 +154,7 @@ async def _run_report(*, test: bool, until: str | None = None, now: datetime | N
     job_status.start("report")
     rows, used_fallback = _select_report_rows(test, until)
     attach_list_alert = test or list_alert.should_attach(now)  # 웹툰 전체목록 알림은 테스트 발송이거나 오늘 얹을 차례인 리포트에만
+    attach_stalled = test or stalled_episodes.should_attach(now)  # 회차가 늘지 않는 작품 알림도 같은 식(각자 하루 한 번)
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -162,7 +163,8 @@ async def _run_report(*, test: bool, until: str | None = None, now: datetime | N
                 naver_new, kakao_new = await collect_new_title_section(session, settings, force_test=test)
                 unregistered_new_episodes, kakao_new_episodes = await collect_new_episode_sections(session, settings, force_test=test)
             # 자동 발송은 받은 이력이 있을 때만 보낸다(웹툰 전체목록 알림은 이력과 함께만). 테스트 발송은 알림만 있어도 보낸다.
-            has_list_alert = bool(naver_new or kakao_new or unregistered_new_episodes or kakao_new_episodes)
+            stalled = stalled_episodes.due(now) if attach_stalled else []
+            has_list_alert = bool(naver_new or kakao_new or unregistered_new_episodes or kakao_new_episodes or stalled)
             if not rows and (not test or not has_list_alert):
                 job_status.log_line("report", "발송할 내용 없음 (다운로드 기록도, 새 에피소드도 없음)")
                 if not test:
@@ -170,7 +172,7 @@ async def _run_report(*, test: bool, until: str | None = None, now: datetime | N
                 job_status.finish("report", success=True)
                 return
 
-            await _send_message(session, settings, rows, unregistered_new_episodes, kakao_new_episodes, used_fallback, naver_new, kakao_new)
+            await _send_message(session, settings, rows, unregistered_new_episodes, kakao_new_episodes, used_fallback, naver_new, kakao_new, stalled)
             if not test:
                 # 전송이 성공한 뒤에만 기록(실패하면 다음에 다시 시도)
                 report_seen.remember(unregistered_new_episodes, kakao_new_episodes)
@@ -178,6 +180,9 @@ async def _run_report(*, test: bool, until: str | None = None, now: datetime | N
                 report_seen.remember_rows(rows)
                 if attach_list_alert:
                     list_alert.mark_done(now)  # 얹을 차례였으면(알릴 것이 없었어도) 오늘은 확인한 것
+                if attach_stalled:
+                    stalled_episodes.mark_notified([item["title_id"] for item in stalled])
+                    stalled_episodes.mark_done(now)
 
         if not test:
             repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, until)

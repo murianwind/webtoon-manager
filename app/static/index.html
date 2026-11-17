@@ -526,6 +526,14 @@
         </div>
         <p id="list-alert-quiet-hint" class="field-hint hidden">발송하지 않는 시간이 설정돼 있어서, 신규 웹툰과 새 에피소드는 하루 한 번 <strong>발송하지 않는 시간이 끝난 뒤 처음 나가는 다운로드 리포트</strong>에 같이 보냅니다(여러 시간대면 하루 중 가장 빠른 종료 시각 이후). 끝난 뒤 30분 안에 다운로드 리포트가 나가지 않으면 신규 웹툰과 새 에피소드만 묶어서 따로 보냅니다.</p>
       </div>
+      <div class="field-group" id="stalled-group">
+        <label for="stalled-days">회차가 늘지 않는 웹툰 알림 (일)</label>
+        <input id="stalled-days" type="number" min="0" max="365" style="width: 90px;" />
+        <button id="btn-save-stalled">저장</button>
+        <span id="stalled-save-result" class="error"></span>
+        <p class="field-hint">구독 중인 <strong>카카오페이지</strong> 웹툰 중 연재 중(완결·휴재 아님)인데 회차 수가 이 일수 이상 그대로인 작품을 하루 한 번 다운로드 리포트에 같이 알립니다. 발송하지 않는 시간이 있으면 끝난 뒤 처음 나가는 리포트에, 없으면 그날 첫 리포트에 나갑니다. 같은 작품은 회차가 다시 늘기 전까지 한 번만 알립니다. 0이면 끕니다(끈 뒤 다시 켜면 그때부터 처음 셉니다).</p>
+        <p id="stalled-off-hint" class="field-hint hidden">지금은 꺼져 있습니다.</p>
+      </div>
     </div>
 
     <div class="settings-card">

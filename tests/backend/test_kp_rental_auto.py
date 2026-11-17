@@ -83,9 +83,9 @@ async def auto_flow():
     job_status.start("download")
     repository.upsert_new_kakao_webtoon(1, "작품", status=repository.STATUS_ACTIVE)
 
-    # Scenario 3: 설정이 꺼져 있으면 보유 대여권이 있어도 쓰지 않고, 기존 "대여권 충전이 필요합니다" 알림만 간다
+    # Scenario 3: (대여권 충전 알림은 완결작만 — 아래 작품은 완결로 둔다) 설정이 꺼져 있으면 보유 대여권이 있어도 쓰지 않고, 기존 "대여권 충전이 필요합니다" 알림만 간다
     sent.clear()
-    SITE["site"] = site = Site([item(1, free=True), item(2, blocked=True), item(3, blocked=True), item(4, blocked=True)], rental=2)
+    SITE["site"] = site = Site([item(1, free=True), item(2, blocked=True), item(3, blocked=True), item(4, blocked=True)], rental=2, on_issue="N")
     await scheduler._download_kakao_subscriptions(settings, [])
     assert use_posts(site) == [] and site.rental == 2
     assert sent == ["[작품] 다음 회차 (2번 '2화')부터는 대여권 충전이 필요합니다."], sent
@@ -94,7 +94,7 @@ async def auto_flow():
 
     # Scenario 4: 설정을 켜면 보유 2장까지 번호순으로 쓰고, 쓴 내용을 알리고, 못 연 다음 회차는 충전 필요로 알린다
     sent.clear(); repository.set_setting("kakao_rental_ticket_auto_use", "1")
-    SITE["site"] = site = Site([item(1, free=True), item(2, blocked=True), item(3, blocked=True), item(4, blocked=True)], rental=2)
+    SITE["site"] = site = Site([item(1, free=True), item(2, blocked=True), item(3, blocked=True), item(4, blocked=True)], rental=2, on_issue="N")
     site.opened.clear()
     await scheduler._download_kakao_subscriptions(settings, [])
     assert [p[1] for p in use_posts(site)] == [{"product_id": 5002, "ticket_type": "RT01"}, {"product_id": 5003, "ticket_type": "RT01"}], site.posts

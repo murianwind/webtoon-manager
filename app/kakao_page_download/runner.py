@@ -180,7 +180,7 @@ async def run_download(
     return RunResult(
         downloaded, items, failed, plan, title=folder_title, ticket_used=ticket_used, finished=series_item.get("on_issue") == "N",
         waitfree_supported=waitfree_supported(series_item), rental_used=rental_used, rental_remaining=rental_remaining,
-        rental_skip_mode=use_rental_tickets,
+        rental_skip_mode=use_rental_tickets, episode_count=series_item.get("on_sale_count"), serving=series_item.get("on_issue") == "Y",
     )
 
 

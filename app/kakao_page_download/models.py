@@ -165,6 +165,8 @@ class RunResult:
     rental_used: list[int] = field(default_factory=list)  # 일반 대여권(RT01)으로 열어서 받은 회차 번호
     rental_remaining: int | None = None  # 이 작품에 남은 대여권 수(대여권을 쓰려고 확인한 경우에만 안다)
     rental_skip_mode: bool = False  # 대여권 자동 사용이 켜진 실행(기다무 대기 회차를 건너뛰고 대여권 회차를 본다)
+    episode_count: int | None = None  # 작품의 회차 수(작품 정보의 on_sale_count — 모르면 None)
+    serving: bool = False  # 작품이 연재 중으로 표시돼 있음(작품 정보의 on_issue == "Y" — 휴재 "P"/완결 "N"은 아님)
 
     @property
     def caught_up_episode(self) -> "Episode | None":

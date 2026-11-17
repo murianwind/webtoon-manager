@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 import aiohttp
 
-from app import discord_bot, discord_notify, download_pacing, download_roots, job_status, kakao_page_auth, kakao_page_download, repository, waitfree_sync
+from app import discord_bot, discord_notify, download_pacing, download_roots, job_status, kakao_page_auth, kakao_page_download, repository, stalled_episodes, waitfree_sync
 
 log = logging.getLogger(__name__)
 
@@ -91,10 +91,10 @@ async def _notify_kakao_rental_used(session, webtoon: dict, result) -> None:
 
 
 async def _notify_kakao_ticket_needed(session, webtoon: dict, result) -> None:
-    """다음 회차가 대여권이 필요해서 더 못 받으면 디스코드로 알린다. 같은 회차는 한 번만 알리고(알린 번호를 기록),
-    웹훅이 없거나 전송이 실패하면 기록하지 않아 다음 실행 때 다시 시도한다."""
+    """완결된 작품의 다음 회차가 대여권이 필요해서 더 못 받으면 디스코드로 알린다(연재 중인 작품은 새 회차가 계속 나오므로 알리지 않는다).
+    같은 회차는 한 번만 알리고(알린 번호를 기록), 웹훅이 없거나 전송이 실패하면 기록하지 않아 다음 실행 때 다시 시도한다."""
     needed = result.ticket_needed
-    if needed is None or webtoon.get("ticket_notified_no") == needed.number:
+    if not result.finished or needed is None or webtoon.get("ticket_notified_no") == needed.number:
         return
     message = f"[{result.title or webtoon['title']}] 다음 회차 ({needed.number}번 '{needed.subtitle}')부터는 대여권 충전이 필요합니다."
     if await discord_notify.send_webhook_notification(session, message):
@@ -180,6 +180,7 @@ async def _download_kakao_subscriptions(
                 # 연재 중으로 돌아왔으면 기록을 되돌려 다음 완결 때 다시 알린다.
                 if result.error is None:
                     repository.set_kakao_finished(webtoon["title_id"], result.finished and result.nothing_left)
+                    stalled_episodes.track(webtoon["title_id"], result.episode_count, result.serving, datetime.now(timezone.utc))
                 await _notify_kakao_ticket_needed(session, webtoon, result)
                 await _notify_kakao_caught_up(session, webtoon, result)
                 await asyncio.sleep(settings.delay_seconds)
