@@ -466,6 +466,21 @@ def rental_eligible(episode: Episode, series_item: dict) -> bool:
     return not waitfree_supported(series_item) or episode.waitfree_blocked
 
 
+def count_remaining_locked(locked: list[Episode], series_item: dict, opened: set[int]) -> tuple[int, int]:
+    """아직 못 받은 잠긴 회차를 (기다무로 열 회차 수, 대여권으로 받아야 하는 회차 수)로 센다 — 이번 실행에서 막 연 회차(opened)는 뺀다.
+    기다무로 열 회차 = 기다무 작품에서 기다무로 열 수 있는 회차(충전될 때마다 한 회차씩 열린다), 대여권 회차 = rental_eligible인 회차.
+    숨김/"N일 후 무료"처럼 기다리면 열리는 회차와 이미 열려 있는 회차는 어느 쪽도 아니다."""
+    waitfree = rental = 0
+    for episode in locked:
+        if episode.number in opened:
+            continue
+        if rental_eligible(episode, series_item):
+            rental += 1
+        elif waitfree_supported(series_item) and not (episode.accessible or episode.hidden or free_date_of(episode) or episode.waitfree_blocked):
+            waitfree += 1
+    return waitfree, rental
+
+
 def free_date_of(episode: Episode, now: datetime | None = None) -> str | None:
     """아직 못 받는 회차가 무료로 열리는 날짜("YYYY-MM-DD", 한국시간) — 연재무료 작품의 "N일 후 무료". 이미 받을 수 있거나, 날짜가 지났거나,
     날짜를 모르면 None. now는 테스트에서 기준 시각을 고정하려고 받는다(시간대가 있는 시각)."""

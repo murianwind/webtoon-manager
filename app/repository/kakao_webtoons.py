@@ -43,6 +43,7 @@ def _row_to_kakao_webtoon(row) -> dict:
         "finish_notified": bool(row["finish_notified"]), "finish_ack": bool(row["finish_ack"]),
         "ticket_notified_no": row["ticket_notified_no"], "caught_up_notified_no": row["caught_up_notified_no"],
         "new_episode_seen_no": row["new_episode_seen_no"], "waitfree_next_at": row["waitfree_next_at"],
+        "waitfree_left": row["waitfree_left"], "rental_left": row["rental_left"], "waitfree_period_minutes": row["waitfree_period_minutes"],
         "episode_count_seen": row["episode_count_seen"], "episode_count_since": row["episode_count_since"], "stall_notified": bool(row["stall_notified"]),
     }
 
@@ -207,6 +208,15 @@ def set_kakao_waitfree_next_at(title_id: int, next_at: str | None) -> None:
     """서버가 알려 준 기다무 다음 충전 시각(UTC ISO)을 저장한다(None이면 지움). 추적하지 않는 작품이면 아무것도 하지 않는다."""
     with write_transaction() as conn:
         conn.execute("UPDATE kakao_webtoons SET waitfree_next_at = ? WHERE title_id = ?", (next_at, title_id))
+
+
+def set_kakao_waitfree_remaining(title_id: int, waitfree_left: int, rental_left: int, period_minutes: int) -> None:
+    """다운로드 때 센 남은 회차(기다무로 열 회차/대여권으로 받을 회차)와 기다무 충전 주기(분, 모르면 0)를 저장한다. 추적하지 않는 작품이면 아무것도 하지 않는다."""
+    with write_transaction() as conn:
+        conn.execute(
+            "UPDATE kakao_webtoons SET waitfree_left = ?, rental_left = ?, waitfree_period_minutes = ? WHERE title_id = ?",
+            (waitfree_left, rental_left, period_minutes, title_id),
+        )
 
 
 def list_kakao_waitfree_schedule() -> list[dict]:

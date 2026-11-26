@@ -101,6 +101,7 @@ from app.repository.kakao_webtoons import (
     set_kakao_pending_numbers,
     set_kakao_ticket_notified,
     set_kakao_waitfree_next_at,
+    set_kakao_waitfree_remaining,
     set_kakao_webtoon_status,
     upsert_new_kakao_webtoon,
 )
@@ -267,6 +268,7 @@ __all__ = [
     "set_kakao_pending_numbers",
     "set_kakao_ticket_notified",
     "set_kakao_waitfree_next_at",
+    "set_kakao_waitfree_remaining",
     "set_kakao_webtoon_status",
     "set_naver_new_episode_seen",
     "set_setting",

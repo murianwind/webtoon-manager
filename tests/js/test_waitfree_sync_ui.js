@@ -37,6 +37,24 @@ const { makeApp, sleep, idle, ok, done } = require("./harness");
   const t = (sec) => { run(`window.__t = waitfreeRemainingText(${sec});`); return w.__t; };
   ok(t(-5) === "곧 시작" && t(30) === "1분 안에" && t(90) === "1분 후" && t(45 * 60) === "45분 후" && t(2 * 3600 + 13 * 60) === "2시간 13분 후" && t(3 * 3600) === "3시간 후" && t(26 * 3600) === "1일 2시간 후", "남은 시간 표기: " + [-5, 30, 90, 2700, 7980, 10800, 93600].map(t).join(" | "));
 
+  // Scenario 3-2: 남은 회차가 저장돼 있으면 같은 줄에 "남은 기다무 회차 · 대여권 회차 · 마지막 회차 다운로드(연도 포함)"가 붙는다. 0이거나 모르는 항목은 뺀다
+  const saved = items;
+  items = [
+    { ...saved[0], waitfree_left: 10, rental_left: 2, last_at: "2026-12-05T12:01:10+00:00" },
+    { ...saved[1], waitfree_left: 1, rental_left: 0, last_at: "2026-10-14T03:31:20+00:00" },
+    { title_id: 3, title: "대여권만", next_at: "2026-10-15T03:30:00+00:00", due_at: "2026-10-15T03:31:20+00:00", waitfree_left: 0, rental_left: 3, last_at: null },
+    { title_id: 4, title: "주기 모름", next_at: "2026-10-16T03:30:00+00:00", due_at: "2026-10-16T03:31:20+00:00", waitfree_left: 4, rental_left: 0, last_at: null },
+    { title_id: 5, title: "아직 모름", next_at: "2026-10-17T03:30:00+00:00", due_at: "2026-10-17T03:31:20+00:00", waitfree_left: null, rental_left: null, last_at: null },
+  ];
+  run("window.__p = refreshWaitfreeSchedule();"); await w.__p; await idle();
+  const x = rows();
+  ok(x.length === 5 && /도굴왕: 엔드라인.*남은 기다무 회차 10회 · 대여권 회차 2회 · 마지막 회차 다운로드 2026년 12월 5일 21:01$/.test(x[0]), "남은 회차 한 줄: " + x[0]);
+  ok(/남은 기다무 회차 1회 · 마지막 회차 다운로드 2026년 10월 14일 12:31$/.test(x[1]) && !/대여권 회차/.test(x[1]), "대여권 0이면 뺀다: " + x[1]);
+  ok(/대여권만.*대여권 회차 3회$/.test(x[2]) && !/기다무 회차|마지막 회차/.test(x[2]), "기다무 0이면 뺀다: " + x[2]);
+  ok(/주기 모름.*남은 기다무 회차 4회$/.test(x[3]) && !/마지막 회차|대여권 회차/.test(x[3]), "마지막 시각을 모르면 뺀다: " + x[3]);
+  ok(!/기다무 회차|대여권 회차|마지막 회차/.test(x[4]), "아직 모르면 아무것도 안 붙인다: " + x[4]);
+  items = saved;
+
   // Scenario 4: 충전 시각을 아는 작품이 없으면 안내 문구(다음 정기 다운로드가 작품마다 확인해 채운다)
   items = []; run("window.__p = refreshWaitfreeSchedule();"); await w.__p; await idle();
   ok(rows().length === 0 && /아직 충전 시각을 확인한 작품이 없습니다/.test($("waitfree-schedule-box").textContent) && /다음 정기 다운로드/.test($("waitfree-schedule-box").textContent), "빈 목록 안내: " + $("waitfree-schedule-box").textContent.replace(/\s+/g, " "));

@@ -265,6 +265,9 @@ class WaitfreeScheduleItem(BaseModel):
     title: str
     next_at: str  # 서버가 알려 준 다음 충전 시각(UTC ISO)
     due_at: str  # 이 작품을 받기 시작하는 시각 = 충전 시각 + 작품마다 정해진 30~120초(UTC ISO)
+    waitfree_left: int | None = None  # 기다무로 열어야 하는 남은 회차 수(아직 다운로드로 세지 않았으면 None)
+    rental_left: int | None = None  # 대여권으로 받아야 하는 남은 회차 수
+    last_at: str | None = None  # 마지막 기다무 회차를 받는 시각(UTC ISO) — 남은 회차나 충전 주기를 모르면 None
 
 
 class WaitfreeScheduleOut(BaseModel):

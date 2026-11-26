@@ -75,6 +75,20 @@ function formatKstShort(iso) {
   return `${parts.month}월 ${parts.day}일 ${hour}:${parts.minute}`;
 }
 
+// "2026년 12월 5일 21:01" — 한국시간, 연도 포함
+function formatKstFull(iso) {
+  return `${new Date(new Date(iso).getTime() + 9 * 3600 * 1000).getUTCFullYear()}년 ${formatKstShort(iso)}`;
+}
+
+// 다운로드 예정 한 줄 뒤에 붙이는 남은 회차 설명 — 0이거나 모르는 항목은 뺀다
+function waitfreeExtraText(item) {
+  const parts = [];
+  if (item.waitfree_left > 0) parts.push(`남은 기다무 회차 ${item.waitfree_left}회`);
+  if (item.rental_left > 0) parts.push(`대여권 회차 ${item.rental_left}회`);
+  if (item.last_at) parts.push(`마지막 회차 다운로드 ${formatKstFull(item.last_at)}`);
+  return parts.join(" · ");
+}
+
 async function refreshWaitfreeSchedule() {
   if (!document.getElementById("waitfree-sync-toggle").checked) return; // 꺼져 있으면 서버에 요청하지 않는다
   try {
@@ -84,7 +98,7 @@ async function refreshWaitfreeSchedule() {
     for (const item of data.items) {
       const li = document.createElement("li");
       const seconds = Math.round((new Date(item.due_at).getTime() - Date.now()) / 1000);
-      li.innerHTML = `<span class="waitfree-time">${escapeHtml(formatKstShort(item.due_at))}</span><span class="waitfree-title">${escapeHtml(item.title)}</span><span class="waitfree-left">${escapeHtml(waitfreeRemainingText(seconds))}</span>`;
+      li.innerHTML = `<span class="waitfree-time">${escapeHtml(formatKstShort(item.due_at))}</span><span class="waitfree-title">${escapeHtml(item.title)}</span><span class="waitfree-left">${escapeHtml(waitfreeRemainingText(seconds))}</span>${waitfreeExtraText(item) ? `<span class="waitfree-extra">${escapeHtml(waitfreeExtraText(item))}</span>` : ""}`;
       list.appendChild(li);
     }
     document.getElementById("waitfree-schedule-empty").classList.toggle("hidden", data.items.length > 0);
