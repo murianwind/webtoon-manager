@@ -92,7 +92,7 @@ async def _report_step(now: datetime, scan: _TickScan) -> None:
         _request_scan_for_batch(cutoff)  # 이번 묶음에 새로 받은 게 있으면 뷰어 스캔(로컬 저장소) 요청 — 리포트를 보내든 말든 뷰어는 새 파일을 훑어야 한다
         state = report_dispatch.update_state(scan_requested=True)
 
-    rows = report_seen.filter_unseen_rows(repository.list_episode_history_window(since, cutoff)) if since else []
+    rows = report_seen.reportable_rows(repository.list_episode_history_window(since, cutoff)) if since else []
     if not rows or not discord_config.get_webhook_url():
         report_dispatch.finish_cycle(cutoff)  # 보낼 것이 없거나 보낼 곳이 없다 — 리포트만 건너뛴다(스캔 요청은 이미 했다)
         return

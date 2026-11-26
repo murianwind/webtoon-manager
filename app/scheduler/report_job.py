@@ -118,7 +118,7 @@ def _select_report_rows(test: bool, until: str | None) -> tuple[list[dict], bool
         since = repository.get_setting(_SETTING_KEY_REPORT_LAST_SENT_AT)
         if not since:
             return [], False
-        return report_seen.filter_unseen_rows(repository.list_episode_history_window(since, until)), False
+        return report_seen.reportable_rows(repository.list_episode_history_window(since, until)), False
     today = datetime.now(_KST).date()
     rows = repository.list_episode_history_between(*_kst_day_range_utc(today))
     if rows:
