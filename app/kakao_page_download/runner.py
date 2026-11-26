@@ -26,6 +26,7 @@ from app.kakao_page_download.models import (
     SelectedResult,
     TicketInfo,
     _image_extension,
+    count_remaining_locked,
     episode_zip_name,
     plan_by_folder_rules,
     rental_eligible,
@@ -175,6 +176,7 @@ async def run_download(
         rental_used, rental_remaining, failed = await _download_locked_with_rental(
             client, series_id, series_item, candidates, folder, downloaded, items, max_episodes, on_progress
         )
+    _remember_remaining(client, series_id, series_item, plan, {n for n in (ticket_used, *rental_used) if n is not None})
     if downloaded:
         await write_series_metadata(series_item, series_id, folder, on_progress, await client.fetch_about(series_id))
     return RunResult(
@@ -182,6 +184,14 @@ async def run_download(
         waitfree_supported=waitfree_supported(series_item), rental_used=rental_used, rental_remaining=rental_remaining,
         rental_skip_mode=use_rental_tickets, episode_count=series_item.get("on_sale_count"), serving=series_item.get("on_issue") == "Y",
     )
+
+
+def _remember_remaining(client: KakaoPageClient, series_id: int, series_item: dict, plan: DownloadPlan, opened: set[int]) -> None:
+    """이번 실행이 끝난 뒤 남은 잠긴 회차를 세어(기다무로 열 회차/대여권으로 받을 회차) 충전 주기와 함께 저장한다 — 설정의 다운로드 예정 목록에 보여 주려고.
+    충전 주기는 작품 정보의 값을 우선하고, 없으면 이번 실행에서 이용권을 조회했을 때 받은 값(없으면 0 = 모름)."""
+    waitfree_left, rental_left = count_remaining_locked(plan.locked, series_item, opened)
+    period = int(series_item.get("waitfree_period_by_minute") or 0) or int(getattr(client, "last_waitfree_period_minutes", 0) or 0)
+    repository.set_kakao_waitfree_remaining(series_id, waitfree_left, rental_left, period)
 
 
 async def _download_first_locked_with_waitfree(client, series_id, episode, folder, downloaded, items, on_progress) -> tuple[int | None, int | None]:

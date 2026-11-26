@@ -76,6 +76,7 @@ class KakaoPageClient:
         self.cookies_changed = False
         self.last_failure: str | None = None  # 가장 최근 받기 실패의 원인(화면 로그 한 줄에 붙인다). 새 회차를 받기 시작할 때 지운다
         self.last_waitfree_charged_at: str | None = None  # 가장 최근 기다무 사용 응답이 알려 준 다음 충전 시각(waitfree_charged_at)
+        self.last_waitfree_period_minutes: int = 0  # 가장 최근 이용권 조회가 알려 준 기다무 충전 주기(분) — 못 받았으면 0
 
     def _headers(self, *, image: bool = False, post: bool = False) -> dict:
         headers = dict(kakao_api.IMAGE_HEADERS if image else kakao_api.HEADERS)
@@ -154,6 +155,7 @@ class KakaoPageClient:
         result = data.get("result") or {}
         mine, waitfree = result.get("my") or {}, result.get("waitfree") or {}
         ready = bool(waitfree.get("charged_complete"))
+        self.last_waitfree_period_minutes = int(waitfree.get("charged_period_by_minute") or 0)
         return TicketInfo(
             rental_count=int(mine.get("ticket_rental_count") or 0), own_count=int(mine.get("ticket_own_count") or 0),
             waitfree_ready=ready, waitfree_available_at=None if ready else waitfree.get("charged_at"),

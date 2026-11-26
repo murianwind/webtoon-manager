@@ -82,10 +82,22 @@ def due_webtoons(now: datetime) -> list[dict]:
     return sorted(due, key=lambda w: due_at(w["title_id"], w["waitfree_next_at"]))
 
 
+def last_waitfree_at(webtoon: dict) -> datetime | None:
+    """남은 기다무 회차를 마지막까지 받는 시각 = 받기 시작하는 시각 + (남은 회차 - 1) × 충전 주기. 남은 회차를 모르거나 0이거나,
+    여러 회차인데 충전 주기를 모르면 None(한 회차면 주기를 몰라도 받기 시작하는 시각이 마지막)."""
+    left, period = webtoon.get("waitfree_left"), webtoon.get("waitfree_period_minutes") or 0
+    if not left or (left > 1 and period <= 0):
+        return None
+    return due_at(webtoon["title_id"], webtoon["waitfree_next_at"]) + timedelta(minutes=(left - 1) * period)
+
+
 def schedule_view() -> list[dict]:
-    """화면용 — 구독 중이고 충전 시각을 아는 작품을 다운로드 예정 시각 순으로."""
+    """화면용 — 구독 중이고 충전 시각을 아는 작품을 다운로드 예정 시각 순으로. 남은 기다무/대여권 회차 수와 마지막 기다무 회차를 받는 시각(모르면 None)도 같이."""
     items = [
-        {"title_id": w["title_id"], "title": w["title"], "next_at": w["waitfree_next_at"], "due_at": due_at(w["title_id"], w["waitfree_next_at"]).isoformat()}
+        {
+            "title_id": w["title_id"], "title": w["title"], "next_at": w["waitfree_next_at"], "due_at": due_at(w["title_id"], w["waitfree_next_at"]).isoformat(),
+            "waitfree_left": w["waitfree_left"], "rental_left": w["rental_left"], "last_at": (last_at.isoformat() if (last_at := last_waitfree_at(w)) else None),
+        }
         for w in repository.list_kakao_waitfree_schedule()
         if _parse(w["waitfree_next_at"]) is not None
     ]
