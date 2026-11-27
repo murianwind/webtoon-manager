@@ -64,7 +64,7 @@ async def send_list_alert(now: datetime | None = None) -> None:
             if not message:
                 job_status.log_line("report", "웹툰 전체목록 알림: 알릴 신규 웹툰/새 에피소드가 없습니다")
             else:
-                await discord_notify.send_webhook_notification(session, message)
+                await _send_or_raise(session, message)
                 report_seen.remember(naver_eps, kakao_eps)
                 report_seen.remember_new(naver_new, kakao_new)
                 job_status.log_line("report", f"웹툰 전체목록 알림 발송 완료 (신규 웹툰 {len(naver_new) + len(kakao_new)}개, 새 에피소드 {len(naver_eps) + len(kakao_eps)}개)")
@@ -89,8 +89,7 @@ async def send_stalled_alert(now: datetime | None = None) -> None:
             job_status.log_line("report", "회차가 늘지 않는 웹툰 알림: 알릴 작품이 없습니다")
         else:
             async with aiohttp.ClientSession() as session:
-                if await discord_notify.send_webhook_notification(session, message) is False:  # 웹훅 전송은 실패해도 예외 대신 False를 돌려준다
-                    raise RuntimeError("웹훅 전송 실패")
+                await _send_or_raise(session, message)
             stalled_episodes.mark_notified([item["title_id"] for item in stalled])
             job_status.log_line("report", f"회차가 늘지 않는 웹툰 알림 발송 완료 ({len(stalled)}개)")
         stalled_episodes.mark_done(now)
@@ -100,6 +99,13 @@ async def send_stalled_alert(now: datetime | None = None) -> None:
         stalled_episodes.note_failure(now)
         job_status.log_line("report", f"오류: {e}")
         job_status.finish("report", success=False)
+
+
+async def _send_or_raise(session: aiohttp.ClientSession, message: str) -> None:
+    """웹훅으로 보낸다. 웹훅 전송은 실패해도 예외 대신 False를 돌려주므로(디스코드가 204가 아닌 상태로 거절한 경우 등) 그것도 예외로 바꾼다 —
+    그래야 호출부가 "알렸다"는 기록과 발송 기준 시각을 남기지 않고 다음에 다시 시도한다. (None은 성공으로 본다 — 값을 안 돌려주는 예전 가짜 전송 호환)"""
+    if await discord_notify.send_webhook_notification(session, message) is False:
+        raise RuntimeError("웹훅 전송 실패")
 
 
 def _kst_day_range_utc(day) -> tuple[str, str]:
@@ -169,7 +175,7 @@ async def _send_message(
     )
     if used_fallback:
         message = "🧪 **[테스트 발송 — 오늘 기록 없어 어제 기록으로 대체됨]**\n" + message
-    await discord_notify.send_webhook_notification(session, message)
+    await _send_or_raise(session, message)
 
 
 async def _run_report(*, test: bool, until: str | None = None, now: datetime | None = None) -> None:
