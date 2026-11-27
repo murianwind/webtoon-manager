@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import aiohttp
 
-from app import discord_config, list_alert, report_dispatch, report_seen, repository, stalled_episodes, viewer_scan
+from app import discord_config, job_status, list_alert, report_dispatch, report_seen, repository, stalled_episodes, viewer_scan
 
 
 from app.config import get_settings
@@ -107,9 +107,15 @@ async def _report_step(now: datetime, scan: _TickScan) -> None:
         state = report_dispatch.update_state(scan_done=True)  # 반영됐거나(done), 스캔을 못 시켰거나(failed), 너무 오래 걸려서 — 기다리지 않는다
     if report_dispatch.is_quiet(now):
         return  # 발송하지 않는 시간 — 쌓아 둔 채 끝날 때까지 기다린다
+    if report_dispatch.send_retry_blocked(now):
+        return  # 전송이 실패해서 다시 시도할 시각을 기다린다
     async with _report_job_lock:
-        await send_batch_report(cutoff)
-    report_dispatch.finish_cycle(cutoff)
+        sent = await send_batch_report(cutoff)
+    if sent:
+        report_dispatch.finish_cycle(cutoff)
+    elif not report_dispatch.note_send_failure(now):
+        job_status.log_line("report", f"리포트 전송을 {report_dispatch.MAX_SEND_ATTEMPTS}번 시도했지만 실패해 이번 묶음은 건너뜁니다(받은 이력은 다음 리포트에 함께 담깁니다)")
+        report_dispatch.finish_cycle(cutoff)
 
 
 def _request_scan_for_batch(cutoff: str) -> None:
