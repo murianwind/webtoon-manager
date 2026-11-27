@@ -43,11 +43,12 @@ async def run_test_report() -> None:
         await _run_report(test=True)
 
 
-async def send_batch_report(until: str, now: datetime | None = None) -> None:
+async def send_batch_report(until: str, now: datetime | None = None) -> bool:
     """자동 발송 — 1분 확인(report_tick)이 묶음을 확정하고 부른다(그쪽에서 _report_job_lock을 잡고 있다). until: 이번 묶음의 끝 — 지난 발송 기준 시각부터 이 시각까지의 이력만 담고,
     보낸 뒤(또는 보낼 것이 없을 때) 발송 기준 시각도 이 값으로 둔다. 받은 이력이 있을 때만 보낸다. 웹툰 전체목록 알림(신규 웹툰 + 새 에피소드)은 하루 한 번,
-    list_alert.should_attach가 허락하는 리포트에만 얹힌다(발송하지 않는 시간이 끝난 뒤 처음 나가는 리포트). now: 지금 시각(테스트에서 바꿀 수 있게)."""
-    await _run_report(test=False, until=until, now=now)
+    list_alert.should_attach가 허락하는 리포트에만 얹힌다(발송하지 않는 시간이 끝난 뒤 처음 나가는 리포트). now: 지금 시각(테스트에서 바꿀 수 있게).
+    전송에 실패했으면 False(호출한 쪽이 묶음을 끝내지 않고 다시 시도한다). 보낼 것이 없었거나 보냈으면 True."""
+    return await _run_report(test=False, until=until, now=now)
 
 
 async def send_list_alert(now: datetime | None = None) -> None:
@@ -178,14 +179,16 @@ async def _send_message(
     await _send_or_raise(session, message)
 
 
-async def _run_report(*, test: bool, until: str | None = None, now: datetime | None = None) -> None:
-    """리포트 한 통을 만들어 보낸다(test: 테스트 발송, 아니면 until까지의 묶음 발송)."""
+async def _run_report(*, test: bool, until: str | None = None, now: datetime | None = None) -> bool:
+    """리포트 한 통을 만들어 보낸다(test: 테스트 발송, 아니면 until까지의 묶음 발송). 다시 시도해야 하는 실패(메시지를 못 보냄)면 False.
+    메시지가 이미 나간 뒤의 오류(기록 저장 등)는 같은 메시지를 또 보내지 않도록 True로 돌려준다(기록이 안 남아서 이력이 다음 리포트에 한 번 더 나올 수는 있다)."""
     now = now or datetime.now(timezone.utc)
     settings = get_settings()
     job_status.start("report")
     rows, used_fallback = _select_report_rows(test, until)
     attach_list_alert = test or list_alert.should_attach(now)  # 웹툰 전체목록 알림은 테스트 발송이거나 오늘 얹을 차례인 리포트에만
     attach_stalled = test or stalled_episodes.should_attach(now)  # 회차가 늘지 않는 작품 알림도 같은 식(각자 하루 한 번)
+    delivered = False  # 메시지가 실제로 나갔는가
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -201,9 +204,10 @@ async def _run_report(*, test: bool, until: str | None = None, now: datetime | N
                 if not test:
                     repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, until)
                 job_status.finish("report", success=True)
-                return
+                return True
 
             await _send_message(session, settings, rows, unregistered_new_episodes, kakao_new_episodes, used_fallback, naver_new, kakao_new, stalled)
+            delivered = True
             if not test:
                 # 전송이 성공한 뒤에만 기록(실패하면 다음에 다시 시도)
                 report_seen.remember(unregistered_new_episodes, kakao_new_episodes)
@@ -219,7 +223,9 @@ async def _run_report(*, test: bool, until: str | None = None, now: datetime | N
             repository.set_setting(_SETTING_KEY_REPORT_LAST_SENT_AT, until)
         job_status.log_line("report", f"리포트 발송 완료 (성공 {sum(1 for r in rows if r['status'] == 'success')}건, 실패 {sum(1 for r in rows if r['status'] == 'failed')}건)")
         job_status.finish("report", success=True)
+        return True
     except Exception as e:
         log.error("리포트 발송 중 예외: %s", e)
         job_status.log_line("report", f"오류: {e}")
         job_status.finish("report", success=False)
+        return delivered

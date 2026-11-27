@@ -8,9 +8,10 @@
 상태(state)는 설정 테이블에 JSON 한 덩어리로 저장해서 재시작해도 이어진다. 1분마다 도는 확인(scheduler.report_tick.run_report_tick)이 이 상태만 보고 움직인다:
   last_download_at: 마지막으로 다운로드가 끝난 시각(없으면 보낼 것이 대기 중이 아님) / cutoff: 확정된 묶음의 끝(이 시각까지의 이력을 보낸다)
   scan_requested: 이 묶음에서 뷰어 스캔을 이미 요청했다 / scan_started_at: 리포트가 스캔을 기다리기 시작한 시각(최대 대기 계산용) / scan_done: 기다림이 끝났다(스캔 반영/실패/시간 초과).
+  send_failures / send_retry_at: 이 묶음의 전송이 실패한 횟수와 다시 시도할 시각 — 실패하면 묶음을 끝내지 않고 SEND_RETRY_MINUTES 뒤에 다시 보낸다(최대 MAX_SEND_ATTEMPTS번, 넘으면 포기).
 """
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from app import job_status, repository
@@ -22,6 +23,8 @@ BATCH_KEY = "report_batch_minutes"
 STATE_KEY = "report_dispatch_state"
 LAST_SENT_KEY = "report_last_sent_at"
 DEFAULT_BATCH_MINUTES = 10
+SEND_RETRY_MINUTES = 10  # 리포트 전송이 실패하면 이만큼 뒤에 다시 시도한다
+MAX_SEND_ATTEMPTS = 6  # 한 묶음을 이 횟수만큼 시도해도 실패하면 포기한다(웹훅 주소가 잘못된 경우 영원히 반복하지 않게) — 이력은 남아서 다음 리포트에 같이 담긴다
 MAX_BATCH_MINUTES = 24 * 60
 DOWNLOAD_JOBS = ("download", "manual")  # 이 작업들이 끝나면 "다운로드가 끝났다"로 센다
 
@@ -135,7 +138,7 @@ def set_batch_minutes(minutes: int) -> None:
 # ── 발송 상태 ─────────────────────────────────────────────────────────
 
 def _empty_state() -> dict:
-    return {"last_download_at": None, "cutoff": None, "scan_requested": False, "scan_started_at": None, "scan_done": False}
+    return {"last_download_at": None, "cutoff": None, "scan_requested": False, "scan_started_at": None, "scan_done": False, "send_failures": 0, "send_retry_at": None}
 
 
 # 발송 상태 — 설정에 JSON 한 덩어리로 저장한다(읽고-바꾸고-쓰기는 JsonSetting이 잠금으로 한 덩어리로 보호한다: 작업 종료 알림 등 다른 스레드와 겹쳐도 안전).
@@ -155,6 +158,21 @@ def finish_cycle(cutoff: str) -> None:
             clear_state()
 
 
+def send_retry_blocked(now: datetime) -> bool:
+    """전송 실패 뒤 다시 시도할 시각이 아직 안 됐으면 True."""
+    retry_at = load_state()["send_retry_at"]
+    return bool(retry_at) and now < datetime.fromisoformat(retry_at)
+
+
+def note_send_failure(now: datetime) -> bool:
+    """이 묶음의 전송이 실패했다고 기록한다. 다시 시도할 거면(MAX_SEND_ATTEMPTS번 미만) 다음 시각을 정해 True, 포기해야 하면 False."""
+    failures = load_state()["send_failures"] + 1
+    if failures >= MAX_SEND_ATTEMPTS:
+        return False
+    update_state(send_failures=failures, send_retry_at=(now + timedelta(minutes=SEND_RETRY_MINUTES)).isoformat())
+    return True
+
+
 def note_download_finished(now: datetime | None = None, started_at: str | None = None) -> None:
     """다운로드가 하나 끝났다고 기록한다(보낼 이력이 있는지는 보낼 때 이력으로 확인한다).
     started_at: 이 다운로드 작업이 시작한 시각 — 발송 기준 시각이 아직 없을 때(처음 한 번) 이 시각부터의 이력을 보내도록 기준으로 삼는다."""
@@ -166,7 +184,7 @@ def note_download_finished(now: datetime | None = None, started_at: str | None =
         fields = {"last_download_at": now.isoformat()}
         # 묶음이 확정됐어도 아직 스캔이 진행 중이 아니면(시작 전이거나, 끝나고 발송하지 않는 시간을 기다리는 중) 다시 열어서 새로 끝난 다운로드까지 한 통으로 보낸다.
         if state["cutoff"] and not (state["scan_started_at"] and not state["scan_done"]):
-            fields.update(cutoff=None, scan_requested=False, scan_started_at=None, scan_done=False)
+            fields.update(cutoff=None, scan_requested=False, scan_started_at=None, scan_done=False, send_failures=0, send_retry_at=None)  # 새 묶음 — 전송 실패 기록도 새로 센다
         update_state(**fields)
 
 
