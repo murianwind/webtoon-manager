@@ -144,9 +144,14 @@ def build_report_message(
     today_label = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
     tag_platforms = any(row.get("platform") == "kakao" for row in success_rows + failed_rows)
 
-    success_lines = _success_lines(success_rows, reader_urls, tag_platforms)
-    parts = [f"📅 웹툰 다운로드 리포트 ({today_label})", "", f"📁 받은 작품 ({len(success_lines)}):"]
-    parts.extend(_limited(success_lines) if success_lines else ["없음"])
+    new_rows = [row for row in success_rows if not row.get("redownload")]
+    success_lines = _success_lines(new_rows, reader_urls, tag_platforms)
+    again_lines = _success_lines([row for row in success_rows if row.get("redownload")], reader_urls, tag_platforms)  # 이미 알린 회차를 다시 받은 것(수정본 재다운로드 등)
+    parts = [f"📅 웹툰 다운로드 리포트 ({today_label})"]
+    if success_lines or not again_lines:  # 다시 받은 것만 있으면 "받은 작품: 없음" 줄은 생략
+        parts.extend(["", f"📁 받은 작품 ({len(success_lines)}):", *(_limited(success_lines) if success_lines else ["없음"])])
+    if again_lines:
+        parts.extend(["", f"🔁 다시 받은 작품 ({len(again_lines)}):", *_limited(again_lines)])
 
     failed_titles = _failed_titles(failed_rows, tag_platforms)
     if failed_titles:

@@ -26,13 +26,15 @@ async def main():
     add("100", "네이버작", 5, "naver"); add("7", "카카오작", 410, "kakao"); add("7", "카카오작", 411, "kakao")
     msgs = await report(); assert len(msgs) == 1 and "네이버작" in msgs[0] and "카카오작 · 2개 회차(410~411번)" in msgs[0]
     add("100", "네이버작", 5, "naver"); add("7", "카카오작", 410, "kakao"); add("7", "카카오작", 411, "kakao")           # 같은 회차 이력이 다시 쌓임
-    assert await report() == []                                                                                      # 보낼 게 없으면 메시지 자체를 안 보냄
-    print("1) 같은 회차는 한 번만 OK")
+    msgs = await report(); assert len(msgs) == 1 and "다시 받은 작품 (2)" in msgs[0] and "📁 받은 작품" not in msgs[0], msgs   # 같은 회차를 다시 받은 것은 "다시 받은 작품"으로 따로 알린다(test_report_redownload.py)
+    assert await report() == []                                                                                      # 새로 쌓인 이력이 없으면 메시지 자체를 안 보냄
+    print("1) 같은 회차 새 보고는 한 번만 OK")
 
     # ── 2. 새 회차가 하나라도 섞여 있으면 그것만 보고(이미 알린 회차는 빼고, 번호 범위/개수도 새 것만) ──
     add("7", "카카오작", 410, "kakao"); add("7", "카카오작", 412, "kakao"); add("100", "네이버작", 5, "naver")
-    msgs = await report(); assert len(msgs) == 1 and "카카오작 · 1개 회차(412번)" in msgs[0] and "네이버작" not in msgs[0], msgs
-    add("100", "네이버작", 6, "naver"); msgs = await report(); assert len(msgs) == 1 and "네이버작" in msgs[0] and "카카오작" not in msgs[0]
+    msgs = await report(); assert len(msgs) == 1 and "카카오작 · 1개 회차(412번)" in msgs[0], msgs
+    received, again = msgs[0].split("🔁 다시 받은 작품"); assert "네이버작" not in received and "카카오작 · 1개 회차(410번)" in again and "네이버작" in again, msgs   # 410번·네이버작은 다시 받은 것
+    add("100", "네이버작", 6, "naver"); msgs = await report(); assert len(msgs) == 1 and "네이버작" in msgs[0] and "카카오작" not in msgs[0] and "다시 받은 작품" not in msgs[0]
     print("2) 새 회차만 OK")
 
     # ── 3. 같은 번호라도 다른 작품/플랫폼이면 따로 센다 ──

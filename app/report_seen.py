@@ -6,10 +6,9 @@ UP 표시는 새 회차가 나온 뒤 한동안 그대로 남아 있어서, 하�
 
 - 네이버: 식별값 = 최신 회차 번호 / 카카오: 식별값 = 최신 회차 주소
 
-"받은 작품/실패한 작품" 섹션도 같은 원칙이다 — **같은 회차는 한 번만 보고한다**. 지난 발송 시각 이후의 이력만 모으는 것이 기본이지만,
-같은 회차의 이력이 다시 쌓이거나(재다운로드, 시각 비교가 어긋난 경우 등) 어떤 이유로든 이미 알린 회차가 다시 들어오더라도 반복하지 않도록
-회차 단위(플랫폼+작품+회차 번호)로 따로 기억한다. 실패는 같은 회차의 실패를 한 번만 알리고, 그 회차를 성공하면 실패 기록을 지워서
-나중에 다시 실패하면 새 문제로 다시 알린다.
+"받은 작품/실패한 작품" 섹션도 같은 원칙이다 — **같은 회차의 새 보고는 한 번만 한다**. 회차 단위(플랫폼+작품+회차 번호)로 따로 기억한다.
+이미 알린 회차를 다시 받으면(웹툰이 수정돼서 재다운로드한 경우 등) 새 회차와 섞이지 않게 "다시 받은 작품"으로 따로 알린다.
+실패는 같은 회차의 실패를 한 번만 알리고, 그 회차를 성공하면 실패 기록을 지워서 나중에 다시 실패하면 새 문제로 다시 알린다.
 - 전송이 성공한 뒤에만 기록한다(호출부 책임) — 실패하면 다음 리포트에서 다시 시도된다.
 - 기억하는 작품 수는 MAX_ENTRIES로 제한한다(오래된 것부터 잊음).
 """
@@ -52,10 +51,17 @@ def _row_key(row: dict) -> str:
     return f"{prefix}:{row.get('platform') or 'naver'}:{row['title_id']}:{row['episode_no']}"
 
 
-def filter_unseen_rows(rows: list[dict]) -> list[dict]:
-    """이미 보고한 회차(성공/실패 각각)의 이력을 뺀 목록."""
+def reportable_rows(rows: list[dict]) -> list[dict]:
+    """리포트에 담을 이력 — 아직 알리지 않은 회차, 그리고 이미 알린 회차를 **다시 받은 것**(성공만 — 웹툰이 수정돼서 재다운로드한 경우 등).
+    다시 받은 이력은 복사본에 "redownload": True를 달아 "다시 받은 작품"으로 따로 보여 준다. 같은 실패는 여전히 한 번만 알린다."""
     seen = _load()
-    return [r for r in rows if _row_key(r) not in seen]
+    reportable = []
+    for row in rows:
+        if _row_key(row) not in seen:
+            reportable.append(row)
+        elif row["status"] == "success":
+            reportable.append({**row, "redownload": True})
+    return reportable
 
 
 def remember_rows(rows: list[dict]) -> None:
